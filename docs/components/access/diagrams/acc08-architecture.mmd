@@ -1,0 +1,18 @@
+flowchart TB
+  CALLER["AttemptReadService"]
+  subgraph Policy["Server policy boundary"]
+    BASE["ACC-04 ownership + course"]
+    COMBINE["AccessPolicy: base AND context"]
+    TIME["TimeProvider / server UTC"]
+    READER["IContextPolicyReader"]
+    SEED[("DemoData policy windows")]
+    READER --> SEED
+    BASE -->|"Base verdict"| COMBINE
+    TIME -->|"Current instant"| COMBINE
+    READER -->|"ContextPolicy snapshot"| COMBINE
+  end
+  CALLER -->|"Actor / member / resource / action"| BASE
+  CALLER --> READER
+  COMBINE -->|"Verdict / reason / version"| CALLER
+  FUTURE["Planned: persistent policy adapter"]
+  FUTURE -.-> READER
