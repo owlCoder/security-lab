@@ -30,7 +30,7 @@ $lines = @(
     "",
     "Evidence: $($task.evidence -join '; ')",
     "Branch: feature/acc-04-authorization",
-    "PR: https://github.com/owlCoder/security-lab/pull/18",
+    "PR: https://github.com/owlCoder/security-lab/pull/21",
     "",
     "Record actual work and review dates. This prepared description does not prove prior Tapiz creation or external acceptance."
 )
