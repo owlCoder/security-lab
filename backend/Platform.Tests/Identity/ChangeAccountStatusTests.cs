@@ -1,4 +1,4 @@
-using Platform.Api.Domain.Identity;
+using Platform.Identity.Domain;
 using Platform.Api.Services.Identity;
 using Platform.Api.Domain.Authentication;
 

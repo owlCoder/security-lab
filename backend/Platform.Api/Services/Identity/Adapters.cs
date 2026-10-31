@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Platform.Api.Domain.Identity;
+using Platform.Identity.Domain;
 using Platform.Api.Domain.Authentication;   
 
 namespace Platform.Api.Services.Identity;

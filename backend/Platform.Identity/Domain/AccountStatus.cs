@@ -1,4 +1,4 @@
-namespace Platform.Api.Domain.Identity;
+namespace Platform.Identity.Domain;
 
 public enum AccountStatus
 {

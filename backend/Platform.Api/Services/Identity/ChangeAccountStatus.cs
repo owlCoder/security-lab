@@ -1,4 +1,4 @@
-using Platform.Api.Domain.Identity;
+using Platform.Identity.Domain;
 
 namespace Platform.Api.Services.Identity;
 

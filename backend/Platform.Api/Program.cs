@@ -1,10 +1,19 @@
-using Platform.Api.Domain.Identity;
 using Platform.Api.Modules.Access.Demo;
 using Platform.Api.Services.Identity;
+using Platform.Identity;
+using Platform.Identity.Data;
+using Platform.Identity.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
 var accessDemoEnabled = AccessDemoEndpoints.Enabled(builder.Environment, builder.Configuration);
 if (accessDemoEnabled) builder.Services.AddAccessKt1Demo();
+
+
+if (builder.Environment.IsDevelopment())
+    builder.Configuration.AddUserSecrets<PlatformIdentityDbContext>(optional: true);
+
+builder.Services.AddIdentityModule(builder.Configuration);
+
 
 builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();

@@ -1,4 +1,4 @@
-namespace Platform.Api.Domain.Identity;
+namespace Platform.Identity.Domain;
 
 public sealed class UserAccount(Guid id, string email, AccountStatus status = AccountStatus.Active)
 {

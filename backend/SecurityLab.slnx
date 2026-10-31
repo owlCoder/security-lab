@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="Platform.Api/Platform.Api.csproj" />
   <Project Path="Platform.Access.Tests/Platform.Access.Tests.csproj" />
+  <Project Path="Platform.Identity/Platform.Identity.csproj" />
+  <Project Path="Platform.Tests/Platform.Tests.csproj" />
 </Solution>
