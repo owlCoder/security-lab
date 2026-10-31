@@ -99,7 +99,7 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 
 | ID | Store | Content | Status |
 |-|-|-|-|
-| D1 | Accounts | Password hash (ASP.NET Core Identity), account status, MFA enabled flag, TOTP secret, failed-attempt counter, last used TOTP step | `UserAccount` in memory today (`IAccountRepository`, owned by IDN-03). Database tables planned, physical names pending US-02 and US-12 |
+| D1 | Accounts | Password hash (ASP.NET Core Identity), account status, MFA enabled flag, TOTP secret, failed-attempt counter, last used TOTP step | Table `identity.accounts` exists (US-02) with `id`, `email`, `status`. The API still uses `UserAccount` in memory (`IAccountRepository`, owned by IDN-03). Password and MFA columns are planned, physical names pending US-12 |
 | D2 | Sessions | Hash of the token (never the token), `UserId`, created, expiry, last activity, revoked time, authentication level (`MfaPending` or `Active`), public `SessionHandle` | planned (US-03). `InMemorySessionManagement` fake exists in tests |
 | D3 | Audit log | Actor, action, target, time, outcome, correlation ID | `LoggerAuditWriter` writes to the application log. A real store is owned by the AUD team |
 
@@ -174,6 +174,7 @@ Present in the repository now:
 - Stubs and fakes: `StubIdentityContext` (Development, header `X-Stub-User`), `AnonymousIdentityContext` (other environments), `NoOpSessionRevoker`, `LoggerAuditWriter`, `FakeIdentityContext`, `InMemorySessionManagement`.
 - Consumer of our contracts: `PUT /api/admin/accounts/{id}/status` (IDN-03).
 - Contract documents: `docs/contracts/IIdentityContext.md`, `docs/contracts/ISessionManagement.md`.
+- Identity module skeleton: `backend/Platform.Identity` with `PlatformIdentityDbContext`, `AddIdentityModule()` and the initial migration for `identity.accounts`.
 
 Planned (this DFD describes them, but the code does not exist yet): P1 to P5, D2 Sessions table, MFA columns in D1, endpoints under `/api/auth`.
 

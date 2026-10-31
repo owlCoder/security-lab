@@ -21,6 +21,7 @@ The optional local PostgreSQL service can be started with Docker Compose after c
 ## Repository structure
 
 - `backend/Platform.Api/` — API entry point.
+- `backend/Platform.Identity/` — identity module: domain, `DbContext`, and migrations.
 - `frontend/` — React application.
 - `docs/ARCHITECTURE.md` — conceptual architecture and module boundaries.
 - `docs/DATA_FLOW.md` — platform-level data flow example.

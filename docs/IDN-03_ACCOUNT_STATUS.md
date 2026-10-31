@@ -45,7 +45,7 @@ flowchart LR
   Aud --> Log\[(Application log)]
 ```
 
-Layers: `Controllers/Identity` only translates the result into an HTTP code. `Services/Identity` holds the use-case and the contracts. `Domain/Identity` holds the enum and the entity. Adapters (`Adapters.cs`) are the replaceable technical parts.
+Layers: `Controllers/Identity` only translates the result into an HTTP code. `Services/Identity` holds the use-case and the contracts. `Platform.Identity/Domain` holds the enum and the entity. Adapters (`Adapters.cs`) are the replaceable technical parts.
 
 ## Data flow diagram
 
@@ -120,7 +120,7 @@ Order of checks in the use-case: authenticated, then administrator, then status 
 
 * Changed files / commit / pull request: branch `feature/IDN-03-account-status`, commit `413a53d` (IDN-03: status change with access check and audit record). Pull request: \[link].
 
-  * `backend/Platform.Api/Domain/Identity/`: `AccountStatus.cs`, `UserAccount.cs`
+  * `backend/Platform.Identity/Domain/`: `AccountStatus.cs`, `UserAccount.cs`
   * `backend/Platform.Api/Services/Identity/`: `ChangeAccountStatus.cs`, interfaces, `Adapters.cs`
   * `backend/Platform.Api/Controllers/Identity/AdminAccountsController.cs`
   * `backend/Platform.Api/Program.cs`, `appsettings.Development.json`
