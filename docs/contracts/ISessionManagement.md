@@ -9,7 +9,7 @@
 
 ## Purpose
 
-Lets other modules revoke and list sessions without touching the session store. Revocation takes effect on the very next request (the session is checked in the store on every request).
+Lets other modules revoke, list and check session data without touching the session store. Revocation takes effect on the very next request (the session is checked in the store on every request).
 
 ## Methods
 
@@ -17,9 +17,10 @@ Lets other modules revoke and list sessions without touching the session store. 
 |-|-|
 | `Task<int> RevokeAllForUserAsync(Guid userId, string reason, CancellationToken ct)` | Revokes every active session of the user. Returns the number of sessions revoked (0 if none). Idempotent. Used by IDN-03 when an account becomes `BLOCKED` or `ARCHIVED`, and by IDN-04 after a password change (recommended). |
 | `Task<bool> RevokeSessionAsync(Guid ownerUserId, Guid sessionHandle, CancellationToken ct)` | Revokes one session identified by its public handle, **only if it belongs to `ownerUserId`**. Returns `false` both when the handle does not exist and when it belongs to someone else, so callers cannot probe other users' sessions. Other sessions of the user stay valid. Used by IDN-07. |
+| `bool IsSessionActive(Guid userId, Guid sessionHandle, CancellationToken ct)` | Checks whether or not session with provided handle is valid. Returns `false` if the session with specified `sessionHandle` does not exist and when `userId` does not match, meaning it belongs to some other user. Used by IDN-03 |
 | `Task<IReadOnlyList<SessionInfo>> ListForUserAsync(Guid userId, CancellationToken ct)` | Active (not revoked, not expired) sessions of the user. |
 
-`SessionInfo`: `Handle` (Guid), `CreatedAt`, `LastActivityAt`, `ExpiresAt`. **Never** contains the token, its hash or any cookie value.
+`SessionInfo`: `Handle` (Guid), `CreatedAt`, `LastActivityAt`, `ExpiresAt`, `IsRevoked`. **Never** contains the token, its hash or any cookie value.
 
 ## Errors
 
@@ -33,7 +34,7 @@ This contract is called **by trusted server-side modules**. It does not decide w
 
 | Team | Use |
 |-|-|
-| IDN-03 account status | `RevokeAllForUserAsync` (replaces the no-op `ISessionRevoker`) |
+| IDN-03 account status | `RevokeAllForUserAsync`, `IsSessionActive` (replaces the no-op `ISessionRevoker`) |
 | IDN-07 session overview | `ListForUserAsync`, `RevokeSessionAsync` |
 | IDN-04 password reset | `RevokeAllForUserAsync` (recommended, not required by the spec) |
 
