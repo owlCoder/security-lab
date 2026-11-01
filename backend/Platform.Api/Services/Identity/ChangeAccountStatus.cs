@@ -19,7 +19,7 @@ public sealed class ChangeAccountStatus(
     IIdentityContext identity,
     IAccessDecision access,
     IAccountRepository accounts,
-    ISessionRevoker sessions,
+    ISessionManager sessions,
     IAuditWriter audit,
     TimeProvider clock)
 {
@@ -32,20 +32,20 @@ public sealed class ChangeAccountStatus(
             return Reject(ChangeStatusOutcome.Unauthenticated, null, targetId, correlationId, "denied", "no authenticated caller");
 
         if (!access.CanChangeAccountStatus(caller))
-            return Reject(ChangeStatusOutcome.Forbidden, caller.ActorId, targetId, correlationId, "denied", "caller is not an administrator");
+            return Reject(ChangeStatusOutcome.Forbidden, caller.UserId, targetId, correlationId, "denied", "caller is not an administrator");
 
         if (!TryParseStatus(requestedStatus, out var newStatus))
-            return Reject(ChangeStatusOutcome.InvalidStatus, caller.ActorId, targetId, correlationId, "failure", "invalid status value");
+            return Reject(ChangeStatusOutcome.InvalidStatus, caller.UserId, targetId, correlationId, "failure", "invalid status value");
 
         var account = accounts.Find(targetId);
         if (account is null)
-            return Reject(ChangeStatusOutcome.NotFound, caller.ActorId, targetId, correlationId, "failure", "account not found");
+            return Reject(ChangeStatusOutcome.NotFound, caller.UserId, targetId, correlationId, "failure", "account not found");
 
-        if (caller.ActorId == targetId)
-            return Reject(ChangeStatusOutcome.SelfChangeNotAllowed, caller.ActorId, targetId, correlationId, "failure", "administrator cannot change own status");
+        if (caller.UserId == targetId)
+            return Reject(ChangeStatusOutcome.SelfChangeNotAllowed, caller.UserId, targetId, correlationId, "failure", "administrator cannot change own status");
 
         if (account.Status == newStatus)
-            return Reject(ChangeStatusOutcome.InvalidTransition, caller.ActorId, targetId, correlationId, "failure", "status is already " + newStatus);
+            return Reject(ChangeStatusOutcome.InvalidTransition, caller.UserId, targetId, correlationId, "failure", "status is already " + newStatus);
 
         var oldStatus = account.Status;
         account.Status = newStatus;
@@ -53,11 +53,11 @@ public sealed class ChangeAccountStatus(
 
         // Blokiran ili arhiviran nalog gubi sve aktivne sesije odmah (spec IDN-03).
         if (newStatus is AccountStatus.Blocked or AccountStatus.Archived)
-            sessions.RevokeAllForUser(targetId);
+            sessions.RevokeAllForUser(targetId, "");
 
         var cleanReason = CleanReason(reason);
         var detail = $"{oldStatus}->{newStatus}" + (cleanReason is null ? "" : $" reason={cleanReason}");
-        Write(caller.ActorId, targetId, correlationId, "success", detail);
+        Write(caller.UserId, targetId, correlationId, "success", detail);
 
         return new ChangeStatusResult(ChangeStatusOutcome.Success, newStatus);
     }

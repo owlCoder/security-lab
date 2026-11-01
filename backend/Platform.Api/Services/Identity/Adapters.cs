@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Platform.Api.Domain.Identity;
+using Platform.Api.Domain.Authentication;   
 
 namespace Platform.Api.Services.Identity;
 
@@ -16,9 +17,11 @@ public sealed class InMemoryAccountRepository : IAccountRepository
 }
 
 /// Stub dok IDN-02 ne napravi pravi opoziv sesija.
-public sealed class NoOpSessionRevoker : ISessionRevoker
+public sealed class NoOpSessionRevoker : ISessionManager
 {
-    public void RevokeAllForUser(Guid userId) { }
+    public int RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) => 0;
+    public bool RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default) => false;
+    public IReadOnlyList<SessionInfo> ListForUser(Guid userId, CancellationToken ct = default) => Array.Empty<SessionInfo>();
 }
 
 public sealed class LoggerAuditWriter(ILogger<LoggerAuditWriter> logger) : IAuditWriter
@@ -38,7 +41,7 @@ public interface IAdminDirectory
 public sealed class AdminOnlyAccessDecision(IAdminDirectory admins) : IAccessDecision
 {
     public bool CanChangeAccountStatus(CallerIdentity caller) =>
-        caller.IsAuthenticated && admins.IsAdministrator(caller.ActorId);
+        caller.IsAuthenticated && admins.IsAdministrator(caller.UserId ?? Guid.Empty);
 }
 
 /// DEV STUB do IDN-01/IDN-02: pozivalac se cita iz headera X-Stub-User.
@@ -50,7 +53,7 @@ public sealed class StubIdentityContext(IHttpContextAccessor http) : IIdentityCo
         get
         {
             var raw = http.HttpContext?.Request.Headers["X-Stub-User"].FirstOrDefault();
-            return Guid.TryParse(raw, out var id) ? new CallerIdentity(id, true) : null;
+            return Guid.TryParse(raw, out var id) ? new CallerIdentity(true, id, AuthenticationLevel.None, new Guid()) : null;
         }
     }
 }

@@ -1,5 +1,6 @@
 using Platform.Api.Domain.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Api.Domain.Authentication;
 
 namespace Platform.Tests.Identity;
 
@@ -19,10 +20,22 @@ public class ChangeAccountStatusTests
         public bool IsAdministrator(Guid userId) => ids.Contains(userId);
     }
 
-    private sealed class RecordingRevoker : ISessionRevoker
+    private sealed class RecordingRevoker : ISessionManager
     {
         public List<Guid> Revoked { get; } = new();
-        public void RevokeAllForUser(Guid userId) => Revoked.Add(userId);
+        public int RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)
+        {
+            Revoked.Add(userId);
+            int count = Revoked.Count;
+            return count;
+        }
+        public bool RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default)
+        {
+            Revoked.Add(ownerUserId);
+            return true;
+        }
+
+        public IReadOnlyList<SessionInfo> ListForUser(Guid userId, CancellationToken ct = default) => Array.Empty<SessionInfo>();
     }
 
     private sealed class RecordingAudit : IAuditWriter
@@ -31,7 +44,7 @@ public class ChangeAccountStatusTests
         public void Write(AuditEvent e) => Events.Add(e);
     }
 
-    private static CallerIdentity Admin => new(AdminId, true);
+    private static CallerIdentity Admin => new(true, AdminId, AuthenticationLevel.None, new Guid());
 
     private static (ChangeAccountStatus Sut, InMemoryAccountRepository Repo, RecordingRevoker Revoker, RecordingAudit Audit)
         Build(CallerIdentity? caller, AccountStatus studentStatus = AccountStatus.Active)
@@ -98,7 +111,7 @@ public class ChangeAccountStatusTests
     [Test]
     public void NonAdmin_IsForbidden_StatusUnchanged_DenialAudited()
     {
-        var (sut, repo, revoker, audit) = Build(new CallerIdentity(Guid.NewGuid(), true));
+        var (sut, repo, revoker, audit) = Build(new CallerIdentity(true, new Guid(), AuthenticationLevel.None, new Guid()));
 
         var result = sut.Execute(StudentId, "BLOCKED", "x", "corr");
 
@@ -122,7 +135,7 @@ public class ChangeAccountStatusTests
     [Test]
     public void CallerMarkedNotAuthenticated_IsUnauthenticated_EvenIfIdIsAdmin()
     {
-        var (sut, repo, _, _) = Build(new CallerIdentity(AdminId, false));
+        var (sut, repo, _, _) = Build(new CallerIdentity(false, AdminId, AuthenticationLevel.None, new Guid()));
 
         var result = sut.Execute(StudentId, "BLOCKED", "x", "corr");
 
@@ -133,7 +146,7 @@ public class ChangeAccountStatusTests
     [Test]
     public void NonAdmin_CannotLearnWhetherAccountExists()
     {
-        var (sut, _, _, _) = Build(new CallerIdentity(Guid.NewGuid(), true));
+        var (sut, _, _, _) = Build(new CallerIdentity(true, new Guid(), AuthenticationLevel.None, new Guid()));
 
         var result = sut.Execute(Guid.NewGuid(), "BLOCKED", null, "corr");
 
