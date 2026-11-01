@@ -79,3 +79,50 @@ flowchart LR
   API -->|generički rezultat| U
   API -.->|uloga/identitet iz zahteva se ignorišu| IGN[Klijentski header/body/query]
 ```
+
+
+## Demonstracija
+
+Iz korena repozitorijuma:
+
+```bash
+dotnet build backend/Platform.Api/Platform.Api.csproj --configuration Release
+ASPNETCORE_ENVIRONMENT=Development dotnet run \
+  --project backend/Platform.Api/Platform.Api.csproj \
+  --urls http://localhost:5080
+```
+
+U drugom terminalu:
+
+```bash
+curl http://localhost:5080/api/health
+curl http://localhost:5080/api/access/demo-deny
+```
+
+Očekivano:
+
+- `/api/health` vraća `status: "ok"`;
+- `/api/access/demo-deny` vraća `Deny` sa razlogom `UnknownAction`.
+
+Važno: razvojni demo endpoint je registrovan samo kada je okruženje `Development`:
+
+```csharp
+if (app.Environment.IsDevelopment())
+{
+    app.MapGet("/api/access/demo-deny", ...);
+}
+```
+
+Ako se API pokrene bez `ASPNETCORE_ENVIRONMENT=Development`, `/api/health` će raditi, ali će `/api/access/demo-deny` vratiti `404 Not Found`. To znači da ruta nije registrovana, a ne da je autorizacija odbila zahtev.
+
+Ovim se proveravaju pokretanje API-ja i početni ACC-05 tok. Demo ruta je samo razvojna i namerno nije dostupna u produkciji.
+
+
+## Planirani tok razvoja
+
+1. Dogovor sa Identity, Laboratories, Attempts i Audit timovima.
+2. Registrovane akcije i konkretne politike.
+3. Endpoint metadata i fallback-deny.
+4. Stvarni audit adapter.
+5. Ownership/scope, članstvo, server-side atributi i ACC-08 pravila.
+6. Jedinični, integracioni i negativni testovi.
