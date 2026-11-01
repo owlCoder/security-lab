@@ -47,6 +47,9 @@ if (app.Environment.IsDevelopment())
     repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
     repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
     repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
+
+    // US-09: seed development accounts in the identity database (skipped without a connection string).
+    await app.SeedDevelopmentAccountsAsync();
 }
 app.MapGet("/api/health", () => Results.Ok(new
 {

@@ -138,6 +138,8 @@ Order of checks in the use-case: authenticated, then administrator, then status 
 
   Development seeds three test accounts (`example.com` addresses). Ids: `1111...` administrator, `2222...` student, `3333...` other account. The caller is chosen with the header `X-Stub-User` (development only). Example, in a second terminal:
 
+  Note: login reads accounts from the identity database, which the development seeder fills with `admin`, `student`, `teacher` and `blocked` (ids `1111...`, `2222...`, `4444...`, `5555...`). The status endpoint still uses the in-memory repository described above, so the two sets differ until `IAccountRepository` is backed by the database.
+
 ```powershell
   '{"status":"BLOCKED","reason":"test"}' | curl.exe -s -w " HTTP %{http\_code}`n" -X PUT "http://localhost:5080/api/admin/accounts/33333333-3333-3333-3333-333333333333/status" -H "Content-Type: application/json" -H "X-Stub-User: 11111111-1111-1111-1111-111111111111" --data-binary "@-"
   ```

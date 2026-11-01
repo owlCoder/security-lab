@@ -9,6 +9,7 @@ public sealed class PlatformIdentityDbContext(DbContextOptions<PlatformIdentityD
     public const string SchemaName = "identity";
 
     public DbSet<UserAccount> Accounts => Set<UserAccount>();
+    public DbSet<Session> Sessions => Set<Session>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
