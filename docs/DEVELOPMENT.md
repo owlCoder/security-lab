@@ -12,22 +12,25 @@ Build the initial API with `dotnet build backend/Platform.Api/Platform.Api.cspro
 
 ## Local identity database
 
-1. Copy `.env.example` to `.env` and set the credentials.
+1. Copy `.env.example` to `.env`. The file is git-ignored; put your own passwords there, never in `.env.example`.
 2. Start PostgreSQL: `docker compose up -d db`
-3. Restore the EF Core tool and the packages: `dotnet tool restore`, then `dotnet restore backend/SecurityLab.slnx`
-4. Store the connection string outside the repository, replacing each `<...>` placeholder with its value from `.env`:
+3. Start the API: `dotnet run --project backend/Platform.Api --urls http://localhost:5080`
 
-   `dotnet user-secrets set 'ConnectionStrings:Identity' 'Host=127.0.0.1;Port=5432;Database=<POSTGRES_DB>;Username=<POSTGRES_USER>;Password=<POSTGRES_PASSWORD>' --project backend/Platform.Identity`
+In the Development environment the API applies pending identity migrations when it starts, then seeds the development accounts. If the database is not reachable, the API still starts and logs a warning; start the database and restart the API. Migrations are never applied on startup outside Development.
 
-5. Apply migrations:
+To apply migrations without starting the API, run `dotnet tool restore` once, then:
 
-   `dotnet ef database update --project backend/Platform.Identity --startup-project backend/Platform.Identity`
+`dotnet ef database update --project backend/Platform.Identity --startup-project backend/Platform.Identity`
+
+Docker Compose, the API in the Development environment, and `dotnet ef` all read the same `.env` from the repository root. `ConnectionStrings__Identity` is built from the `POSTGRES_*` values, so a password changes in one place. Keep `;` out of `POSTGRES_PASSWORD`, because it ends a value in the connection string. If you change the password after the database was created, the old one stays in the Docker volume until you recreate it with `docker compose down -v`, which deletes the local data.
+
+Precedence: `dotnet user-secrets`, if you still have any, override `.env`. Delete an old value with `dotnet user-secrets remove "ConnectionStrings:Identity" --project backend/Platform.Identity`. A variable set in the real environment also wins over `.env`.
 
 After changing the identity model, add a migration:
 
 `dotnet ef migrations add <Name> --project backend/Platform.Identity --startup-project backend/Platform.Identity --output-dir Migrations`
 
-The `Migrations_MatchTheModel` test fails when a model change has no migration. The API starts without a connection string, so steps 4 and 5 are only needed for work that uses the identity database.
+The `Migrations_MatchTheModel` test fails when a model change has no migration. The API starts without a connection string, so the database steps are only needed for work that uses the identity database.
 
 ## Reset the local identity database
 
@@ -61,17 +64,13 @@ The script does the following:
 Keep the following in mind:
 
 - Only the `identity` schema is changed. Do not use `dotnet ef database drop` for a reset, because it deletes the whole database, including the tables of other teams.
-- The schema is dropped in the `db` service, while migrations use your `ConnectionStrings:Identity` secret. Keep the secret pointed at that local database.
+- The schema is dropped in the `db` service, while migrations use `ConnectionStrings__Identity` from `.env`, or your `ConnectionStrings:Identity` user secret if you have one. Keep it pointed at that local database.
 - A red `Failed executing DbCommand` message for `__EFMigrationsHistory` is expected. EF Core checks for that table before recreating it. The reset succeeded if the script ends with `Done. Schema 'identity' was recreated from migrations.`
 - If migrations fail after the drop, the script reports it and the schema is left incomplete. Fix the problem and run the script again.
 
 ## Development accounts (US-09)
 
-In the Development environment, the API seeds four accounts (admin, teacher, student, and blocked) when both the identity connection string and the seed password are set. The password is not stored in the repository; set it with:
-
-```powershell
-dotnet user-secrets set "Seed:DevelopmentPassword" "<password, at most 128 characters>" --project backend/Platform.Identity
-```
+In the Development environment, the API seeds four accounts (admin, teacher, student, and blocked) when both the identity connection string and the seed password are set. The password is `Seed__DevelopmentPassword` in your local `.env`, at most 128 characters.
 
 All four accounts share this password. The seeder is idempotent: it adds missing accounts and sets a password only on accounts that do not already have one. To change the password, delete the accounts or run `scripts/reset-identity-db.ps1`, then restart the API. Roles are not stored yet because the account model has no role.
 
@@ -79,9 +78,7 @@ All four accounts share this password. The seeder is idempotent: it adds missing
 
 In the Development environment the API seeds four accounts in `identity.accounts` when both the identity connection string and a seed password are set: `admin@example.com`, `teacher@example.com`, `student@example.com` and `blocked@example.com` (status Blocked). All use the reserved `example.com` domain.
 
-The password is not in the repository. Set it once, in the same user-secrets store as the connection string:
-
-`dotnet user-secrets set "Seed:DevelopmentPassword" "<password, at most 128 characters>" --project backend/Platform.Identity`
+The password is `Seed__DevelopmentPassword` in your local `.env`. Only a placeholder is in the repository, in `.env.example`.
 
 Behaviour:
 

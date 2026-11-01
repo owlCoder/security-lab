@@ -10,13 +10,14 @@ The reference stack is React and TypeScript for the frontend, ASP.NET Core and C
 
 ## Getting started
 
-Requirements: .NET SDK 10 and Node.js 22.12 or later (or Node.js 24 or later).
+Requirements: .NET SDK 10 and Node.js 22.12 or later (or Node.js 24 or later). Login and the identity module also need Docker.
 
-1. Start the API: `cd backend/Platform.Api && dotnet run --urls http://localhost:5080`
-2. In another terminal, start the frontend: `cd frontend && npm ci && npm run dev`
-3. Open `http://localhost:5173`. The API health endpoint is `http://localhost:5080/api/health`.
+1. For login and the identity module, copy `.env.example` to `.env` and start PostgreSQL: `docker compose up -d db`
+2. Start the API: `cd backend/Platform.Api && dotnet run --urls http://localhost:5080`
+3. In another terminal, start the frontend: `cd frontend && npm ci && npm run dev`
+4. Open `http://localhost:5173`. The API health endpoint is `http://localhost:5080/api/health`.
 
-The optional local PostgreSQL service can be started with Docker Compose after copying `.env.example` to `.env` and setting the required credentials.
+Locally, the API applies the identity migrations and seeds the development accounts when it starts. It also starts without the database, but login then does not work. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for configuration, migrations, and the database reset.
 
 ## Repository structure
 

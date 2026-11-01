@@ -19,6 +19,9 @@ public sealed class AccessFactory(string environment = "Development", bool enabl
     {
         builder.UseEnvironment(environment);
         builder.UseSetting("AccessDemo:Enabled", enabled.ToString());
+        // Applied after Program.cs, so a developer's .env never connects these tests to the local database.
+        builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(
+            new Dictionary<string, string?> { ["ConnectionStrings:Identity"] = "" }));
         builder.ConfigureLogging(logging => logging.ClearProviders());
         if (configure is not null) builder.ConfigureServices(configure);
     }

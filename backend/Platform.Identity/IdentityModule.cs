@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Identity.Data;
 using Platform.Identity.Services;
 
@@ -17,6 +18,7 @@ public static class IdentityModule
 
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
 
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<ICredentialStore, EfCredentialStore>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();

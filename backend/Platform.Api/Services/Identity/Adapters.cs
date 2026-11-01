@@ -1,3 +1,4 @@
+using Platform.Identity.Services;
 using System.Collections.Concurrent;
 using Platform.Identity.Domain;
 using Platform.Api.Domain.Authentication;

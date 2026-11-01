@@ -37,4 +37,7 @@ public sealed class Session
     {
         LastActivityAt = now;
     }
+
+    /// <summary>Marks the session as revoked. The first revocation time is kept.</summary>
+    public void Revoke(DateTimeOffset now) => RevokedAt ??= now;
 }

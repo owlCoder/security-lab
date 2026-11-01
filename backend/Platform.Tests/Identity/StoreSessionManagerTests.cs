@@ -1,4 +1,5 @@
 ﻿using Platform.Api.Domain.Authentication;
+using Platform.Identity.Services;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Domain;
 
@@ -114,5 +115,8 @@ public class StoreSessionManagerTests
             TouchCount++;
             return Task.CompletedTask;
         }
+
+        public Task<Session?> RevokeByTokenAsync(string rawToken, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 }
