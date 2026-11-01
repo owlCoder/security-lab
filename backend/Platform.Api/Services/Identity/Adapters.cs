@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Platform.Identity.Domain;
-using Platform.Api.Domain.Authentication;   
+using Platform.Api.Domain.Authentication;
+using System.Reflection.Metadata.Ecma335;
 
 namespace Platform.Api.Services.Identity;
 
@@ -22,6 +23,7 @@ public sealed class NoOpSessionRevoker : ISessionManager
     public int RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) => 0;
     public bool RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default) => false;
     public IReadOnlyList<SessionInfo> ListForUser(Guid userId, CancellationToken ct = default) => Array.Empty<SessionInfo>();
+    public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) => Task.FromResult<ValidateSession?>(null);
 }
 
 public sealed class LoggerAuditWriter(ILogger<LoggerAuditWriter> logger) : IAuditWriter

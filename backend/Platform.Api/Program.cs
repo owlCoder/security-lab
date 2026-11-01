@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Platform.Api.Modules.Access.Demo;
 using Platform.Api.Services.Identity;
 using Platform.Identity;
@@ -47,13 +48,14 @@ if (app.Environment.IsDevelopment())
     repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
     repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
 }
-
 app.MapGet("/api/health", () => Results.Ok(new
 {
     status = "ok",
     service = "security-lab-api",
     note = "Initial scaffold; not a production-ready laboratory platform"
-}));
+})).AllowAnonymous();
+
+app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
 

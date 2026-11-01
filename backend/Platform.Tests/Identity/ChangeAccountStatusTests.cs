@@ -29,6 +29,7 @@ public class ChangeAccountStatusTests
             int count = Revoked.Count;
             return count;
         }
+        public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) => Task.FromResult<ValidateSession?>(null);
         public bool RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default)
         {
             Revoked.Add(ownerUserId);

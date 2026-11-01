@@ -27,12 +27,14 @@ public sealed class InMemorySessionManagement : ISessionManager
         public DateTimeOffset LastActivityAt;
         public DateTimeOffset ExpiresAt;
         public bool Revoked;
+        public string Token = "";
+        public AuthenticationLevel Level = AuthenticationLevel.Active;
     }
 
     private readonly ConcurrentDictionary<Guid, Entry> _sessions = new();
 
     /// <summary>Test helper: creates a session and returns its public handle.</summary>
-    public Guid Seed(Guid userId, TimeSpan? lifetime = null)
+    public Guid Seed(Guid userId, TimeSpan? lifetime = null,string? token = null,AuthenticationLevel level = AuthenticationLevel.Active)
     {
         var now = DateTimeOffset.UtcNow;
         var handle = Guid.NewGuid();
@@ -41,7 +43,9 @@ public sealed class InMemorySessionManagement : ISessionManager
             UserId = userId,
             CreatedAt = now,
             LastActivityAt = now,
-            ExpiresAt = now + (lifetime ?? TimeSpan.FromHours(8))
+            ExpiresAt = now + (lifetime ?? TimeSpan.FromHours(8)),
+            Token = token ?? Guid.NewGuid().ToString(),
+            Level = level
         };
         return handle;
     }
@@ -80,6 +84,25 @@ public sealed class InMemorySessionManagement : ISessionManager
 
         lock (e) { e.Revoked = true; }
         return true;
+    }
+
+    public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)
+    {
+        KeyValuePair<Guid,Entry> check = _sessions.Where(vs => vs.Value.Token == token).FirstOrDefault();
+
+        if(check.Value == null)
+        {
+            return Task.FromResult<ValidateSession?>(null);
+        }
+
+        if(!IsLive(check.Value))
+        {
+            return Task.FromResult<ValidateSession?>(null);
+        }
+
+        ValidateSession validate = new ValidateSession(check.Key, check.Value.UserId, check.Value.Level);
+
+        return Task.FromResult <ValidateSession?>(validate);
     }
 
     public IReadOnlyList<SessionInfo> ListForUser(Guid userId, CancellationToken ct = default)
