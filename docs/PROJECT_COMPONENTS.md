@@ -6,6 +6,7 @@ Components and requirements are defined by the Security Lab project specificatio
 | --- | --- | --- | --- |
 | Team 1 |  |  |  |
 | Team 2 |  |  |  |
+| Team 3 | ACC-05 — podrazumevano odbijanje | ACC-08 — kontekstualne politike pristupa | [ACC-05 i ACC-08](components/ACC-05-ACC-08.md) |
 | … |  |  |  |
 | Team 32 |  |  |  |
 
