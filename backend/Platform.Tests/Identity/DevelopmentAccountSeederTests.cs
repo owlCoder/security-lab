@@ -7,6 +7,7 @@ using Platform.Api.Services.Identity;
 using Platform.Identity;
 using Platform.Identity.Data;
 using Platform.Identity.Domain;
+using Platform.Identity.Services;
 
 namespace Platform.Tests.Identity;
 
@@ -46,6 +47,14 @@ public class DevelopmentAccountSeederTests
     }
 
     [Test]
+    public void All_EmailsAreInTheNormalizedFormUsedByLogin()
+    {
+        Assert.That(
+            DevelopmentAccountSeeder.All.Select(account => account.Email),
+            Has.All.Matches<string>(email => email == CredentialVerifier.NormalizeEmail(email)));
+    }
+
+    [Test]
     public void Administrator_UsesTheIdFromStubAdminIds()
     {
         var administrator = DevelopmentAccountSeeder.All.Single(account => account.Role == DevelopmentRole.Administrator);
@@ -79,22 +88,60 @@ public class DevelopmentAccountSeederTests
     [TestCase("Staging")]
     public void SeedAsync_Throws_OutsideDevelopment_BeforeTouchingTheDatabase(string environmentName)
     {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+
+        Assert.ThrowsAsync<InvalidOperationException>(
+            () => DevelopmentAccountSeeder.SeedAsync(
+                context, new ThrowingHasher(), "any-dev-password", EnvironmentNamed(environmentName)));
+    }
+
+    [Test]
+    public void SeedAsync_RejectsBlankPassword_BeforeTouchingTheDatabase()
+    {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+
+        Assert.ThrowsAsync<ArgumentException>(
+            () => DevelopmentAccountSeeder.SeedAsync(
+                context, new ThrowingHasher(), "   ", EnvironmentNamed(Environments.Development)));
+    }
+
+    [Test]
+    public void SeedAsync_RejectsPasswordThatLoginWouldRefuse()
+    {
+        using var provider = BuildProvider();
+        using var scope = provider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var password = new string('x', CredentialVerifier.MaxPasswordLength + 1);
+
+        Assert.ThrowsAsync<ArgumentException>(
+            () => DevelopmentAccountSeeder.SeedAsync(
+                context, new ThrowingHasher(), password, EnvironmentNamed(Environments.Development)));
+    }
+
+    private static IHostEnvironment EnvironmentNamed(string name) =>
+        WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = name }).Environment;
+
+    private static ServiceProvider BuildProvider()
+    {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 [$"ConnectionStrings:{IdentityModule.ConnectionStringName}"] = "Host=localhost;Database=model_only"
             })
             .Build();
-        using var provider = new ServiceCollection()
-            .AddIdentityModule(configuration)
-            .BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
 
-        Assert.ThrowsAsync<InvalidOperationException>(
-            () => DevelopmentAccountSeeder.SeedAsync(context, EnvironmentNamed(environmentName)));
+        return new ServiceCollection().AddIdentityModule(configuration).BuildServiceProvider();
     }
 
-    private static IHostEnvironment EnvironmentNamed(string name) =>
-        WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = name }).Environment;
+    private sealed class ThrowingHasher : IPasswordHasher
+    {
+        public string Hash(string password) => throw new InvalidOperationException("Hasher must not be called.");
+
+        public bool Verify(string password, string? passwordHash) =>
+            throw new InvalidOperationException("Hasher must not be called.");
+    }
 }

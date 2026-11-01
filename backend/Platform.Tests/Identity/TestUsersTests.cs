@@ -1,5 +1,6 @@
 using Platform.Api.Services.Identity;
 using Platform.Identity.Domain;
+using Platform.Identity.Services;
 
 namespace Platform.Tests.Identity;
 
@@ -73,5 +74,25 @@ public class TestUsersTests
         var user = TestUsers.Create(_accounts);
 
         Assert.That(user.Email, Does.EndWith("@example.com"));
+    }
+
+    [Test]
+    public void Create_WithPassword_StoresAHashThatVerifies()
+    {
+        const string password = "pass-for-tests-123";
+        var user = TestUsers.Create(_accounts, password: password);
+
+        Assert.That(user.Password, Is.EqualTo(password));
+        Assert.That(user.Account.PasswordHash, Is.Not.Null.And.Not.EqualTo(password));
+        Assert.That(new BCryptPasswordHasher().Verify(password, user.Account.PasswordHash!), Is.True);
+    }
+
+    [Test]
+    public void Create_WithoutPassword_HasNoPasswordHash()
+    {
+        var user = TestUsers.Create(_accounts);
+
+        Assert.That(user.Password, Is.Null);
+        Assert.That(user.Account.PasswordHash, Is.Null);
     }
 }

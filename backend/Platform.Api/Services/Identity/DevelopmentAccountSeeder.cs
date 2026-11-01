@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Platform.Identity;
 using Platform.Identity.Data;
 using Platform.Identity.Domain;
+using Platform.Identity.Services;
 
 namespace Platform.Api.Services.Identity;
 
@@ -19,6 +20,7 @@ public sealed record SeedResult(int Added, int PasswordsSet);
 
 public static class DevelopmentAccountSeeder
 {
+    // Set with: dotnet user-secrets set "Seed:DevelopmentPassword" "..." --project backend/Platform.Identity.
     public const string PasswordConfigKey = "Seed:DevelopmentPassword";
     // Must match Stub:AdminIds in appsettings.Development.json.
     public static readonly Guid AdminId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -31,6 +33,7 @@ public static class DevelopmentAccountSeeder
         new DevelopmentAccount(Guid.Parse("55555555-5555-5555-5555-555555555555"), "blocked@example.com", DevelopmentRole.Student, AccountStatus.Blocked)
     ];
 
+    // BCrypt hashing of four accounts takes a few hundred milliseconds each.
     private static readonly TimeSpan DatabaseTimeout = TimeSpan.FromSeconds(15);
 
     public static async Task SeedDevelopmentAccountsAsync(this WebApplication app, CancellationToken ct = default)
@@ -50,7 +53,7 @@ public static class DevelopmentAccountSeeder
         if (string.IsNullOrWhiteSpace(password))
         {
             logger.LogInformation(
-               "{Key} is not set, development accounts are skipped. See docs/DEVELOPMENT.md.", PasswordConfigKey);
+                "{Key} is not set, development accounts are skipped. See docs/DEVELOPMENT.md.", PasswordConfigKey);
             return;
         }
 
@@ -75,29 +78,50 @@ public static class DevelopmentAccountSeeder
         }
     }
 
-    public static async Task<int> SeedAsync(
+    public static async Task<SeedResult> SeedAsync(
         PlatformIdentityDbContext context,
+        IPasswordHasher hasher,
+        string password,
         IHostEnvironment environment,
         CancellationToken ct = default)
     {
         RequireDevelopment(environment);
 
+        ArgumentException.ThrowIfNullOrWhiteSpace(password);
+        if (password.Length > CredentialVerifier.MaxPasswordLength)
+            throw new ArgumentException(
+                $"Password must be no more than {CredentialVerifier.MaxPasswordLength} characters.",
+                nameof(password));
+
         if ((await context.Database.GetPendingMigrationsAsync(ct)).Any())
             throw new InvalidOperationException("Identity migrations are not applied. Run 'dotnet ef database update' first.");
 
         var emails = All.Select(account => account.Email).ToArray();
-        var existingEmails = await context.Accounts
+        var accounts = await context.Accounts
             .Where(account => emails.Contains(account.Email))
-            .Select(account => account.Email)
-            .ToListAsync(ct);
-        var existing = existingEmails.ToHashSet(StringComparer.Ordinal);
-        var missing = All.Where(account => !existing.Contains(account.Email)).ToArray();
+            .ToDictionaryAsync(account => account.Email, StringComparer.Ordinal, ct);
+        var added = 0;
+        var passwordsSet = 0;
 
-        foreach (var account in missing)
-            context.Accounts.Add(new UserAccount(account.Id, account.Email, account.Status));
+        foreach (var definition in All)
+        {
+            if (!accounts.TryGetValue(definition.Email, out var account))
+            {
+                account = new UserAccount(definition.Id, definition.Email, definition.Status);
+                context.Accounts.Add(account);
+                accounts.Add(definition.Email, account);
+                added++;
+            }
+
+            if (account.PasswordHash is null)
+            {
+                account.SetPasswordHash(hasher.Hash(password));
+                passwordsSet++;
+            }
+        }
 
         await context.SaveChangesAsync(ct);
-        return missing.Length;
+        return new SeedResult(added, passwordsSet);
     }
 
     public static void RequireDevelopment(IHostEnvironment environment)
