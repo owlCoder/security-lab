@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Api.Services.Identity;
 
@@ -6,6 +7,7 @@ namespace Platform.Api.Controllers.Identity;
 public sealed record LoginRequest(string? Email, string? Password);
 
 [ApiController]
+[AllowAnonymous]
 [Route("api/auth")]
 public class LoginController(LoginAccount login) : ControllerBase
 {

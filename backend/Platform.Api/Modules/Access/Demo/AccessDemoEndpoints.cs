@@ -55,7 +55,7 @@ public static class AccessDemoEndpoints
 
     public static void MapAccessKt1Demo(this WebApplication app)
     {
-        var group = app.MapGroup("/api/access-demo");
+        var group = app.MapGroup("/api/access-demo").AllowAnonymous();
         group.MapGet("/info", () => Results.Ok(new
         {
             mode = "KT1 synthetic fixtures - not production authentication",

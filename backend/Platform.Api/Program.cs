@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Platform.Api.Modules.Access.Demo;
 using Platform.Api.Services.Identity;
 using Platform.Identity;
@@ -19,7 +20,7 @@ builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IAccountRepository, InMemoryAccountRepository>(); // TODO: zameniti trajnim repozitorijumom (PostgreSQL)
-builder.Services.AddSingleton<ISessionManager, NoOpSessionRevoker>();   // zameniti kad IDN-02 bude gotov
+builder.Services.AddScoped<ISessionManager, StoreSessionManager>();   // zameniti kad IDN-02 bude gotov
 builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
 builder.Services.AddSingleton<IAccessDecision, AdminOnlyAccessDecision>();
@@ -51,13 +52,14 @@ if (app.Environment.IsDevelopment())
     // US-09: seed development accounts in the identity database (skipped without a connection string).
     await app.SeedDevelopmentAccountsAsync();
 }
-
 app.MapGet("/api/health", () => Results.Ok(new
 {
     status = "ok",
     service = "security-lab-api",
     note = "Initial scaffold; not a production-ready laboratory platform"
-}));
+})).AllowAnonymous();
+
+app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
 

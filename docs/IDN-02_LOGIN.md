@@ -38,7 +38,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 | Story | What it needs from this change |
 |-|-|
 | US-03 session store | Done. `StoreSessionCreator` connects login to `ISessionStore`. The two level enums have different numeric values, so `StoreSessionCreator` maps them by name. |
-| US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions, so US-06 must check `RevokedAt` and `ExpiresAt` itself. |
+| US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions; `StoreSessionManager.ValidateAsync` refuses them. |
 | US-07, US-08 frontend | Send the request with credentials included. Read only the status code and `code`; show one generic message for `401`. |
 | US-09 seed users | Done. `DevelopmentAccountSeeder` seeds four accounts into `identity.accounts` with a BCrypt hash and lower-case e-mails (see docs/DEVELOPMENT.md). Seeding into the in-memory `IAccountRepository` does not make login work. |
 | IDN-03 | Login reads the status from `identity.accounts`, while `PUT /api/admin/accounts/{id}/status` still changes the in-memory account. Until `IAccountRepository` is backed by the database, an account blocked through the endpoint can still log in. |
@@ -50,7 +50,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 - No MFA: every successful login is `Active` until an MFA policy (IDN-06, US-12) exists.
 - No registration (IDN-01): accounts exist only through seeding or direct database work.
 - The login does not revoke a session that was sent with the request.
-- Sessions are created, but no endpoint reads them until US-06 replaces the stub `IIdentityContext`.
+- `SessionCheckMiddleware` (US-06) validates the session, but `IIdentityContext` is still the stub.
 - The DFD said "ASP.NET Core Identity" for the hash check. This implementation uses BCrypt (`BCrypt.Net-Next`) directly, as decided by the team member working on US-04. Confirm with the team (US-12 ADR).
 
 ## Tests

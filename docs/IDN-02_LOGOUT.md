@@ -26,7 +26,7 @@ The endpoint is `[AllowAnonymous]`, so logout without a valid session stays idem
 
 ## Known limitations
 
-- The IDN-02 criterion "the old cookie gets `401`" needs the session check from US-06. Logout already sets `revoked_at`, but no endpoint reads it yet. `ISessionStore.FindByTokenAsync` also returns revoked sessions, so US-06 must check `RevokedAt` itself.
+- The check that the old cookie gets `401` was run by hand on a real database. An automated HTTP test is still missing (US-13).
 - No CSRF token (US-15) yet. Logout accepts only `POST` and the cookie is `SameSite=Strict`.
 - There is no logout button yet (US-08).
 
