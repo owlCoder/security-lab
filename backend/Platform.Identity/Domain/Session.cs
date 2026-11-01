@@ -32,4 +32,9 @@ public sealed class Session
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset LastActivityAt { get; private set; }
     public DateTimeOffset? RevokedAt { get; private set; }
+
+    public void Touch(DateTimeOffset now)
+    {
+        LastActivityAt = now;
+    }
 }

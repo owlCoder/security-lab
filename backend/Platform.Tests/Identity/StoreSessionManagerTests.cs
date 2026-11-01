@@ -63,6 +63,29 @@ public class StoreSessionManagerTests
         Assert.That(result!.Level, Is.EqualTo(AuthenticationLevel.MfaPending));
     }
 
+    [Test]
+    public async Task ValidSession_UpdatesLastActivity()
+    {
+        var session = NewSession(AuthLevel.Active, expiresIn: TimeSpan.FromHours(1));
+        var before = session.LastActivityAt;
+        _store.Session = session;
+
+        await _manager.ValidateAsync("token");
+
+        Assert.That(_store.TouchCount, Is.EqualTo(1));
+        Assert.That(session.LastActivityAt, Is.GreaterThanOrEqualTo(before));
+    }
+
+    [Test]
+    public async Task ExpiredSession_DoesNotUpdateLastActivity()
+    {
+        _store.Session = NewSession(AuthLevel.Active, expiresIn: TimeSpan.FromMinutes(-1));
+
+        await _manager.ValidateAsync("token");
+
+        Assert.That(_store.TouchCount, Is.EqualTo(0));
+    }
+
     // Opozvana sesija: čeka opoziv iz US-03 (RevokedAt se trenutno ne može postaviti).
 
     private static Session NewSession(AuthLevel level, TimeSpan expiresIn)
@@ -82,5 +105,14 @@ public class StoreSessionManagerTests
         public Task<(string RawToken, Session Session)> CreateAsync(
             Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct) =>
             throw new NotSupportedException();
+
+        public int TouchCount { get; private set; }
+
+        public Task TouchAsync(Session session, DateTimeOffset now, CancellationToken ct)
+        {
+            session.Touch(now);
+            TouchCount++;
+            return Task.CompletedTask;
+        }
     }
 }
