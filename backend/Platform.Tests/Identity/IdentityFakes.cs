@@ -45,6 +45,13 @@ public sealed class InMemorySessionManagement : ISessionManager
         };
         return handle;
     }
+    public bool IsSessionActive(Guid userId, Guid sessionHandle, CancellationToken ct = default)
+    { 
+        if (userId == Guid.Empty) throw new ArgumentException("ownerUserId is required", nameof(userId));
+        if (sessionHandle == Guid.Empty) throw new ArgumentException("sessionHandle is required", nameof(sessionHandle));
+
+        return _sessions.TryGetValue(sessionHandle, out var e) && IsLive(e);
+    }
 
     /// <summary>Test helper: is the session still valid?</summary>
     public bool IsActive(Guid handle) =>
@@ -88,7 +95,7 @@ public sealed class InMemorySessionManagement : ISessionManager
 
         IReadOnlyList<SessionInfo> list = _sessions
             .Where(kv => kv.Value.UserId == userId && IsLive(kv.Value))
-            .Select(kv => new SessionInfo(kv.Key, kv.Value.CreatedAt, kv.Value.LastActivityAt, kv.Value.ExpiresAt))
+            .Select(kv => new SessionInfo(kv.Key, kv.Value.CreatedAt, kv.Value.LastActivityAt, kv.Value.ExpiresAt, kv.Value.Revoked))
             .ToList();
         return list;
     }
