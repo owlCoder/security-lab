@@ -2,11 +2,14 @@ using Platform.Access.Contracts;
 using Platform.Access.Composition;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
+using Platform.Api.Modules.Identity.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAccessControl();
+builder.Services.AddIdentityRateLimiting(builder.Configuration);
 
 var app = builder.Build();
+app.UseIdentityRateLimiting();
 
 // Starter endpoint only. Add domain APIs together with server-side authorization.
 app.MapGet("/api/health", () => Results.Ok(new
