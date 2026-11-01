@@ -24,6 +24,8 @@ builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
 builder.Services.AddSingleton<IAccessDecision, AdminOnlyAccessDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
+builder.Services.AddScoped<LoginAccount>();
+builder.Services.AddSingleton<ISessionCreator, UnavailableSessionCreator>(); // zameniti kad US-03 (skladiste sesija) bude gotov
 
 if (builder.Environment.IsDevelopment())
     builder.Services.AddScoped<IIdentityContext, StubIdentityContext>();

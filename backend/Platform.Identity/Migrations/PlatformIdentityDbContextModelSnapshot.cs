@@ -35,6 +35,11 @@ namespace Platform.Identity.Migrations
                         .HasColumnType("character varying(320)")
                         .HasColumnName("email");
 
+                    b.Property<string>("PasswordHash")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("password_hash");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
