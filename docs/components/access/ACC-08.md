@@ -19,7 +19,7 @@ Missing, mismatched, unversioned or invalid context fails closed. Empty time bou
 
 ```mermaid
 flowchart TB
-  CALLER["AttemptReadService"]
+  CALLER["AttemptReadService / AttemptDraftService"]
   subgraph Policy["Server policy boundary"]
     BASE["ACC-04 ownership + course"]
     COMBINE["AccessPolicy: base AND context"]
@@ -44,7 +44,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  E1["E1 AttemptReadService"]
+  E1["E1 AttemptReadService / AttemptDraftService"]
   subgraph Policy["Trusted policy boundary"]
     P1["P1 Resolve policy ID"]
     D1[("D1 Context policies / seed")]
@@ -82,3 +82,9 @@ These are tests of a first context rule. This KT1 does not implement a generic p
 
 Agree real contextual attributes/providers, policy ownership/version semantics and explicit reviewer rules. Add missing-attribute, policy-change and adapter integration tests. Keep base checks mandatory for each relevant API request. Do not copy the old SCUTUM deployment architecture into this monolith.
 Run and evidence: [DEMO.md](DEMO.md), [VALIDATION.md](VALIDATION.md).
+
+## Both primary actions use context
+
+The same context restriction applies to `ReadAttempt` and `UpdateDraftAnswer`. A teacher's review permission is read-only; a valid context never grants another student or reviewer permission to modify a draft. `ChangedContextIsRecheckedBeforeWrite`, `ExpiredContextPreventsDraftMutation` and `ValidContextCannotGrantForeignDraftWrite` cover these boundaries.
+
+The full matrix and ownership are in [DOMAIN_MODEL.md](DOMAIN_MODEL.md); the asset-to-test chains are in [THREAT_MODEL.md](THREAT_MODEL.md). The prepared use cases and KT2 prerequisites are in [BACKLOG.md](BACKLOG.md). Production policy/provider review remains explicit in [CONTRACTS.md](CONTRACTS.md).

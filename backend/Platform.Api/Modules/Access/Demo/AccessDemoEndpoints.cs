@@ -43,11 +43,13 @@ public static class AccessDemoEndpoints
         services.AddSingleton<IAccountReader>(sp => sp.GetRequiredService<DemoData>());
         services.AddSingleton<IMembershipReader>(sp => sp.GetRequiredService<DemoData>());
         services.AddSingleton<IAttemptReader>(sp => sp.GetRequiredService<DemoData>());
+        services.AddSingleton<IAttemptDraftWriter>(sp => sp.GetRequiredService<DemoData>());
         services.AddSingleton<IContextPolicyReader>(sp => sp.GetRequiredService<DemoData>());
         services.AddSingleton<IAuditWriter>(sp => sp.GetRequiredService<DemoData>());
         services.AddSingleton<IAccessDecision, AccessPolicy>();
         services.AddSingleton(TimeProvider.System);
         services.AddScoped<AttemptReadService>();
+        services.AddScoped<AttemptDraftService>();
         return services;
     }
 
@@ -64,6 +66,8 @@ public static class AccessDemoEndpoints
                 new { id = DemoData.MarkoAttempt, label = "Markov predati pokusaj" },
                 new { id = DemoData.ClosedAttempt, label = "Anin pokusaj - istekao kontekst" },
                 new { id = DemoData.DraftAttempt, label = "Anin nepredati pokusaj" },
+                new { id = DemoData.CompletedAttempt, label = "Anin zavrseni pokusaj" },
+                new { id = DemoData.ClosedDraftAttempt, label = "Anin nacrt - istekao kontekst" },
                 new { id = DemoData.MissingAttempt, label = "Nepostojeci testni ID" }
             }
         }));
@@ -92,12 +96,28 @@ public static class AccessDemoEndpoints
             http.Response.Headers["X-Correlation-ID"] = correlation.ToString();
             http.Response.Headers.CacheControl = "no-store";
             var result = service.Read(identity.AccountId, parsed, correlation);
-            return result.StatusCode switch
-            {
-                200 => Results.Ok(result.Resource),
-                401 => Results.Json(new { code = "AUTHENTICATION_REQUIRED" }, statusCode: 401),
-                _ => Results.Json(new { code = "RESOURCE_UNAVAILABLE", message = "Resurs nije dostupan." }, statusCode: 404)
-            };
+            return PublicResponse(result.StatusCode, result.Resource);
+        });
+        group.MapPut("/attempts/{id}/answer", (string id, UpdateDraftRequest request,
+            IIdentityContext identity, AttemptDraftService service, HttpContext http) =>
+        {
+            if (http.Request.Headers["X-Access-Demo"] != "1") return Results.BadRequest();
+            if (!Guid.TryParse(id, out var parsed) || parsed == Guid.Empty)
+                return Results.BadRequest(new { code = "INVALID_RESOURCE_ID" });
+            var correlation = Guid.NewGuid();
+            http.Response.Headers["X-Correlation-ID"] = correlation.ToString();
+            http.Response.Headers.CacheControl = "no-store";
+            var result = service.Update(identity.AccountId, parsed, request, correlation);
+            return PublicResponse(result.StatusCode, result.Resource);
         });
     }
+
+    private static IResult PublicResponse(int status, AttemptView? resource) => status switch
+    {
+        200 => Results.Ok(resource),
+        400 => Results.Json(new { code = "INVALID_REQUEST" }, statusCode: 400),
+        401 => Results.Json(new { code = "AUTHENTICATION_REQUIRED" }, statusCode: 401),
+        409 => Results.Json(new { code = "RESOURCE_CHANGED", message = "Pokusaj je izmenjen. Ponovo ga ucitajte." }, statusCode: 409),
+        _ => Results.Json(new { code = "RESOURCE_UNAVAILABLE", message = "Resurs nije dostupan." }, statusCode: 404)
+    };
 }

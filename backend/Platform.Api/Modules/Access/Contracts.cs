@@ -3,6 +3,7 @@ namespace Platform.Api.Modules.Access;
 public enum CourseRole { Student, Teacher, Assistant }
 public enum AttemptState { InProgress, Submitted, Completed }
 public enum PortStatus { Ok, NotFound, Unavailable }
+public enum DraftWriteStatus { Updated, Conflict, NotFound, Unavailable }
 
 public sealed record PortResult<T>(PortStatus Status, T? Value) where T : class
 {
@@ -21,9 +22,13 @@ public sealed record ContextPolicy(string Id, string Version,
 public sealed record AttemptView(Guid Id, string Answer, int Version);
 public sealed record AccessVerdict(bool Allowed, string ReasonCode, string PolicyVersion);
 public sealed record ReadResult(int StatusCode, AttemptView? Resource = null);
+public sealed record UpdateDraftRequest(string? Answer, int ExpectedVersion);
+public sealed record UpdateResult(int StatusCode, AttemptView? Resource = null);
+public sealed record DraftWriteResult(DraftWriteStatus Status, AttemptView? Resource = null);
 public sealed record AccessAuditEvent(DateTimeOffset Timestamp, Guid CorrelationId,
     Guid? ActorId, string Action, Guid TargetId, Guid? CourseId,
-    string Outcome, string ReasonCode, string PolicyVersion);
+    string Outcome, string ReasonCode, string PolicyVersion,
+    int? ResourceVersionBefore = null, int? ResourceVersionAfter = null);
 
 // Provider modules own these snapshots. The consumer never reads their tables.
 public interface IAccountReader { PortResult<AccountSnapshot> FindAccount(Guid id); }
@@ -35,6 +40,11 @@ public interface IAttemptReader
 {
     PortResult<AttemptSnapshot> FindAttempt(Guid id);
     PortResult<AttemptView> ReadAnswer(AttemptSnapshot authorizedSnapshot);
+}
+// Proposed ATT-provider port. The KT1 adapter writes synthetic drafts only.
+public interface IAttemptDraftWriter
+{
+    DraftWriteResult TryUpdateDraft(AttemptSnapshot authorizedSnapshot, int expectedVersion, string answer);
 }
 public interface IContextPolicyReader { PortResult<ContextPolicy> FindPolicy(string id); }
 public interface IIdentityContext { Guid? AccountId { get; } }

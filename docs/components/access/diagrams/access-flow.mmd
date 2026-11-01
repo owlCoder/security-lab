@@ -1,0 +1,20 @@
+flowchart TB
+  CLIENT["Untrusted React or API caller"]
+  subgraph SERVER["Trusted ASP.NET Core server"]
+    API["Validate ID, identity and input"]
+    SNAP["Load current provider snapshots"]
+    BASE["ACC-04 resource and action rules"]
+    WINDOW["ACC-08 policy and server UTC"]
+    ACTION{"Allowed action"}
+    READ["Read exact authorized version"]
+    WRITE["CAS own draft answer"]
+    AUDIT[("Metadata-only audit")]
+    API --> SNAP --> BASE --> WINDOW --> ACTION
+    ACTION -->|"ReadAttempt"| READ
+    ACTION -->|"UpdateDraftAnswer"| WRITE
+    ACTION -->|"Deny, no answer or mutation"| AUDIT
+    READ --> AUDIT
+    WRITE --> AUDIT
+  end
+  CLIENT -->|"GUID, cookie, answer, expectedVersion"| API
+  AUDIT -->|"200, 401, safe 404 or authorized 409"| CLIENT

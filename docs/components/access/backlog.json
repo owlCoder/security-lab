@@ -1,0 +1,422 @@
+{
+  "schemaVersion": 1,
+  "projectName": "Security Lab - ACC-04 / ACC-08",
+  "source": "Project specification section 4.2 / shared authorization rules; decomposed team tasks, not new requirement IDs.",
+  "tapizImportStatus": "NOT_CREATED_BY_THIS_PACKAGE",
+  "useCases": [
+    {
+      "id": "ACC04-UC01",
+      "requirement": "ACC-04",
+      "title": "Read own attempt",
+      "preconditions": "Active account and matching active membership; real attempt snapshot; valid context.",
+      "acceptance": "Read returns the exact authorized answer/version.",
+      "test": "OwnerReceivesAnswerThroughHttp"
+    },
+    {
+      "id": "ACC04-UC02",
+      "requirement": "ACC-04",
+      "title": "Reject direct foreign-resource access",
+      "preconditions": "A second student and an existing foreign attempt, plus a missing ID.",
+      "acceptance": "Foreign and missing resources have identical public status/body.",
+      "test": "ForeignAndMissingHaveIdenticalPublicResponses"
+    },
+    {
+      "id": "ACC04-UC03",
+      "requirement": "ACC-04",
+      "title": "Apply scoped reviewer permissions",
+      "preconditions": "Course membership with teacher or explicit assistant delegation.",
+      "acceptance": "Review applies only to the matching course and reviewable status; another owner's draft stays private.",
+      "test": "TeacherCannotReadUnsubmittedAnswerOfAnotherOwner"
+    },
+    {
+      "id": "ACC04-UC04",
+      "requirement": "ACC-04",
+      "title": "Recheck current account and membership",
+      "preconditions": "Identity adapter and current membership snapshots.",
+      "acceptance": "Inactive account/membership cannot read or write; changing membership affects the next write.",
+      "test": "RevokedMembershipIsRecheckedBeforeWrite"
+    },
+    {
+      "id": "ACC04-UC05",
+      "requirement": "ACC-04",
+      "title": "Update own draft answer",
+      "preconditions": "Student owns an InProgress attempt; valid input, version and context.",
+      "acceptance": "Answer changes, version increases once, and owner/course/status do not change.",
+      "test": "OwnerUpdatesDraftAndReadsNewContent"
+    },
+    {
+      "id": "ACC04-UC06",
+      "requirement": "ACC-04",
+      "title": "Prevent stale or historical mutation",
+      "preconditions": "Versioned attempt adapter with atomic compare-and-swap.",
+      "acceptance": "A stale write conflicts without mutation; Submitted/Completed answers stay unchanged.",
+      "test": "CompareAndSwapCommitsExactlyOneCompetingUpdate"
+    },
+    {
+      "id": "ACC04-UC07",
+      "requirement": "ACC-04",
+      "title": "Fail closed on missing/unavailable dependency",
+      "preconditions": "Explicit NotFound/Unavailable provider replies or a timeout.",
+      "acceptance": "No answer or state change is exposed on failure; public foreign/missing replies remain equal.",
+      "test": "DraftOutageDoesNotRevealExistence"
+    },
+    {
+      "id": "ACC08-UC01",
+      "requirement": "ACC-08",
+      "title": "Combine base authorization and context",
+      "preconditions": "ACC-04 base decision and an identified/versioned context policy.",
+      "acceptance": "Context can restrict but cannot grant a foreign student access.",
+      "test": "ContextCannotGrantForeignResource"
+    },
+    {
+      "id": "ACC08-UC02",
+      "requirement": "ACC-08",
+      "title": "Enforce server time boundaries",
+      "preconditions": "Server TimeProvider; NotBefore/NotAfter window.",
+      "acceptance": "Start is inclusive, end is exclusive; expired/future windows deny.",
+      "test": "WindowEndIsExclusive"
+    },
+    {
+      "id": "ACC08-UC03",
+      "requirement": "ACC-08",
+      "title": "Reject missing or invalid policy data",
+      "preconditions": "Policy snapshot with matching ID and nonempty version.",
+      "acceptance": "Missing policy, wrong ID, empty version and invalid window fail closed.",
+      "test": "UnversionedPolicyIsDenied"
+    },
+    {
+      "id": "ACC08-UC04",
+      "requirement": "ACC-08",
+      "title": "Recheck context before the next operation",
+      "preconditions": "Context reader evaluated for each request.",
+      "acceptance": "A newly closed window denies the next draft write without state change.",
+      "test": "ChangedContextIsRecheckedBeforeWrite"
+    },
+    {
+      "id": "ACC08-UC05",
+      "requirement": "ACC-08",
+      "title": "Apply context to both protected actions",
+      "preconditions": "ReadAttempt and UpdateDraftAnswer are explicit actions.",
+      "acceptance": "Expired context denies even a draft owner; valid context cannot grant foreign writes.",
+      "test": "ValidContextCannotGrantForeignDraftWrite"
+    },
+    {
+      "id": "ACC08-UC06",
+      "requirement": "ACC-08",
+      "title": "Extend agreed contextual attributes in KT2",
+      "preconditions": "Agreement on attribute providers and policy ownership/version rules.",
+      "acceptance": "Define additional attributes and acceptance tests before implementing them.",
+      "test": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "ACC04-01",
+      "requirements": [
+        "ACC-04"
+      ],
+      "title": "Read own attempt and reject IDOR",
+      "phase": "KT1",
+      "implementation": "VERIFIED_BASELINE",
+      "dependsOn": [],
+      "useCases": [
+        "ACC04-UC01",
+        "ACC04-UC02"
+      ],
+      "prerequisites": "Confirmed ACC-04 / ACC-08 assignment and specification.",
+      "acceptance": "Normal owner read succeeds; changing the ID cannot reveal another student's answer.",
+      "evidence": [
+        "AccessHttpTests.cs",
+        "PR #18; baseline CI success"
+      ]
+    },
+    {
+      "id": "ACC04-02",
+      "requirements": [
+        "ACC-04"
+      ],
+      "title": "Course-scoped review and current account checks",
+      "phase": "KT1",
+      "implementation": "VERIFIED_BASELINE",
+      "dependsOn": [
+        "ACC04-01"
+      ],
+      "useCases": [
+        "ACC04-UC03",
+        "ACC04-UC04"
+      ],
+      "prerequisites": "ACC04-01",
+      "acceptance": "Course/role/status rules are enforced on the server and inactive accounts are denied.",
+      "evidence": [
+        "AccessPolicyTests.cs",
+        "CurrentAccountStateIsRecheckedForEveryRequest"
+      ]
+    },
+    {
+      "id": "ACC08-01",
+      "requirements": [
+        "ACC-08"
+      ],
+      "title": "Versioned time-window restriction after base checks",
+      "phase": "KT1",
+      "implementation": "VERIFIED_BASELINE",
+      "dependsOn": [
+        "ACC04-01"
+      ],
+      "useCases": [
+        "ACC08-UC01",
+        "ACC08-UC02",
+        "ACC08-UC03"
+      ],
+      "prerequisites": "ACC04-01",
+      "acceptance": "Base AND context is enforced; exact window boundaries and malformed/missing policies are tested.",
+      "evidence": [
+        "AccessPolicyTests.cs",
+        "ACC-08.md"
+      ]
+    },
+    {
+      "id": "ACC04-03",
+      "requirements": [
+        "ACC-04",
+        "ACC-08"
+      ],
+      "title": "Authorize and validate own draft update",
+      "phase": "KT1",
+      "implementation": "VERIFIED_LOCAL",
+      "dependsOn": [
+        "ACC04-01",
+        "ACC08-01"
+      ],
+      "useCases": [
+        "ACC04-UC05"
+      ],
+      "prerequisites": "ACC04-01; ACC08-01",
+      "acceptance": "Only an active owning student can update an InProgress answer; malformed input and foreign writes do not mutate it.",
+      "evidence": [
+        "AccessDraftHttpTests.cs",
+        "25-scenario direct HTTP demo"
+      ]
+    },
+    {
+      "id": "ACC04-04",
+      "requirements": [
+        "ACC-04"
+      ],
+      "title": "Atomic draft version check and history protection",
+      "phase": "KT1",
+      "implementation": "VERIFIED_LOCAL",
+      "dependsOn": [
+        "ACC04-03"
+      ],
+      "useCases": [
+        "ACC04-UC06"
+      ],
+      "prerequisites": "ACC04-03",
+      "acceptance": "Exactly one competing update succeeds; stale writes conflict; Submitted and Completed remain unchanged.",
+      "evidence": [
+        "AttemptPortContractTests.cs",
+        "StaleVersionReturnsConflictWithoutLosingFirstWrite"
+      ]
+    },
+    {
+      "id": "ACC04-05",
+      "requirements": [
+        "ACC-04"
+      ],
+      "title": "Normalize dependency failure without resource enumeration",
+      "phase": "KT1",
+      "implementation": "VERIFIED_LOCAL",
+      "dependsOn": [
+        "ACC04-01",
+        "ACC04-03"
+      ],
+      "useCases": [
+        "ACC04-UC07"
+      ],
+      "prerequisites": "ACC04-01; ACC04-03",
+      "acceptance": "Read/write foreign and missing replies are equal when membership/context is unavailable; unavailable writer does not mutate.",
+      "evidence": [
+        "DependencyOutageDoesNotRevealExistence",
+        "DraftOutageDoesNotRevealExistence",
+        "UnavailableWriterFailsClosedWithoutMutation"
+      ]
+    },
+    {
+      "id": "ACC08-02",
+      "requirements": [
+        "ACC-08",
+        "ACC-04"
+      ],
+      "title": "Recheck context for reads and draft writes",
+      "phase": "KT1",
+      "implementation": "VERIFIED_LOCAL",
+      "dependsOn": [
+        "ACC08-01",
+        "ACC04-03"
+      ],
+      "useCases": [
+        "ACC08-UC04",
+        "ACC08-UC05"
+      ],
+      "prerequisites": "ACC08-01; ACC04-03",
+      "acceptance": "Context change is observed on the next write; neither a valid context nor reviewer role grants foreign draft write.",
+      "evidence": [
+        "DraftPolicyTests.cs",
+        "ChangedContextIsRecheckedBeforeWrite"
+      ]
+    },
+    {
+      "id": "KT1-01",
+      "requirements": [
+        "ACC-04",
+        "ACC-08"
+      ],
+      "title": "Domain model, statuses, ownership and decision matrix",
+      "phase": "KT1",
+      "implementation": "PREPARED",
+      "dependsOn": [
+        "ACC04-01",
+        "ACC08-01"
+      ],
+      "useCases": [],
+      "prerequisites": "ACC04-01; ACC08-01",
+      "acceptance": "Present the common model and separate architecture/DFD diagrams for both components, with actual and planned boundaries.",
+      "evidence": [
+        "DOMAIN_MODEL.md",
+        "ACC-04.md",
+        "ACC-08.md",
+        "diagrams/"
+      ]
+    },
+    {
+      "id": "KT1-02",
+      "requirements": [
+        "ACC-04",
+        "ACC-08"
+      ],
+      "title": "Threat model and metadata-only change audit",
+      "phase": "KT1",
+      "implementation": "VERIFIED_LOCAL",
+      "dependsOn": [
+        "ACC04-03",
+        "ACC08-02"
+      ],
+      "useCases": [],
+      "prerequisites": "ACC04-03; ACC08-02",
+      "acceptance": "Every listed threat maps asset -> misuse -> control -> named test -> evidence; an actual update audit contains versions without answer/session data.",
+      "evidence": [
+        "THREAT_MODEL.md",
+        "UpdateAuditContainsMetadataWithoutAnswerOrSessionSecret"
+      ]
+    },
+    {
+      "id": "KT1-03",
+      "requirements": [
+        "ACC-04",
+        "ACC-08"
+      ],
+      "title": "Review one ATT boundary contract with the neighboring team",
+      "phase": "KT1",
+      "implementation": "EXTERNAL_PENDING",
+      "dependsOn": [
+        "KT1-01",
+        "ACC04-04"
+      ],
+      "useCases": [],
+      "prerequisites": "KT1-01; ACC04-04",
+      "acceptance": "A real neighboring-team reviewer confirms the proposed snapshot/CAS/error contract; record a real review URL and version.",
+      "evidence": [
+        "CONTRACTS.md; status PROPOSED, external review pending"
+      ]
+    },
+    {
+      "id": "KT1-04",
+      "requirements": [
+        "ACC-04",
+        "ACC-08"
+      ],
+      "title": "Record Tapiz task -> branch -> PR and update CI evidence",
+      "phase": "KT1",
+      "implementation": "EXTERNAL_PENDING",
+      "dependsOn": [
+        "KT1-01",
+        "KT1-02"
+      ],
+      "useCases": [],
+      "prerequisites": "KT1-01; KT1-02",
+      "acceptance": "Create these cards in the real Tapiz project, record their URLs, link PR #18, and record the new successful CI after this update is pushed.",
+      "evidence": [
+        "EVIDENCE.json",
+        "VALIDATION.md"
+      ]
+    },
+    {
+      "id": "KT1-05",
+      "requirements": [
+        "ACC-04",
+        "ACC-08"
+      ],
+      "title": "Demonstrate Read and UpdateDraftAnswer with negative tests",
+      "phase": "KT1",
+      "implementation": "VERIFIED_LOCAL",
+      "dependsOn": [
+        "ACC04-04",
+        "ACC04-05",
+        "ACC08-02"
+      ],
+      "useCases": [],
+      "prerequisites": "ACC04-04; ACC04-05; ACC08-02",
+      "acceptance": "Show normal read, allowed draft mutation, denied foreign mutation, stale conflict, expired context denial and the actual NUnit/demo output.",
+      "evidence": [
+        "DEMO.md",
+        "scripts/access-demo.ps1"
+      ]
+    },
+    {
+      "id": "ACC04-06",
+      "requirements": [
+        "ACC-04"
+      ],
+      "title": "Integrate real identity, membership and ATT providers",
+      "phase": "KT2",
+      "implementation": "PLANNED",
+      "dependsOn": [
+        "KT1-03",
+        "ACC04-05"
+      ],
+      "useCases": [
+        "ACC04-UC01",
+        "ACC04-UC04",
+        "ACC04-UC05",
+        "ACC04-UC06"
+      ],
+      "prerequisites": "KT1-03; ACC04-05",
+      "acceptance": "Use agreed provider adapters without direct foreign-table access; add integration, revocation and actual persistence/seed tests.",
+      "evidence": [
+        "Planned; no production integration is claimed"
+      ]
+    },
+    {
+      "id": "ACC08-03",
+      "requirements": [
+        "ACC-08"
+      ],
+      "title": "Extend contextual attributes and policy lifecycle",
+      "phase": "KT2",
+      "implementation": "PLANNED",
+      "dependsOn": [
+        "KT1-03",
+        "ACC08-02"
+      ],
+      "useCases": [
+        "ACC08-UC06"
+      ],
+      "prerequisites": "KT1-03; ACC08-02",
+      "acceptance": "Agree attributes and ownership, then test changed/missing attributes and policy versions; preserve mandatory resource checks.",
+      "evidence": [
+        "Planned; no generic policy language or policy CRUD is claimed"
+      ]
+    }
+  ]
+}

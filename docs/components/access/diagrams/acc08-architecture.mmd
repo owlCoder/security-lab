@@ -1,5 +1,5 @@
 flowchart TB
-  CALLER["AttemptReadService"]
+  CALLER["AttemptReadService / AttemptDraftService"]
   subgraph Policy["Server policy boundary"]
     BASE["ACC-04 ownership + course"]
     COMBINE["AccessPolicy: base AND context"]

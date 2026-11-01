@@ -5,13 +5,13 @@ flowchart TB
   subgraph Server["ASP.NET Core modular monolith"]
     HTTP["AccessDemoEndpoints"]
     ID["IIdentityContext / cookie"]
-    APP["AttemptReadService"]
+    APP["Read and draft-update services"]
     POL["IAccessDecision / ACC-04"]
     CONTEXT["ACC-08 context check"]
     PROVIDERS["Account / membership / attempt ports"]
     SEED[("DemoData snapshots")]
     AUD["IAuditWriter"]
-    STORE[("Internal audit")]
+    STORE[("Internal audit + version metadata")]
     HTTP --> ID
     HTTP --> APP
     APP --> POL
