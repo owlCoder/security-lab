@@ -5,19 +5,3 @@ main { max-width: 900px; margin: 8vh auto; padding: 0 24px; }
 h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; }
 .eyebrow { font-weight: 700; letter-spacing: .12em; color: #315d8a; }
 section { background: white; border: 1px solid #e1e6ed; border-radius: 12px; padding: 22px; margin-top: 32px; }
-.access-demo { margin-bottom: 48px; }
-.access-demo h2 { margin-top: 0; }
-.access-demo label { display: flex; flex-direction: column; gap: 7px; font-weight: 600; }
-.access-demo select { padding: 10px; border: 1px solid #b9c8d8; border-radius: 6px; color: inherit; background: white; font: inherit; width: 100%; }
-.access-demo button { border: 0; border-radius: 6px; background: #245589; color: white; padding: 11px 16px; cursor: pointer; font: inherit; }
-.access-demo button:disabled { opacity: .6; cursor: wait; }
-.access-demo button.secondary { background: #e7edf5; color: #223045; }
-.access-demo :focus-visible { outline: 3px solid #b66a00; outline-offset: 3px; }
-.access-fields { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 12px; }
-.access-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
-.access-demo pre { background: #f0f4f9; border: 1px solid #dbe4ee; padding: 16px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; min-height: 100px; }
-.access-note { color: #4c6079; font-size: .95rem; line-height: 1.6; }
-.access-editor { margin-top: 20px; padding-top: 18px; border-top: 1px solid #dbe4ee; }
-.access-editor textarea { padding: 10px; border: 1px solid #b9c8d8; border-radius: 6px; color: inherit; background: white; font: inherit; resize: vertical; width: 100%; }
-.access-editor p { color: #4c6079; font-size: .95rem; line-height: 1.5; }
-@media (max-width: 560px) { .access-fields { grid-template-columns: 1fr; } }

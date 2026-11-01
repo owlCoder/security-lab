@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="Platform.Api/Platform.Api.csproj" />
-  <Project Path="Platform.Access.Tests/Platform.Access.Tests.csproj" />
-</Solution>
