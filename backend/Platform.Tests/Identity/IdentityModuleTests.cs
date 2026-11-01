@@ -68,6 +68,15 @@ public class IdentityModuleTests
     }
 
     [Test]
+    public void PasswordHash_IsOptionalColumn()
+    {
+        var hash = AccountEntity().FindProperty(nameof(UserAccount.PasswordHash))!;
+
+        Assert.That(hash.GetColumnName(), Is.EqualTo("password_hash"));
+        Assert.That(hash.IsNullable, Is.True);
+    }
+
+    [Test]
     public void Migrations_MatchTheModel()
     {
         Assert.That(_context.Database.HasPendingModelChanges(), Is.False);

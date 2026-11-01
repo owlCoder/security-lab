@@ -26,6 +26,10 @@ internal sealed class UserAccountConfiguration : IEntityTypeConfiguration<UserAc
             .HasMaxLength(20)
             .IsRequired();
 
+        builder.Property(account => account.PasswordHash)
+            .HasColumnName("password_hash")
+            .HasMaxLength(100);
+
         builder.HasIndex(account => account.Email)
             .IsUnique()
             .HasDatabaseName("ux_accounts_email");
