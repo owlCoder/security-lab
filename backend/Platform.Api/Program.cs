@@ -1,5 +1,6 @@
 using Platform.Api.Domain.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Api.Middlewares;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +39,8 @@ app.MapGet("/api/health", () => Results.Ok(new
     service = "security-lab-api",
     note = "Initial scaffold; not a production-ready laboratory platform"
 }));
+
+app.UseMiddleware<SessionValidationMiddleware>();
 
 app.MapControllers();
 
