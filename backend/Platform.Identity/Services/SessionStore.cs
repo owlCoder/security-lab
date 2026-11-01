@@ -36,4 +36,25 @@ internal sealed class SessionStore(PlatformIdentityDbContext db, TimeProvider ti
         return await db.Sessions.FirstOrDefaultAsync(s => s.TokenHash == hash, ct);
     }
 
+    public async Task<Session?> RevokeByTokenAsync(string rawToken, CancellationToken ct)
+    {
+        var session = await FindByTokenAsync(rawToken, ct);
+        var now = time.GetUtcNow();
+        if (session is null || session.RevokedAt is not null || session.ExpiresAt <= now)
+            return null;
+
+        session.Revoke(now);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // RevokedAt is a concurrency token: another request revoked this session first.
+            db.Entry(session).State = EntityState.Detached;
+            return null;
+        }
+
+        return session;
+    }
 }

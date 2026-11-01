@@ -47,7 +47,8 @@ public sealed class SessionConfiguration : IEntityTypeConfiguration<Session>
             .IsRequired();
 
         builder.Property(session => session.RevokedAt)
-            .HasColumnName("revoked_at");
+            .HasColumnName("revoked_at")
+            .IsConcurrencyToken();     // samo jedan zahtev moze da opozove sesiju
 
         builder.HasIndex(session => session.TokenHash)
             .IsUnique()

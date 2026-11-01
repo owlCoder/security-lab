@@ -16,13 +16,6 @@ public interface ISessionCreator
     Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default);
 }
 
-/// <summary>Default until US-03 registers the real store. Fails closed: nobody can log in without sessions.</summary>
-public sealed class UnavailableSessionCreator : ISessionCreator
-{
-    public Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default) =>
-        Task.FromResult<IssuedSession?>(null);
-}
-
 /// <summary>Session cookie settings, shared by login (sets it), logout (US-05) and session check (US-06).</summary>
 public static class SessionCookie
 {

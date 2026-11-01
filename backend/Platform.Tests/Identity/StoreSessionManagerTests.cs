@@ -1,4 +1,5 @@
 ﻿using Platform.Api.Domain.Authentication;
+using Platform.Identity.Services;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Domain;
 
@@ -81,6 +82,9 @@ public class StoreSessionManagerTests
 
         public Task<(string RawToken, Session Session)> CreateAsync(
             Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<Session?> RevokeByTokenAsync(string rawToken, CancellationToken ct) =>
             throw new NotSupportedException();
     }
 }
