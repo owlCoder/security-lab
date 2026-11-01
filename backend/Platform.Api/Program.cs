@@ -11,7 +11,10 @@ if (accessDemoEnabled) builder.Services.AddAccessKt1Demo();
 
 
 if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddLocalEnvFile();
     builder.Configuration.AddUserSecrets<PlatformIdentityDbContext>(optional: true);
+}
 
 builder.Services.AddIdentityModule(builder.Configuration);
 

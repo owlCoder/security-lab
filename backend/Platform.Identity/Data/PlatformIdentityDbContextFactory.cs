@@ -9,6 +9,7 @@ public sealed class PlatformIdentityDbContextFactory : IDesignTimeDbContextFacto
     public PlatformIdentityDbContext CreateDbContext(string[] args)
     {
         var configuration = new ConfigurationBuilder()
+            .AddLocalEnvFile()
             .AddUserSecrets<PlatformIdentityDbContextFactory>(optional: true)
             .AddEnvironmentVariables()
             .Build();
@@ -16,7 +17,7 @@ public sealed class PlatformIdentityDbContextFactory : IDesignTimeDbContextFacto
         var connectionString = configuration.GetConnectionString(IdentityModule.ConnectionStringName)
             ?? throw new InvalidOperationException(
                 $"Connection string '{IdentityModule.ConnectionStringName}' not found. " +
-                "Set it with dotnet user-secrets, see docs/DEVELOPMENT.md.");
+                "Copy .env.example to .env, see docs/DEVELOPMENT.md.");
 
         var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>();
         options.UseIdentityNpgsql(connectionString);

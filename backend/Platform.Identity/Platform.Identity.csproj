@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Connection string is in user secrets of this project -->
+    <!-- Optional local override; the connection string normally comes from .env -->
     <UserSecretsId>platform-identity-security-lab</UserSecretsId>
   </PropertyGroup>
 

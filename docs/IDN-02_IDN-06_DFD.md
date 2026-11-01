@@ -131,7 +131,7 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 | ID | Boundary | Crossed by | Rule |
 |-|-|-|-|
 | TB1 | Internet / browser and server | F1 to F5 | Everything from E1 is untrusted and validated on the server. The cookie carries only an opaque random token. Hiding screens in the UI is not a control. |
-| TB2 | Server and database / log | F6 to F13 | Only the Identity module touches its own tables. Other modules go through contracts (F15, F16). Secrets come from user-secrets or environment, never from code. |
+| TB2 | Server and database / log | F6 to F13 | Only the Identity module touches its own tables. Other modules go through contracts (F15, F16). Secrets come from the local `.env`, user-secrets or environment, never from code. |
 | TB3 | Identity module and other modules (logical, in-process) | F15, F16 | Contracts only. `IIdentityContext` never exposes passwords, tokens or session identifiers. `ISessionManagement` does not decide who may call it, the caller checks permission first. |
 
 The phone (E2) is outside all boundaries. The TOTP secret leaves the server once, in F3, over HTTPS, and the QR code is drawn locally in the browser (no third-party service).

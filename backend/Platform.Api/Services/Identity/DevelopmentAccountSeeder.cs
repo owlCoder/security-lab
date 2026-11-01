@@ -19,7 +19,7 @@ public sealed record SeedResult(int Added, int PasswordsSet);
 
 public static class DevelopmentAccountSeeder
 {
-    // Set with: dotnet user-secrets set "Seed:DevelopmentPassword" "..." --project backend/Platform.Identity.
+    // Set as Seed__DevelopmentPassword in the local .env, see docs/DEVELOPMENT.md.
     public const string PasswordConfigKey = "Seed:DevelopmentPassword";
 
     // Must match Stub:AdminIds in appsettings.Development.json.
