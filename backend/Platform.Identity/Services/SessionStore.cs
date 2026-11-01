@@ -36,4 +36,15 @@ internal sealed class SessionStore(PlatformIdentityDbContext db, TimeProvider ti
         return await db.Sessions.FirstOrDefaultAsync(s => s.TokenHash == hash, ct);
     }
 
+    public async Task<Session?> RevokeByTokenAsync(string rawToken, CancellationToken ct)
+    {
+        var session = await FindByTokenAsync(rawToken, ct);
+        if (session is null || session.RevokedAt is not null)
+            return null;
+
+        session.Revoke(time.GetUtcNow());
+        await db.SaveChangesAsync(ct);
+
+        return session;
+    }
 }

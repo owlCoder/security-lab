@@ -68,8 +68,8 @@ flowchart LR
   classDef planned stroke-dasharray: 5 3,fill:#f5f5f5,color:#000;
   classDef stub fill:#fff3cd,color:#000;
   classDef implemented fill:#d4edda,color:#000;
-  class P2,P3,P4,P5,D1,D2 planned;
-  class P1 implemented;
+  class P2,P3,P5,D1 planned;
+  class P1,P4,D2 implemented;
   class D3,OM stub;
 ```
 
@@ -89,11 +89,11 @@ Legend: circle = process, rectangle = external actor or module, cylinder = data 
 
 | ID | Process | Entry point | Status |
 |-|-|-|-|
-| P1 | Login | `POST /api/auth/login` (US-04) | implemented, see `docs/IDN-02_LOGIN.md`. Until the session store (US-03) exists it answers `503` |
+| P1 | Login | `POST /api/auth/login` (US-04) | implemented, see `docs/IDN-02_LOGIN.md` |
 | P2 | MFA verify | `POST /api/auth/mfa/verify` (proposed name, US-18) | planned |
 | P5 | MFA enroll | `POST /api/auth/mfa/enroll` and `POST /api/auth/mfa/enroll/confirm` (proposed names, US-17) | planned |
 | P3 | Session check | middleware on every protected request, `GET /api/auth/me` (US-06) | planned |
-| P4 | Logout and revoke | `POST /api/auth/logout` (US-05), `ISessionManagement` (US-16) | planned |
+| P4 | Logout and revoke | `POST /api/auth/logout` (US-05), `ISessionManagement` (US-16) | logout implemented, see `docs/IDN-02_LOGOUT.md`. `ISessionManagement` planned |
 
 Process numbers follow the team work plan (P5 is listed after P2 only for layout).
 
@@ -102,7 +102,7 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 | ID | Store | Content | Status |
 |-|-|-|-|
 | D1 | Accounts | Password hash (ASP.NET Core Identity), account status, MFA enabled flag, TOTP secret, failed-attempt counter, last used TOTP step | Table `identity.accounts` exists (US-02) with `id`, `email`, `status`. The API still uses `UserAccount` in memory (`IAccountRepository`, owned by IDN-03). Column `password_hash` (BCrypt) exists since US-04 and login reads it straight from `identity.accounts`; the IDN-03 in-memory repository does not use it yet. MFA columns are planned, physical names pending US-12 |
-| D2 | Sessions | Hash of the token (never the token), `UserId`, created, expiry, last activity, revoked time, authentication level (`MfaPending` or `Active`), public `SessionHandle` | planned (US-03). `InMemorySessionManagement` fake exists in tests |
+| D2 | Sessions | Hash of the token (never the token), `UserId`, created, expiry, last activity, revoked time, authentication level (`MfaPending` or `Active`), public `SessionHandle` | Table `identity.sessions` exists (US-03), used through `ISessionStore` |
 | D3 | Audit log | Actor, action, target, time, outcome, correlation ID | `LoggerAuditWriter` writes to the application log. A real store is owned by the AUD team |
 
 ## Data flows
@@ -113,15 +113,15 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 | F2 | E1 <-> P2 | 6-digit TOTP code in, requires a `MfaPending` cookie. Promotion or generic error out | `POST /api/auth/mfa/verify` (proposed) | none | planned |
 | F3 | E1 <-> P5 | Enroll request. `otpauth://` URI shown once. Confirmation code | `POST /api/auth/mfa/enroll`, `.../enroll/confirm` (proposed) | none | planned |
 | F4 | E1 <-> P3 | Cookie on every protected request, CSRF token on state-changing requests (US-15). `401` without reason or the normal response | any protected endpoint, e.g. `GET /api/auth/me` and the existing `PUT /api/admin/accounts/{id}/status` (IDN-03) | none | consumer exists with stub, real check planned |
-| F5 | E1 <-> P4 | Logout request. Confirmation and cleared cookie. Idempotent | `POST /api/auth/logout` | none | planned |
+| F5 | E1 <-> P4 | Logout request. Confirmation and cleared cookie. Idempotent | `POST /api/auth/logout` | none | implemented |
 | F6 | P1 <-> D1 | Password hash check, account status (blocked and archived are refused), MFA state | BCrypt via `IPasswordHasher`, `ICredentialVerifier` | D1 Accounts | implemented for password and status, MFA state planned |
 | F7 | P2 <-> D1 | TOTP secret read, attempt counter and last used step read and updated | MFA service | D1 Accounts | planned |
 | F8 | P5 <-> D1 | MFA state read, TOTP secret written after confirmation. Existing secret is never overwritten | MFA service | D1 Accounts | planned |
-| F9 | P1 -> D2 | New session with a fresh identifier (session fixation protection), level `MfaPending` or `Active` | `ISessionCreator` (proposed, US-03 provides it) | D2 Sessions | login side done, fail-closed default until US-03. Level is always `Active` until MFA exists |
+| F9 | P1 -> D2 | New session with a fresh identifier (session fixation protection), level `MfaPending` or `Active` | `ISessionCreator` (proposed), `StoreSessionCreator`, `ISessionStore` | D2 Sessions | implemented. Level is always `Active` until MFA exists |
 | F10 | P2 -> D2 | `MfaPending` to `Active`, or revoke after too many wrong codes | session service | D2 Sessions | planned |
 | F11 | P3 <-> D2 | Lookup by token hash on every request, last activity updated, expired or revoked means `401` | session service | D2 Sessions | planned |
-| F12 | P4 <-> D2 | Revoke one or all sessions, list active sessions (public handle only) | `ISessionManagement` | D2 Sessions | planned |
-| F13 | P1, P2, P4, P5 -> D3 | Login, logout, MFA success and failure, enrollment, revocation. Never passwords, tokens, TOTP secrets or codes. Correlation ID from `HttpContext.TraceIdentifier` | `IAuditWriter.Write(AuditEvent)` | D3 Audit log | writer implemented (application log), login writes `auth.login` events |
+| F12 | P4 <-> D2 | Revoke one or all sessions, list active sessions (public handle only) | `ISessionStore.RevokeByTokenAsync` (logout), `ISessionManagement` | D2 Sessions | logout implemented, `ISessionManagement` planned |
+| F13 | P1, P2, P4, P5 -> D3 | Login, logout, MFA success and failure, enrollment, revocation. Never passwords, tokens, TOTP secrets or codes. Correlation ID from `HttpContext.TraceIdentifier` | `IAuditWriter.Write(AuditEvent)` | D3 Audit log | writer implemented (application log), login writes `auth.login` and logout writes `auth.logout` events |
 | F14 | E1 - E2 | QR code scanned with the phone, 6-digit code typed back. Outside the server | none | none | not a server flow |
 | F15 | P3 -> E3 | `CallerIdentity`: `IsAuthenticated`, `UserId`, `Level`, `CurrentSessionHandle`. Never token, hash or cookie | `IIdentityContext.Current` | none | contract implemented, stub in Development |
 | F16 | E3 -> P4 | Revoke all sessions of a user (IDN-03 block or archive), revoke one by handle and list (IDN-07) | `ISessionManager` (`ISessionManagement` contract) | D2 Sessions | interface implemented, `NoOpSessionRevoker` registered |

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Platform.Identity;
 using Platform.Identity.Data;
 using Platform.Identity.Domain;
+using Platform.Identity.Services;
 
 namespace Platform.Tests.Identity;
 
@@ -39,6 +40,12 @@ public class IdentityModuleTests
         using var scope = provider.CreateScope();
 
         Assert.That(scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>(), Is.Not.Null);
+    }
+
+    [Test]
+    public void Module_ResolvesSessionStore()
+    {
+        Assert.That(_scope.ServiceProvider.GetRequiredService<ISessionStore>(), Is.Not.Null);
     }
 
     [Test]
