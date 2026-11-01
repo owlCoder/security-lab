@@ -149,18 +149,18 @@ Bitne odluke na granicama poverenja:
 | Email ili lozinka u logovima (AUD-03) | Log sadrži samo politiku, IP i correlation ID | `RejectionIsLoggedWithCorrelationIdButWithoutCredentials` | Prošao, 1. 11. 2026 |
 | Limiter ne radi na MVC kontroleru (login) | Atribut `[EnableRateLimiting]` | `ControllerActionWithAttributeIsLimited` | Prošao, 1. 11. 2026 |
 
-Verzija koda za kolonu "Dokaz": commit _[dopisati posle push-a]_. Rezultat: 24/24 testa prolazi
+Verzija koda za kolonu "Dokaz": commit `ef107a5` ([PR #28](https://github.com/owlCoder/security-lab/pull/28)). Rezultat: 24/24 testa prolazi
 (`dotnet test backend/Platform.Identity.Tests` i Visual Studio Test Explorer).
 
 ### Test scenariji (struktura iz poglavlja 8.1)
 
 | Requirement ID | Preduslov | Akcija | Očekivano | Dokaz |
 | --- | --- | --- | --- | --- |
-| IDN-05 | Limit prijave 2 zahteva / 60 s; klijent `203.0.113.10`. | Klijent šalje 3 zahteva za prijavu zaredom. | Prva dva prolaze. Treći dobija `429` sa `Retry-After` između 1 i 60 s, `Cache-Control: no-store`, `X-Correlation-ID` i telom `rate_limited`. | `RequestsAboveLimitGet429WithRetryAfter`, 1. 11. 2026, commit _[posle push-a]_, prošao |
-| IDN-05 | Nijedan proxy nije podešen; limit 2. | Napadač šalje 3 zahteva, svaki sa drugom lažnom adresom u `X-Forwarded-For`. | Header se ignoriše, svi zahtevi se broje na stvarnu adresu; treći dobija `429`. | `SpoofedForwardedForFromUntrustedSourceIsIgnored`, 1. 11. 2026, commit _[posle push-a]_, prošao |
-| IDN-05 | Limit 1; klijent je već potrošio limit. | Dva nova zahteva za prijavu sa iste adrese. | Oba dobijaju `429` sa identičnim telom, bez podataka o nalogu (ne otkriva se postojanje naloga). | `RejectionBodyIsGenericAndStable`, 1. 11. 2026, commit _[posle push-a]_, prošao |
-| IDN-05 | Limit 1; login je MVC kontroler sa `[EnableRateLimiting]`; zahtev nosi email i lozinku u telu. | Dve prijave sa iste adrese. | Druga dobija `429`; odbijanje je u logu sa istim correlation ID-jem kao u odgovoru; ni email ni lozinka se ne pojavljuju ni u jednoj log poruci. | `RejectionIsLoggedWithCorrelationIdButWithoutCredentials`, 1. 11. 2026, commit _[posle push-a]_, prošao |
-| IDN-05 | Konfiguracija `RateLimiting:Login:PermitLimit = 0`. | Pokretanje aplikacije. | Aplikacija se ne pokreće (`OptionsValidationException`); limiter nikad ne radi sa neispravnim pragom. | `ApiRefusesToStartWithInvalidLimit`, `InvalidConfigurationStopsStartup`, 1. 11. 2026, commit _[posle push-a]_, prošao |
+| IDN-05 | Limit prijave 2 zahteva / 60 s; klijent `203.0.113.10`. | Klijent šalje 3 zahteva za prijavu zaredom. | Prva dva prolaze. Treći dobija `429` sa `Retry-After` između 1 i 60 s, `Cache-Control: no-store` i `X-Correlation-ID`. | `RequestsAboveLimitGet429WithRetryAfter`, 1. 11. 2026, commit `ef107a5`, prošao |
+| IDN-05 | Nijedan proxy nije podešen; limit 2. | Napadač šalje 3 zahteva, svaki sa drugom lažnom adresom u `X-Forwarded-For`. | Header se ignoriše, svi zahtevi se broje na stvarnu adresu; treći dobija `429`. | `SpoofedForwardedForFromUntrustedSourceIsIgnored`, 1. 11. 2026, commit `ef107a5`, prošao |
+| IDN-05 | Limit 1; klijent je već potrošio limit. | Dva nova zahteva za prijavu sa iste adrese. | Oba odgovora imaju identično telo sa kodom `rate_limited`, bez podataka o nalogu (ne otkriva se postojanje naloga). | `RejectionBodyIsGenericAndStable`, 1. 11. 2026, commit `ef107a5`, prošao |
+| IDN-05 | Limit 1; login je MVC kontroler sa `[EnableRateLimiting]`; zahtev nosi email i lozinku u telu. | Dve prijave sa iste adrese. | Druga dobija `429`; odbijanje je u logu sa istim correlation ID-jem kao u odgovoru; ni email ni lozinka se ne pojavljuju ni u jednoj log poruci. | `RejectionIsLoggedWithCorrelationIdButWithoutCredentials`, 1. 11. 2026, commit `ef107a5`, prošao |
+| IDN-05 | Konfiguracija `RateLimiting:Login:PermitLimit = 0`. | Pokretanje aplikacije. | Aplikacija se ne pokreće (`OptionsValidationException`); limiter nikad ne radi sa neispravnim pragom. | `ApiRefusesToStartWithInvalidLimit`, `InvalidConfigurationStopsStartup`, 1. 11. 2026, commit `ef107a5`, prošao |
 
 **Poznata ograničenja:**
 
@@ -177,7 +177,7 @@ Verzija koda za kolonu "Dokaz": commit _[dopisati posle push-a]_. Rezultat: 24/2
   - Novi fajlovi: `backend/Platform.Api/Modules/Identity/RateLimiting/*` (3 `.cs` + `README.md`),
     `backend/Platform.Identity.Tests/*`, `docs/components/identity/IDN-05.md`
   - Izmenjeni fajlovi: `backend/Platform.Api/Program.cs` (3 linije)
-  - Commit / PR: _[dopisati posle push-a]_
+  - Commit / PR: `ef107a5`, [PR #28](https://github.com/owlCoder/security-lab/pull/28)
 - **Run instructions:**
 
   ```powershell
@@ -198,7 +198,7 @@ Verzija koda za kolonu "Dokaz": commit _[dopisati posle push-a]_. Rezultat: 24/2
   - `Platform.Identity.Tests`: 24 testa (22 nad izolovanim hostom sa istim podešavanjem kao
     `Program.cs`, uključujući probni MVC kontroler, i 2 nad celim `Program.cs` preko `WebApplicationFactory`).
   - Lokalno, Visual Studio Test Explorer i `dotnet test`, 1. 11. 2026: 24/24 testova prolazi.
-    CI rezultat: _[dopisati posle push-a; trenutni CI samo builduje API i ne pokreće testove]_
+    CI: trenutni CI samo builduje API i ne pokreće testove; rezultat builda je vidljiv u PR #28.
   - Prvo pokretanje je otkrilo propust (prazna lista proxy-ja u ASP.NET-u znači "veruj svima").
     Ispravljeno je isključivanjem obrade headera kada proxy nije podešen.
 - **Next steps:**
