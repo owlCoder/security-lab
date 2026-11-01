@@ -20,6 +20,7 @@ public static class IdentityModule
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
         services.AddScoped<ICredentialStore, EfCredentialStore>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
+        services.AddScoped<ISessionStore, SessionStore>();
 
         return services;
     }
