@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using Platform.Api.Modules.Access;
 using Platform.Api.Modules.Access.Demo;
@@ -18,6 +19,7 @@ public sealed class AccessFactory(string environment = "Development", bool enabl
     {
         builder.UseEnvironment(environment);
         builder.UseSetting("AccessDemo:Enabled", enabled.ToString());
+        builder.ConfigureLogging(logging => logging.ClearProviders());
         if (configure is not null) builder.ConfigureServices(configure);
     }
 }

@@ -1,71 +1,80 @@
-# Repeatable KT1 demonstration
+# Repeatable KT1 demonstration: Read and UpdateDraftAnswer
 
-Run from the `security-lab` repository. Requires .NET SDK 10 and the Node version documented in the root README. No database or Docker is required for these synthetic fixtures.
+Requires .NET SDK 10 and the Node version from the root README. The synthetic demo does not require Docker or a database. Use an extracted complete project or apply the accompanying incremental patch to the existing feature branch; do not apply the old initial patch again.
 
-## Automated tests
+## Automated tests and frontend build
+
+From the repository root:
 
 ```powershell
 dotnet test .\backend\SecurityLab.slnx --configuration Release --logger "trx;LogFileName=access-kt1.trx" --results-directory .\TestResults
 ```
 
-## API (PowerShell window 1)
+In `frontend`, stop a running Vite process with Ctrl+C before reinstalling dependencies:
 
 ```powershell
-cd "$env:USERPROFILE\Desktop\security-lab"
+npm.cmd ci
+npm.cmd run build
+```
+
+## API, PowerShell window 1
+
+```powershell
 dotnet run --project .\backend\Platform.Api --launch-profile AccessKt1
 ```
 
-Keep this process running. `AccessKt1` is an explicit Development profile with AccessDemo enabled. The normal profile leaves the routes disabled; Production/Staging always leave them disabled.
+Keep the process running on http://localhost:5080. The normal API profile leaves the demonstration disabled. Production/Staging do not expose any demo route even if the flag is set.
 
-## Frontend (PowerShell window 2)
+## Frontend, PowerShell window 2
 
 ```powershell
-cd "$env:USERPROFILE\Desktop\security-lab\frontend"
-npm.cmd ci
+cd .\frontend
 npm.cmd run dev
 ```
 
-Open http://localhost:5173. In the Access panel:
+Open http://localhost:5173:
 
-1. Set test identity `ana`, select Ana's submitted attempt and check access: HTTP 200 with synthetic answer.
-2. Set `marko`, request the same attempt: HTTP 404 with no answer.
-3. Request the missing test ID: same public 404 body.
-4. Set `ana`, select the attempt with expired context: HTTP 404 despite ownership.
-5. Set `teacher`: submitted attempt in own course is readable. `foreign-teacher`, `assistant` without delegation and `admin` without membership are denied.
+1. Choose `ana`, click **Postavi testni identitet**, choose her submitted attempt and **Proveri pristup**: HTTP 200.
+2. Set `marko`, read the same ID: safe 404 with no answer. The missing ID gives the same public body.
+3. Set `ana`, choose **Anin nepredati pokusaj**, read it, edit **Sadrzaj nacrta** and **Sacuvaj nacrt**: HTTP 200 and an increased version. Read it again to show storage.
+4. A teacher can review a submitted attempt in the matching course but cannot change a student's draft.
+5. Ana's draft with expired context is denied even though she owns it. Submitted/Completed answers cannot be overwritten.
 
-The test persona selector exists only to make the current initial flow demonstrable. It is not a login feature and cannot be enabled in production.
+The interface also uses Serbian diacritics in the actual labels. It only displays the server verdict; direct HTTP negative tests prove the guard does not depend on hiding buttons.
 
-## Direct API demonstration (PowerShell window 3)
-
-```powershell
-cd "$env:USERPROFILE\Desktop\security-lab"
-.\scripts\access-demo.ps1
-```
-
-If the local policy blocks running the repository script, invoke this one trusted script in a child process:
+## Direct HTTP demonstration, PowerShell window 3
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\access-demo.ps1
 ```
 
-The script expects 12 scenarios, asserts status and synthetic answer, compares foreign/missing public bodies and writes `TestResults/access-http-demo.json`. It exits on failure. It does not change your system execution policy or install dependencies.
+Expected: **DEMO PASS: 25/25**. Evidence: `TestResults/access-http-demo.json`.
 
-## Two-minute explanation
+The demo reads the current draft version before updating, so it can run again against the same process. A fresh server/adapter restores all original synthetic records. It never overwrites submitted/completed answers. A single child-process ExecutionPolicy switch does not change system policy.
 
-- Show the two component documents and their separate architecture/DFD diagrams.
-- Trace one request from client to opaque cookie identity, fresh account/membership/attempt snapshots, base checks and context checks.
-- Show the allow, foreign-resource deny and expired-context deny.
-- Show the automated negative test and actual result.
-- Explain remaining production authentication, persistence, contract integration and broader contextual policy work for KT2.
+## Public development endpoints
 
-## Current public API
+| Method/path | Purpose / checks |
+| --- | --- |
+| GET /api/health | Existing starter health |
+| GET /api/access-demo/info | Fixed synthetic persona/resource labels |
+| POST /api/access-demo/session/{persona} | Select a known test identity; X-Access-Demo: 1 required |
+| POST /api/access-demo/logout | Clear current demo cookie; custom header required |
+| GET /api/access-demo/attempts/{guid} | Protected ReadAttempt; safe generic denial |
+| PUT /api/access-demo/attempts/{guid}/answer | Protected UpdateDraftAnswer; header, nonblank answer <=4000 chars and expectedVersion >=1 required |
 
-| Route | Method | Purpose |
-| --- | --- | --- |
-| /api/health | GET | Existing scaffold health (preserved) |
-| /api/access-demo/info | GET | Explicit demo's synthetic persona and resource labels |
-| /api/access-demo/session/{persona} | POST | Select a fixed synthetic identity; X-Access-Demo: 1 required |
-| /api/access-demo/logout | POST | Clear current demo cookie; custom header required |
-| /api/access-demo/attempts/{guid} | GET | Protected server read with generic public denial |
+Example update JSON:
 
-The public read never returns internal reason codes. Those are in the internal audit writer, with no audit API exposed. Clearing the demo cookie is not a claim of server-side revocation for copied cookies; real authentication/session lifecycle belongs to integration work.
+```json
+{"answer":"Sinteticki izmenjen odgovor.","expectedVersion":1}
+```
+
+HTTP 200 returns the authorized answer/version. Invalid input is 400; anonymous is 401; missing/foreign/unavailable is the same safe 404. A stale version from an otherwise authorized owner is 409 `RESOURCE_CHANGED` and requires reloading and a fresh authorization decision.
+
+## Change audit demonstration
+
+NUnit `UpdateAuditContainsMetadataWithoutAnswerOrSessionSecret` prints a real `KT1_AUDIT_JSON` entry to the TRX output. The delivery includes the extracted metadata sample. Show actor, action, target, UTC, correlation, outcome, policy version and before/after resource versions. There is no public audit endpoint and no answer/cookie/token in this event.
+
+## External KT1 evidence
+
+Use [BACKLOG.md](BACKLOG.md) to create real Tapiz tasks, and [CONTRACTS.md](CONTRACTS.md) to request the real neighboring-team review. Those external activities are not performed by the local demonstration.

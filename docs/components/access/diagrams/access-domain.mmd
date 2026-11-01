@@ -1,0 +1,49 @@
+erDiagram
+  direction TB
+  ACCOUNT ||--o{ MEMBERSHIP : has
+  COURSE ||--o{ MEMBERSHIP : contains
+  ACCOUNT ||--o{ ATTEMPT : owns
+  COURSE ||--o{ ATTEMPT : scopes
+  CONTEXT_POLICY ||--o{ ATTEMPT : restricts
+  ATTEMPT ||--o{ AUDIT_EVENT : targets
+  ACCOUNT {
+    guid Id
+    bool IsActive
+  }
+  MEMBERSHIP {
+    guid AccountId
+    guid CourseId
+    enum Role
+    bool IsActive
+    bool CanReview
+  }
+  COURSE {
+    guid Id
+  }
+  ATTEMPT {
+    guid Id
+    guid OwnerId
+    guid CourseId
+    enum State
+    int Version
+    string ContextPolicyId
+  }
+  CONTEXT_POLICY {
+    string Id
+    string Version
+    datetime NotBefore
+    datetime NotAfter
+  }
+  AUDIT_EVENT {
+    datetime Timestamp
+    guid CorrelationId
+    guid ActorId
+    guid TargetId
+    guid CourseId
+    string Action
+    string Outcome
+    string ReasonCode
+    string PolicyVersion
+    int ResourceVersionBefore
+    int ResourceVersionAfter
+  }

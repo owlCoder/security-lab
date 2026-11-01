@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "requirements": [
+    "ACC-04",
+    "ACC-08"
+  ],
+  "baseline": {
+    "commit": "f3d9d1ccb9b679c47bdfe98eb812362f0f33edb6",
+    "pullRequestUrl": "https://github.com/owlCoder/security-lab/pull/18",
+    "ciRunUrl": "https://github.com/owlCoder/security-lab/actions/runs/41132593252",
+    "ciStatus": "SUCCESS",
+    "ciJobs": {
+      "backend": "SUCCESS",
+      "frontend": "SUCCESS"
+    },
+    "artifact": "access-kt1-test-results",
+    "localNUnitPassed": 43,
+    "localDemoPassed": 12,
+    "verifiedOn": "2026-10-31"
+  },
+  "preparedUpdate": {
+    "status": "VERIFIED_LOCAL",
+    "nunitTotal": 91,
+    "demoTotal": 25,
+    "ciRunUrl": null,
+    "ciCommit": null,
+    "ciStatus": "NOT_RUN_FOR_THIS_UPDATE"
+  },
+  "tapiz": {
+    "projectUrl": null,
+    "taskUrls": {
+      "ACC04-01": null,
+      "ACC04-02": null,
+      "ACC08-01": null,
+      "ACC04-03": null,
+      "ACC04-04": null,
+      "ACC04-05": null,
+      "ACC08-02": null,
+      "KT1-01": null,
+      "KT1-02": null,
+      "KT1-03": null,
+      "KT1-04": null,
+      "KT1-05": null,
+      "ACC04-06": null,
+      "ACC08-03": null
+    }
+  },
+  "contractReview": {
+    "contractVersion": "access-attempt-v1",
+    "status": "PENDING_EXTERNAL_REVIEW",
+    "reviewer": null,
+    "reviewUrl": null
+  },
+  "notice": "Prepared cards and a proposed contract do not prove real Tapiz entry or neighboring-team acceptance. Recording references does not certify course approval."
+}

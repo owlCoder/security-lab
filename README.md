@@ -31,10 +31,15 @@ See the course specification for the full requirements. Use short-lived branches
 
 ## ACC-04 / ACC-08 initial implementation
 
-The opt-in development demonstration includes server-side access checks against synthetic
-attempts and an initial context policy. Start it with
+The opt-in development demonstration includes protected attempt reads and own-draft
+updates with atomic version checks, synthetic data and an initial context policy. Start it with
 `dotnet run --project backend/Platform.Api --launch-profile AccessKt1`, then start the
 frontend as above. The normal API profile leaves this demonstration disabled.
 
 Component scope, architecture, DFDs, test commands, and remaining work are documented in
 [the access KT1 checklist](docs/components/access/KT1.md).
+
+The checklist covers all eight KT1 obligations, including the prepared Tapiz backlog,
+shared domain/security model, threat-to-test traceability and proposed provider contract.
+Real Tapiz entries and a neighboring team's contract acceptance must be recorded as actual
+external evidence. They are not created by the demo or claimed by the ZIP.
