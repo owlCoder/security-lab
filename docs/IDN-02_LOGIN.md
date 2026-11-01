@@ -40,7 +40,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 | US-03 session store | Implement `ISessionCreator` (`Platform.Api/Services/Identity/ISessionCreator.cs`) and replace the `UnavailableSessionCreator` registration in `Program.cs`. It must return a new random token every call (at least 128 bits) and keep only its hash. Return `null` when it cannot create a session. |
 | US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes. |
 | US-07, US-08 frontend | Send the request with credentials included. Read only the status code and `code`; show one generic message for `401`. |
-| US-09 seed users | Hash with `IPasswordHasher` and store lower-case e-mails in `identity.accounts`. Seeding into the in-memory `IAccountRepository` does not make login work. |
+| US-09 seed users | Done. `DevelopmentAccountSeeder` seeds four accounts into `identity.accounts` with a BCrypt hash and lower-case e-mails (see docs/DEVELOPMENT.md). Seeding into the in-memory `IAccountRepository` does not make login work. |
 | IDN-03 | Login reads the status from `identity.accounts`, while `PUT /api/admin/accounts/{id}/status` still changes the in-memory account. Until `IAccountRepository` is backed by the database, an account blocked through the endpoint can still log in. |
 | US-13 tests | Use `ISessionCreator` fake as in `Platform.Tests/Identity/LoginTests.cs`. |
 

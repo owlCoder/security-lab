@@ -64,3 +64,32 @@ Keep the following in mind:
 - The schema is dropped in the `db` service, while migrations use your `ConnectionStrings:Identity` secret. Keep the secret pointed at that local database.
 - A red `Failed executing DbCommand` message for `__EFMigrationsHistory` is expected. EF Core checks for that table before recreating it. The reset succeeded if the script ends with `Done. Schema 'identity' was recreated from migrations.`
 - If migrations fail after the drop, the script reports it and the schema is left incomplete. Fix the problem and run the script again.
+
+## Development accounts (US-09)
+
+In the Development environment, the API seeds four accounts (admin, teacher, student, and blocked) when both the identity connection string and the seed password are set. The password is not stored in the repository; set it with:
+
+```powershell
+dotnet user-secrets set "Seed:DevelopmentPassword" "<password, at most 128 characters>" --project backend/Platform.Identity
+```
+
+All four accounts share this password. The seeder is idempotent: it adds missing accounts and sets a password only on accounts that do not already have one. To change the password, delete the accounts or run `scripts/reset-identity-db.ps1`, then restart the API. Roles are not stored yet because the account model has no role.
+
+## Development accounts (US-09)
+
+In the Development environment the API seeds four accounts in `identity.accounts` when both the identity connection string and a seed password are set: `admin@example.com`, `teacher@example.com`, `student@example.com` and `blocked@example.com` (status Blocked). All use the reserved `example.com` domain.
+
+The password is not in the repository. Set it once, in the same user-secrets store as the connection string:
+
+`dotnet user-secrets set "Seed:DevelopmentPassword" "<password, at most 128 characters>" --project backend/Platform.Identity`
+
+Behaviour:
+
+- All four accounts share this password. It is stored only as a BCrypt hash.
+- The seeder is idempotent: it adds missing accounts and sets a password only on accounts that have none. An existing hash is never overwritten.
+- Without the connection string or the password the seed is skipped and the API still starts.
+- It never runs outside the Development environment.
+- To change the password, delete the four accounts or run `scripts/reset-identity-db.ps1`, then start the API again.
+- Roles (admin, teacher, student) are not stored yet because the account model has no role.
+
+For integration tests use `TestUsers.Create(accounts, role, status, password)` (`Platform.Tests/Identity/TestUsers.cs`). Without a password the account has no hash and cannot log in.

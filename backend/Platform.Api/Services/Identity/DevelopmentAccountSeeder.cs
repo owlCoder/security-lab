@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Platform.Identity;
 using Platform.Identity.Data;
@@ -22,6 +21,7 @@ public static class DevelopmentAccountSeeder
 {
     // Set with: dotnet user-secrets set "Seed:DevelopmentPassword" "..." --project backend/Platform.Identity.
     public const string PasswordConfigKey = "Seed:DevelopmentPassword";
+
     // Must match Stub:AdminIds in appsettings.Development.json.
     public static readonly Guid AdminId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
