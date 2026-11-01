@@ -11,7 +11,8 @@ public interface ISessionStore
 
     /// <summary>
     /// Revokes the session with this token. Returns the session only when this call revoked it;
-    /// null when the token is unknown or the session was already revoked.
+    /// null when the token is unknown, the session has expired or it was already revoked,
+    /// also by a concurrent call.
     /// </summary>
     Task<Session?> RevokeByTokenAsync(string rawToken, CancellationToken ct);
 }

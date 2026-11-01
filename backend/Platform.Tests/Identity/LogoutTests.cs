@@ -101,12 +101,27 @@ public class LogoutTests
         var session = _store.Add(Token, Guid.NewGuid());
         var controller = ControllerWithHttpContext(out var http, Token);
 
-        var response = await controller.Logout(CancellationToken.None);
+        var response = await controller.Logout();
 
         Assert.That(response, Is.InstanceOf<NoContentResult>());
         Assert.That(session.RevokedAt, Is.Not.Null);
         Assert.That(http.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
         AssertCookieCleared(http);
+    }
+
+    [Test]
+    public async Task Controller_ClientDisconnect_DoesNotCancelTheRevocation()
+    {
+        var session = _store.Add(Token, Guid.NewGuid());
+        var controller = ControllerWithHttpContext(out var http, Token);
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        http.RequestAborted = aborted.Token;
+
+        await controller.Logout();
+
+        Assert.That(_store.LastToken.CanBeCanceled, Is.False);
+        Assert.That(session.RevokedAt, Is.Not.Null);
     }
 
     [TestCase(null)]
@@ -115,7 +130,7 @@ public class LogoutTests
     {
         var controller = ControllerWithHttpContext(out var http, token);
 
-        var response = await controller.Logout(CancellationToken.None);
+        var response = await controller.Logout();
 
         Assert.That(response, Is.InstanceOf<NoContentResult>());
         AssertCookieCleared(http);
@@ -127,7 +142,7 @@ public class LogoutTests
         _store.Failure = new InvalidOperationException("database is down");
         var controller = ControllerWithHttpContext(out var http, Token);
 
-        Assert.ThrowsAsync<InvalidOperationException>(() => controller.Logout(CancellationToken.None));
+        Assert.ThrowsAsync<InvalidOperationException>(() => controller.Logout());
 
         Assert.That(http.Response.Headers.ContainsKey("Set-Cookie"), Is.False);
     }
@@ -154,6 +169,7 @@ public class LogoutTests
         private readonly Dictionary<string, Session> _sessions = [];
 
         public Exception? Failure { get; set; }
+        public CancellationToken LastToken { get; private set; }
 
         public Session Add(string token, Guid userId, AuthLevel level = AuthLevel.Active)
         {
@@ -167,6 +183,7 @@ public class LogoutTests
         {
             if (Failure is not null) throw Failure;
 
+            LastToken = ct;
             if (!_sessions.TryGetValue(rawToken, out var session) || session.RevokedAt is not null)
                 return Task.FromResult<Session?>(null);
 

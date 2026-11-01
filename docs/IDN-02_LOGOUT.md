@@ -8,7 +8,7 @@
 
 | Result | Status | Body | Cookie |
 |-|-|-|-|
-| Valid session, no cookie, unknown token or session already revoked | `204` | none (identical for all of them) | `SecurityLab.Session` is cleared |
+| Valid session, no cookie, unknown token, expired session or session already revoked | `204` | none (identical for all of them) | `SecurityLab.Session` is cleared |
 | The session could not be revoked (database error) | `500` | none outside Development | kept, so the client can try again |
 
 Responses carry `Cache-Control: no-store`.
@@ -16,9 +16,11 @@ Responses carry `Cache-Control: no-store`.
 ## How it works
 
 1. `LogoutController` passes the cookie value to `LogoutAccount`.
-2. `LogoutAccount` calls `ISessionStore.RevokeByTokenAsync`, which sets `revoked_at` in `identity.sessions`. Only this session is revoked. Other sessions of the same user stay valid.
-3. An audit event `auth.logout` is written when a session was revoked, with the public session handle as the target. It never contains the token or its hash.
+2. `LogoutAccount` calls `ISessionStore.RevokeByTokenAsync`, which sets `revoked_at` in `identity.sessions`. Only this session is revoked. Other sessions of the same user stay valid. An expired session is left unchanged.
+3. An audit event `auth.logout` is written only when this request revoked the session, with the public session handle as the target. `revoked_at` is a concurrency token, so of two logouts at the same time (double click, two tabs) only one succeeds and the first time is kept. The event never contains the token or its hash.
 4. The cookie is cleared with the same attributes it was set with (`SessionCookie.Options`).
+
+The revocation does not use the request cancellation token, so a closed tab or a broken connection cannot leave the session valid.
 
 The endpoint is `[AllowAnonymous]`, so logout without a valid session stays idempotent. It uses the cookie and not `IIdentityContext`, because a session in `MfaPending` must also be able to log out and the session cookie belongs to this module.
 

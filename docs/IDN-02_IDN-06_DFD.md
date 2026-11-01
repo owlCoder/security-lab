@@ -16,7 +16,7 @@
 - Contracts with other modules:
   - Provided: `IIdentityContext`, `ISessionManagement` (code name `ISessionManager`), `IMfaPolicy` (proposed).
   - Used: `IAuditWriter`, account status from IDN-03, attempt limiting from IDN-05.
-- Implementation status: see [Implementation status](#implementation-status). On this branch the contracts, fakes and stubs exist and P1 Login (US-04) is implemented; P2 to P5 are planned.
+- Implementation status: see [Implementation status](#implementation-status). On this branch the contracts, fakes and stubs exist and P1 Login (US-04), P4 Logout (US-05) and D2 Sessions (US-03) are implemented; P2, P3, P5 and the `ISessionManagement` part of P4 are planned.
 
 This file covers only the data flow diagram (US-10). The component architecture diagram is a separate story (US-11).
 
@@ -178,8 +178,10 @@ Present in the repository now:
 - Contract documents: `docs/contracts/IIdentityContext.md`, `docs/contracts/ISessionManagement.md`.
 - Identity module skeleton: `backend/Platform.Identity` with `PlatformIdentityDbContext`, `AddIdentityModule()` and the initial migration for `identity.accounts`.
 - US-04 login: `POST /api/auth/login` (`LoginController`, `LoginAccount`), BCrypt `IPasswordHasher`, `ICredentialVerifier`, column `password_hash` (migration `AddAccountPasswordHash`), session cookie `SecurityLab.Session`. Details in `docs/IDN-02_LOGIN.md`.
+- US-03 session store: table `identity.sessions` (migration `AddSessions`), `ISessionStore`, `SessionStore`, `SessionTokenGenerator`. Login creates sessions through `StoreSessionCreator`.
+- US-05 logout: `POST /api/auth/logout` (`LogoutController`, `LogoutAccount`), `ISessionStore.RevokeByTokenAsync`. Details in `docs/IDN-02_LOGOUT.md`.
 
-Planned (this DFD describes them, but the code does not exist yet): P2 to P5, D2 Sessions table, MFA columns in D1, endpoints under `/api/auth`.
+Planned (this DFD describes them, but the code does not exist yet): P2, P3, P5, the `ISessionManagement` part of P4, MFA columns in D1, the remaining endpoints under `/api/auth`.
 
 Open decisions that can change this diagram (to confirm with the assistant): which groups have mandatory MFA, physical table names and DbContext layout, exact MFA endpoint names, how IDN-05 attempt limiting is shared.
 
