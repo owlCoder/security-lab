@@ -1,0 +1,17 @@
+{
+  "profiles": {
+    "Platform.Api": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
+    },
+    "AccessKt1": {
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:5080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "AccessDemo__Enabled": "true"
+      }
+    }
+  }
+}

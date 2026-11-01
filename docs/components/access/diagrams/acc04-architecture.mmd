@@ -1,0 +1,27 @@
+flowchart TB
+  subgraph Client["Client trust boundary"]
+    UI["React / PowerShell"]
+  end
+  subgraph Server["ASP.NET Core modular monolith"]
+    HTTP["AccessDemoEndpoints"]
+    ID["IIdentityContext / cookie"]
+    APP["AttemptReadService"]
+    POL["IAccessDecision / ACC-04"]
+    CONTEXT["ACC-08 context check"]
+    PROVIDERS["Account / membership / attempt ports"]
+    SEED[("DemoData snapshots")]
+    AUD["IAuditWriter"]
+    STORE[("Internal audit")]
+    HTTP --> ID
+    HTTP --> APP
+    APP --> POL
+    POL --> CONTEXT
+    APP --> PROVIDERS
+    PROVIDERS --> SEED
+    APP --> AUD
+    AUD --> STORE
+  end
+  UI -->|"HTTP request / opaque cookie"| HTTP
+  HTTP -->|"Answer / safe denial"| UI
+  REAL["Planned: real provider adapters"]
+  REAL -.-> PROVIDERS

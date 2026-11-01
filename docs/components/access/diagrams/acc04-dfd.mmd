@@ -1,0 +1,27 @@
+flowchart TB
+  A["E1 Student / reviewer"]
+  subgraph Client["Untrusted client boundary"]
+    P0["P0 React / API caller"]
+  end
+  subgraph Server["Trusted server boundary"]
+    P1["P1 Identity + ID validation"]
+    P2["P2 Load current snapshots"]
+    D1[("D1 Accounts + memberships")]
+    D2[("D2 Attempts + answers")]
+    P3["P3 ACC-04 + ACC-08 decision"]
+    P4["P4 Protected response"]
+    P5["P5 Record decision"]
+    D3[("D3 Internal audit")]
+    P1 -->|"Account ID / attempt ID"| P2
+    D1 -->|"Account + course role"| P2
+    D2 -->|"Owner / course / version"| P2
+    P2 -->|"Trusted snapshots"| P3
+    P3 -->|"Allow / deny"| P4
+    D2 -->|"Answer only after allow"| P4
+    P4 -->|"Decision metadata"| P5
+    P5 --> D3
+  end
+  A -->|"Test persona / attempt ID"| P0
+  P0 -->|"HTTP + cookie + GUID"| P1
+  P4 -->|"200 / 401 / safe 404"| P0
+  P0 -->|"Public response"| A
