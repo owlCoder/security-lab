@@ -1,10 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
-using Newtonsoft.Json.Linq;
 using Platform.Api.Services.Identity;
-using Platform.Identity.Domain;
-using Platform.Identity.Services;
-using static Microsoft.ApplicationInsights.MetricDimensionNames.TelemetryContext;
 
 namespace Platform.Tests.Identity;
 
@@ -19,16 +15,16 @@ public class SessionCheckMiddlewareTests
     [SetUp]
     public void SetUp()
     {
-       _sessionManagement = new InMemorySessionManagement();
-       _nextCalled = false;
+        _sessionManagement = new InMemorySessionManagement();
+        _nextCalled = false;
 
-       RequestDelegate mockNextMiddleware = (Context) =>
-       {
-           _nextCalled = true;
-           return Task.CompletedTask;
-       };
+        RequestDelegate mockNextMiddleware = (Context) =>
+        {
+            _nextCalled = true;
+            return Task.CompletedTask;
+        };
 
-       _middleware = new SessionCheckMiddleware(mockNextMiddleware, _sessionManagement);
+        _middleware = new SessionCheckMiddleware(mockNextMiddleware);
     }
 
     [Test]
@@ -36,33 +32,33 @@ public class SessionCheckMiddlewareTests
     {
         var context = new DefaultHttpContext();
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
-        Assert.That(context.Response.StatusCode,Is.Not.EqualTo(401));
-        Assert.That(_nextCalled,Is.True);
+        Assert.That(context.Response.StatusCode, Is.Not.EqualTo(401));
+        Assert.That(_nextCalled, Is.True);
     }
 
     [Test]
     public async Task PublicEndpoint_NoCookie_CallsNext()
     {
-        var endpoint = new Endpoint(null,new EndpointMetadataCollection(new AllowAnonymousAttribute()),"public");
+        var endpoint = new Endpoint(null, new EndpointMetadataCollection(new AllowAnonymousAttribute()), "public");
         var context = new DefaultHttpContext();
         context.SetEndpoint(endpoint);
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
         Assert.That(_nextCalled, Is.True);
-        Assert.That(context.Response.StatusCode,Is.Not.EqualTo(401));
+        Assert.That(context.Response.StatusCode, Is.Not.EqualTo(401));
     }
 
     [Test]
     public async Task ProtectedEndpoint_NoCookie_Returns401_AndDoesNotCallNext()
     {
-        var endpoint = new Endpoint(null,null, "protected");
+        var endpoint = new Endpoint(null, null, "protected");
         var context = new DefaultHttpContext();
         context.SetEndpoint(endpoint);
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
         Assert.That(_nextCalled, Is.False);
         Assert.That(context.Response.StatusCode, Is.EqualTo(401));
@@ -76,7 +72,7 @@ public class SessionCheckMiddlewareTests
         context.SetEndpoint(endpoint);
         context.Request.Headers.Cookie = $"{SessionCookie.Name}=nepoznat-token";
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
         Assert.That(_nextCalled, Is.False);
         Assert.That(context.Response.StatusCode, Is.EqualTo(401));
@@ -94,7 +90,7 @@ public class SessionCheckMiddlewareTests
         _sessionManagement.Seed(userId, token: token);
         context.Request.Headers.Cookie = $"{SessionCookie.Name}={token}";
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
         Assert.That(_nextCalled, Is.True);
         Assert.That(context.Response.StatusCode, Is.Not.EqualTo(401));
@@ -119,7 +115,7 @@ public class SessionCheckMiddlewareTests
         _sessionManagement.RevokeSession(userId, handle);
         context.Request.Headers.Cookie = $"{SessionCookie.Name}={token}";
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
         Assert.That(_nextCalled, Is.False);
         Assert.That(context.Response.StatusCode, Is.EqualTo(401));
@@ -137,7 +133,7 @@ public class SessionCheckMiddlewareTests
         _sessionManagement.Seed(userId, lifetime: TimeSpan.FromMinutes(-1), token: token);
         context.Request.Headers.Cookie = $"{SessionCookie.Name}={token}";
 
-        await _middleware.Invoke(context);
+        await _middleware.Invoke(context, _sessionManagement);
 
         Assert.That(_nextCalled, Is.False);
         Assert.That(context.Response.StatusCode, Is.EqualTo(401));

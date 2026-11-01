@@ -1,6 +1,6 @@
 ﻿using Platform.Identity.Domain;
 
-internal interface ISessionStore
+public interface ISessionStore
 {
 	Task<(string RawToken, Session Session)> CreateAsync(
         Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct);

@@ -7,15 +7,12 @@ public class SessionCheckMiddleware
     public const string SessionItemKey = "session";
 
     private readonly RequestDelegate _next;
-    private readonly ISessionManager _sessionManager;
-
-    public SessionCheckMiddleware(RequestDelegate next, ISessionManager session)
+    public SessionCheckMiddleware(RequestDelegate next)
     {
         _next = next;
-        _sessionManager = session;
     }
 
-    public async Task Invoke(HttpContext context)
+    public async Task Invoke(HttpContext context, ISessionManager sessionManager)
     {
         string? token = context.Request.Cookies[SessionCookie.Name];
         var endpoint = context.GetEndpoint();
@@ -43,7 +40,7 @@ public class SessionCheckMiddleware
             return;
         }
 
-        ValidateSession? validate = await _sessionManager.ValidateAsync(token);
+        ValidateSession? validate = await sessionManager.ValidateAsync(token);
 
         if (validate == null)
         {

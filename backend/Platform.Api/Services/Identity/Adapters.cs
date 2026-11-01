@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using Platform.Identity.Domain;
 using Platform.Api.Domain.Authentication;
-using System.Reflection.Metadata.Ecma335;
 
 namespace Platform.Api.Services.Identity;
 
@@ -18,12 +17,43 @@ public sealed class InMemoryAccountRepository : IAccountRepository
 }
 
 /// Stub dok IDN-02 ne napravi pravi opoziv sesija.
-public sealed class NoOpSessionRevoker : ISessionManager
+/// Proverava sesiju u bazi (US-06). Opoziv jos ne postoji.
+public sealed class StoreSessionManager : ISessionManager
 {
     public int RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) => 0;
     public bool RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default) => false;
     public IReadOnlyList<SessionInfo> ListForUser(Guid userId, CancellationToken ct = default) => Array.Empty<SessionInfo>();
-    public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) => Task.FromResult<ValidateSession?>(null);
+    private readonly ISessionStore _sessionStore = null!;
+    public StoreSessionManager(ISessionStore sessionStore)
+    {
+        _sessionStore = sessionStore;
+    }
+
+    private static AuthenticationLevel MapLevel(AuthLevel level) => level switch
+    {
+        AuthLevel.Active => AuthenticationLevel.Active,
+        AuthLevel.MfaPending => AuthenticationLevel.MfaPending,
+        _ => AuthenticationLevel.None
+    };
+
+    public async Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)
+    {
+        var session = await _sessionStore.FindByTokenAsync(token, ct);
+
+        if (session == null)
+        {
+            return null;
+        }
+
+        if (session.RevokedAt != null || session.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            return null;
+        }
+
+        ValidateSession validate = new ValidateSession(session.SessionHandle, session.UserId, MapLevel(session.AuthLevel));
+
+        return validate;
+    }
 }
 
 public sealed class LoggerAuditWriter(ILogger<LoggerAuditWriter> logger) : IAuditWriter
