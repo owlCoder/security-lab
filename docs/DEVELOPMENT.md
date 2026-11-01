@@ -14,10 +14,13 @@ Build the initial API with `dotnet build backend/Platform.Api/Platform.Api.cspro
 
 1. Copy `.env.example` to `.env`. The file is git-ignored; put your own passwords there, never in `.env.example`.
 2. Start PostgreSQL: `docker compose up -d db`
-3. Restore the EF Core tool and the packages: `dotnet tool restore`, then `dotnet restore backend/SecurityLab.slnx`
-4. Apply migrations:
+3. Start the API: `dotnet run --project backend/Platform.Api --urls http://localhost:5080`
 
-   `dotnet ef database update --project backend/Platform.Identity --startup-project backend/Platform.Identity`
+In the Development environment the API applies pending identity migrations when it starts, then seeds the development accounts. If the database is not reachable, the API still starts and logs a warning; start the database and restart the API. Migrations are never applied on startup outside Development.
+
+To apply migrations without starting the API, run `dotnet tool restore` once, then:
+
+`dotnet ef database update --project backend/Platform.Identity --startup-project backend/Platform.Identity`
 
 Docker Compose, the API in the Development environment, and `dotnet ef` all read the same `.env` from the repository root. `ConnectionStrings__Identity` is built from the `POSTGRES_*` values, so a password changes in one place. Keep `;` out of `POSTGRES_PASSWORD`, because it ends a value in the connection string. If you change the password after the database was created, the old one stays in the Docker volume until you recreate it with `docker compose down -v`, which deletes the local data.
 
