@@ -22,6 +22,9 @@ using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
 using Platform.Authoring.Composition;
+using Platform.Identity;
+using Platform.Identity.Entities;
+using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
@@ -162,6 +165,9 @@ if (app.Environment.IsDevelopment())
     repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
     repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
     repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
+    repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
+    repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
+    repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
 
     // AUT-04/AUT-07 demo kurs: 1111 je nastavnik, 2222 student, 3333 nije na kursu.
     var demoCourse = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -181,7 +187,9 @@ app.MapGet("/api/health", () => Results.Ok(new
     service = "security-lab-api",
     note = "Initial scaffold; not a production-ready laboratory platform"
 })).AllowAnonymous();
+})).AllowAnonymous();
 
+app.UseMiddleware<SessionCheckMiddleware>();
 app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
