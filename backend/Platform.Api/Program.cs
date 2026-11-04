@@ -22,6 +22,9 @@ using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
 using Platform.Authoring.Composition;
+using Platform.Identity;
+using Platform.Identity.Entities;
+using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
@@ -139,6 +142,9 @@ app.Services.RegisterLabVisibilityAccess();
 if (app.Environment.IsDevelopment())
 {
     var repo = app.Services.GetRequiredService<IAccountRepository>();
+    repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
+    repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
+    repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
     repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
     repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
     repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
