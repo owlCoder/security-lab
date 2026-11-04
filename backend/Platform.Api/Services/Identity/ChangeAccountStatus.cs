@@ -1,19 +1,9 @@
-using Platform.Api.Domain.Identity;
+using Platform.Api.Enums.Identity;
+using Platform.Api.Interfaces.Identity;
+using Platform.Api.Models.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Api.Services.Identity;
-
-public enum ChangeStatusOutcome
-{
-    Success,
-    Unauthenticated,
-    Forbidden,
-    NotFound,
-    InvalidStatus,
-    InvalidTransition,
-    SelfChangeNotAllowed
-}
-
-public sealed record ChangeStatusResult(ChangeStatusOutcome Outcome, AccountStatus? NewStatus = null);
 
 public sealed class ChangeAccountStatus(
     IIdentityContext identity,

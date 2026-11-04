@@ -5,8 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Platform.Api.Modules.Kt1;
-using MainAccountRepository = Platform.Api.Services.Identity.IAccountRepository;
-using MainAccountStatus = Platform.Api.Domain.Identity.AccountStatus;
+using MainAccountRepository = Platform.Api.Interfaces.Identity.IAccountRepository;
+using MainAccountStatus = Platform.Identity.Enums.AccountStatus;
 
 namespace Platform.Kt1.Tests;
 

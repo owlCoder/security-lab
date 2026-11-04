@@ -1,6 +1,8 @@
+using Platform.Api.Enums.Identity;
+using Platform.Api.Interfaces.Identity;
+using Platform.Api.Models.Identity;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
-using Platform.Api.Domain.Authentication;
 
 namespace Platform.Api.Services.Identity;
 

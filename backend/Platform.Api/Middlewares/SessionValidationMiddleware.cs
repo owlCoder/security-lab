@@ -1,3 +1,6 @@
+using Platform.Api.Enums.Identity;
+using Platform.Api.Interfaces.Identity;
+using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 
 namespace Platform.Api.Middlewares;

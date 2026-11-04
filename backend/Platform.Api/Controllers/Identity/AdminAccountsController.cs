@@ -1,9 +1,9 @@
  using Microsoft.AspNetCore.Mvc;
+ using Platform.Api.Enums.Identity;
+ using Platform.Api.Models.Identity;
  using Platform.Api.Services.Identity;
 
  namespace Platform.Api.Controllers.Identity;
-
- public sealed record ChangeStatusRequest(string? Status, string? Reason);
 
  [ApiController]
  [Route("api/admin/accounts")]
