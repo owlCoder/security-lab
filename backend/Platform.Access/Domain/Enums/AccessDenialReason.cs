@@ -7,5 +7,6 @@ public enum AccessDenialReason
     AccountNotActive,
     UnknownAction,
     NoPolicy,
+    PolicyDenied,
     PolicyError
 }

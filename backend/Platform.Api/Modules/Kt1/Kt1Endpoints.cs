@@ -2,10 +2,19 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Platform.Access.Contracts;
+using Platform.Access.AspNet;
+using Platform.Access.Application.Options;
+using Platform.Access.Application.Services;
+using Platform.Access.Domain.Enums;
+using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Policies;
 using Platform.Api.Modules.Access;
 using Platform.Api.Modules.Administration;
+
+// Alias je potreban jer Kt1 koristi isti interfejs kao Access modul, 
+// a ovim se izbegava konflikt imena prilikom build-a i jasno označava Kt1 zavisnost.
+using Kt1MembershipReader = Platform.Api.Modules.Access.IMembershipReader;
 
 namespace Platform.Api.Modules.Kt1;
 
@@ -35,36 +44,59 @@ public static class Kt1Endpoints
         });
         services.AddSingleton<DemoStore>();
         services.AddSingleton<IAccountReader>(sp => sp.GetRequiredService<DemoStore>());
-        services.AddSingleton<IMembershipReader>(sp => sp.GetRequiredService<DemoStore>());
+        services.AddSingleton<Kt1MembershipReader>(sp => sp.GetRequiredService<DemoStore>());
         services.AddSingleton<IAttemptStore>(sp => sp.GetRequiredService<DemoStore>());
         services.AddSingleton<ICourseAdministrationStore>(sp => sp.GetRequiredService<DemoStore>());
         services.AddSingleton<ISecurityAudit>(sp => sp.GetRequiredService<DemoStore>());
         services.AddSingleton<AttemptPolicy>();
         services.AddSingleton<AdministrationPolicy>();
         services.AddSingleton(TimeProvider.System);
-        services.AddScoped<AttemptService>();
-        services.AddScoped<AdministrationService>();
+        // KT1 uses its own strictly scoped policy engine. Do not replace or override
+        // ACC-05 policies for the real API when the development simulator is enabled.
+        services.AddSingleton<Kt1PolicyDecision>(sp =>
+        {
+            var catalog = new InMemoryActionCatalog();
+            var policies = new InMemoryAccessPolicyRegistry();
+            foreach (var action in new[] { AttemptPolicy.Read, AttemptPolicy.Update })
+            {
+                if (!catalog.Contains(action))
+                    catalog.Register(new ActionDefinition(action, ActionScope.Course, "attempt", false));
+                policies.Register(action, sp.GetRequiredService<AttemptPolicy>());
+            }
+            foreach (var action in new[] {
+                AdministrationPolicy.Read, AdministrationPolicy.Rename,
+                AdministrationPolicy.Delegate, AdministrationPolicy.Revoke })
+            {
+                if (!catalog.Contains(action))
+                    catalog.Register(new ActionDefinition(action, ActionScope.Course, "course", true));
+                policies.Register(action, sp.GetRequiredService<AdministrationPolicy>());
+            }
+            return new Kt1PolicyDecision(new DefaultDenyAccessDecision(
+                catalog, policies, sp.GetRequiredService<IAccessAuditWriter>(),
+                sp.GetRequiredService<AccessDecisionOptions>()));
+        });
+        services.AddScoped<AttemptService>(sp => new AttemptService(
+            sp.GetRequiredService<IAccountReader>(), sp.GetRequiredService<IAttemptStore>(),
+            sp.GetRequiredService<Kt1PolicyDecision>(), sp.GetRequiredService<ISecurityAudit>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.AddScoped<AdministrationService>(sp => new AdministrationService(
+            sp.GetRequiredService<IAccountReader>(), sp.GetRequiredService<ICourseAdministrationStore>(),
+            sp.GetRequiredService<Kt1PolicyDecision>(), sp.GetRequiredService<ISecurityAudit>(),
+            sp.GetRequiredService<TimeProvider>()));
         return services;
     }
-    public static void RegisterCourseworkPolicies(this WebApplication app)
+    private sealed class Kt1PolicyDecision(IAccessDecision inner) : IAccessDecision
     {
-        // Reuse the existing engine/catalog/registry. Do not replace the other team's services.
-        var catalog = app.Services.GetRequiredService<InMemoryActionCatalog>();
-        var registry = app.Services.GetRequiredService<InMemoryAccessPolicyRegistry>();
-        foreach (var action in new[] { AttemptPolicy.Read, AttemptPolicy.Update })
-        {
-            catalog.Register(action);
-            registry.Register(action, app.Services.GetRequiredService<AttemptPolicy>());
-        }
-        foreach (var action in new[] { AdministrationPolicy.Read, AdministrationPolicy.Rename, AdministrationPolicy.Delegate, AdministrationPolicy.Revoke })
-        {
-            catalog.Register(action);
-            registry.Register(action, app.Services.GetRequiredService<AdministrationPolicy>());
-        }
+        public ValueTask<AccessDecision> DecideAsync(
+            AccessRequest request, CancellationToken cancellationToken = default)
+            => inner.DecideAsync(request, cancellationToken);
     }
+
     public static void MapCourseworkKt1(this WebApplication app)
     {
-        var g = app.MapGroup("/api/kt1");
+        // Development-only simulator performs its own cookie and isolated-policy checks.
+        // Allow the request to reach those checks rather than blanket-denying every KT1 route.
+        var g = app.MapGroup("/api/kt1").AllowPublic();
         g.AddEndpointFilter(async (context, next) =>
         {
             var http = context.HttpContext;
