@@ -8,7 +8,6 @@ import LabsSection from './components/labs/LabsSection'
 import LoginPage from './pages/LoginPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
-import { EditTaskForm } from './components/labs/EditTaskForm';
 
 type View = { tab: 'pending' | 'mine'; revisionId?: string }
 
@@ -76,9 +75,6 @@ export default function App() {
     <CourseworkKt1 />
     <LabsSection />
 
-    <section className="card">
-    <EditTaskForm taskId="1" />
-  </section>
-  
+
   </main>
 }
