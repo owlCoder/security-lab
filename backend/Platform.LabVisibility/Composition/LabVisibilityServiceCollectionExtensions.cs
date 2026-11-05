@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
@@ -17,11 +18,24 @@ public static class LabVisibilityServiceCollectionExtensions
     // Poziva se posle AddAccessControl(). Svako dodaje svoju liniju ovde.
     public static IServiceCollection AddLabVisibility(this IServiceCollection services)
     {
+        // AUT-04 (Antonić): PostgreSQL kad postoji ConnectionStrings:LabVisibility, inače InMemory.
+        // Reader i store su singletoni (koriste ih singleton politike), pa EF ide preko fabrike DbContext-a.
         services.AddSingleton<InMemoryLabPublicContentReader>();
-        services.AddSingleton<ILabPublicContentReader>(sp => sp.GetRequiredService<InMemoryLabPublicContentReader>());
-
         services.AddSingleton<InMemoryEvaluatorKeyStore>();
-        services.AddSingleton<IEvaluatorKeyStore>(sp => sp.GetRequiredService<InMemoryEvaluatorKeyStore>());
+
+        services.AddDbContextFactory<LabVisibilityDbContext>((sp, options) =>
+            options.UseNpgsql(
+                LabVisibilityDatabase.GetConnectionString(sp),
+                LabVisibilityDesignTimeDbContextFactory.Configure));
+        services.AddSingleton<EfLabPublicContentReader>();
+        services.AddSingleton<EfEvaluatorKeyStore>();
+
+        services.AddSingleton<ILabPublicContentReader>(sp => LabVisibilityDatabase.IsConfigured(sp)
+            ? sp.GetRequiredService<EfLabPublicContentReader>()
+            : sp.GetRequiredService<InMemoryLabPublicContentReader>());
+        services.AddSingleton<IEvaluatorKeyStore>(sp => LabVisibilityDatabase.IsConfigured(sp)
+            ? sp.GetRequiredService<EfEvaluatorKeyStore>()
+            : sp.GetRequiredService<InMemoryEvaluatorKeyStore>());
 
         services.AddSingleton<InMemoryCourseMembership>();
         services.AddSingleton<ICourseMembership>(sp => sp.GetRequiredService<InMemoryCourseMembership>());

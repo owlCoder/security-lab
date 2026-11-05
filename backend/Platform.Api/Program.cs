@@ -25,6 +25,7 @@ using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.LabVisibility.Infrastructure.Persistence;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
@@ -159,6 +160,9 @@ if (app.Environment.IsDevelopment())
     var membership = app.Services.GetRequiredService<InMemoryCourseMembership>();
     membership.Set(demoCourse, Guid.Parse("11111111-1111-1111-1111-111111111111"), LabVisibilityCourseRole.Teacher);
     membership.Set(demoCourse, Guid.Parse("22222222-2222-2222-2222-222222222222"), LabVisibilityCourseRole.Student);
+
+    // AUT-04: demo laboratorije 4444 (objavljena) i 5555 (nacrt); sa ConnectionStrings:LabVisibility idu u PostgreSQL.
+    await app.Services.SeedLabVisibilityDemoAsync();
 
     // US-02 and US-09: migrate and seed the identity database (skipped without a connection string).
     if (await app.ApplyIdentityMigrationsAsync())
