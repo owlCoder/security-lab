@@ -1,3 +1,4 @@
+using Platform.Access.AspNet;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Api.Modules.Laboratories.Application;
@@ -32,7 +33,10 @@ public static class LaboratoriesEndpoints
 
     private static void MapRoutes(RouteGroupBuilder group)
     {
+        // Every handler below has the existing RequireLabAccess filter, executed
+        // before its body, and LaboratoryService additionally checks ownership.
         group.WithTags("Laboratories")
+            .DelegatesToLegacyAuthorization()
             .AddEndpointFilter(SafeErrors);
 
         group.MapGet("/", () => Results.Ok(Array.Empty<object>()))

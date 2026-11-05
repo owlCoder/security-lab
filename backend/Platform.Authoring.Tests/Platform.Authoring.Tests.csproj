@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
+    <ProjectReference Include="..\Platform.Api\Platform.Api.csproj" />
   </ItemGroup>
 
 </Project>

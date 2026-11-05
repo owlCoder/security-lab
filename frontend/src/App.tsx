@@ -74,5 +74,7 @@ export default function App() {
     {/* Komponente drugih timova sa main grane (ACC-04/ADM-08 i LAB-07) */}
     <CourseworkKt1 />
     <LabsSection />
+
+
   </main>
 }

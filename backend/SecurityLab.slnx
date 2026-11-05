@@ -1,22 +1,25 @@
 <Solution>
   <Project Path="Laboratories.Tests/Laboratories.Tests.csproj" />
   <Project Path="Platform.Access/Platform.Access.csproj" />
+  <Project Path="Platform.Access.Tests/Platform.Access.Tests.csproj" />
   <Project Path="Platform.Api/Platform.Api.csproj" />
-  <Project Path="Platform.Assignments/Platform.Assignments.csproj" />
   <Project Path="Platform.Audit/Platform.Audit.csproj" />
+  <Project Path="Platform.Assignments/Platform.Assignments.csproj" />
   <Project Path="Platform.Audit.Tests/Platform.Audit.Tests.csproj" />
   <Project Path="Platform.LabMetadata.Tests/Platform.LabMetadata.Tests.csproj" Id="8ff98d14-96bd-4c62-b1ce-8e45e60fb816" />
-  <Project Path="Platform.LaboratoryPersistence/Platform.LaboratoryPersistence.csproj" />
-  <Project Path="Platform.LaboratoryPersistence.Tests/Platform.LaboratoryPersistence.Tests.csproj" />
   <Project Path="Platform.LabMetadata/Platform.LabMetadata.csproj" Id="90892a49-5843-4415-a14a-1d89b684646f" />
   <Project Path="Platform.Authoring.Tests/Platform.Authoring.Tests.csproj" />
   <Project Path="Platform.Authoring/Platform.Authoring.csproj" />
+  <Project Path="Platform.Kt1.Tests/Platform.Kt1.Tests.csproj" />
   <Project Path="Platform.LabLocalization.Tests/Platform.LabLocalization.Tests.csproj" />
   <Project Path="Platform.LabLocalization/Platform.LabLocalization.csproj" />
+  <Project Path="Platform.LaboratoryPersistence.Tests/Platform.LaboratoryPersistence.Tests.csproj" />
+  <Project Path="Platform.LaboratoryPersistence/Platform.LaboratoryPersistence.csproj" />
   <Project Path="Platform.LabVisibility/Platform.LabVisibility.csproj" />
+  <Project Path="Platform.Prerequisites.Tests/Platform.Prerequisites.Tests.csproj" />
+  <Project Path="Platform.Prerequisites/Platform.Prerequisites.csproj" />
   <Project Path="Platform.RateLimiting.Tests/Platform.RateLimiting.Tests.csproj" />
   <Project Path="Platform.Tests/Platform.Tests.csproj" />
-  <Project Path="Platform.Kt1.Tests/Platform.Kt1.Tests.csproj" />
   <Project Path="Platform.Identity.Tests/Platform.Identity.Tests.csproj" />
   <Project Path="Platform.Identity/Platform.Identity.csproj" />
   <Folder Name="/Publication/">

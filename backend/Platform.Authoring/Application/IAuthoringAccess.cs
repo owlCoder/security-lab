@@ -5,6 +5,7 @@ public enum AuthoringAction
     CreateDraft = 1,
     EditDraft = 2,
     CreateDraftFromTemplate = 3,
+    ListTemplates = 4,
 }
 
 /// <summary>

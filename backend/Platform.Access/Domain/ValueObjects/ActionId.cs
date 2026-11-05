@@ -4,7 +4,7 @@ namespace Platform.Access.Domain.ValueObjects;
 
 public static partial class ActionId
 {
-    [GeneratedRegex(@"^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+\z", RegexOptions.CultureInvariant)]
     private static partial Regex Pattern();
 
     public static bool IsValid(string? value) =>

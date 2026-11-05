@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Platform.Access.AspNet;
 using Platform.Audit.Application;
 using Platform.Audit.Contracts;
 using Platform.Audit.Infrastructure.Persistence;
@@ -40,6 +41,9 @@ internal sealed class AuditHostFactory(string runtimeConnectionString) : WebAppl
 [ApiController]
 public sealed class AuditTestProbeController : ControllerBase
 {
+    // Only exists in the Testing application-part; its trusted synthetic context
+    // performs the identity binding, with no route in production.
+    [DelegatedAuthorization]
     [HttpPost(AuditHostFactory.ProbePath)]
     public async Task<IActionResult> Write(
         [FromBody] AuditEventDraft draft,

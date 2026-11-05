@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>3fd00482-a54c-426f-9d2a-0f2204817946</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Platform.Access\Platform.Access.csproj" />
+    <ProjectReference Include="..\Platform.Identity\Platform.Identity.csproj" />
+    <ProjectReference Include="..\Platform.LabVisibility\Platform.LabVisibility.csproj" />
+    <ProjectReference Include="..\Platform.Audit\Platform.Audit.csproj" />
+    <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
+    <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+</Project>
