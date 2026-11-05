@@ -215,8 +215,8 @@ try {
 
 Do not print the connection string. Without this environment variable, the 7 database
 tests are explicitly skipped. With it set, a failed database connection or migration fails
-the tests. The current shared CI has no Audit PostgreSQL configuration, so its green result
-does not yet prove database coverage. Coordinate that service/setup with S-09 and S-01.
+the tests. The S-09 [test runner](S09-TESTING.md) configures both database connections
+in shared CI and checks that the PostgreSQL fixtures actually ran.
 
 To include runtime permission tests, before the same test command set
 `AUDIT_TEST_RUNTIME_CONNECTION_STRING` using the same connection-string builder pattern,
