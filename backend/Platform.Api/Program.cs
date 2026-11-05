@@ -92,7 +92,6 @@ builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 builder.Services.AddScoped<IdentityContext, SessionIdentityContext>();
 
-
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
