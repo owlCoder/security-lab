@@ -17,6 +17,4 @@ public interface IGroupService
     Task<Result<GroupMemberDto>> AddMemberAsync(Guid courseId, Guid groupId, Guid userId, CancellationToken ct = default);
 
     Task<Result> RemoveMemberAsync(Guid courseId, Guid groupId, Guid userId, CancellationToken ct = default);
-
-    Task<Result> GrantMaterialAccessAsync(Guid courseId, Guid groupId, MaterialRef material, CancellationToken ct = default);
 }

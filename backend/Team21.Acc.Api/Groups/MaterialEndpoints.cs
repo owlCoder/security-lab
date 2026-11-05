@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Routing;
 using Team21.Acc.Api.Extensions;
 using Team21.Acc.Core.Common;
 using Team21.Acc.Core.Groups;
-using Team21.Acc.Core.Groups.Interfaces;
 using Team21.Acc.Core.Groups.Visibility;
 using Team21.Acc.Core.Groups.Visibility.Interfaces;
 
@@ -19,7 +18,6 @@ public static class MaterialEndpoints
     {
         app.MapGet("/api/materials/{type}/{id:guid}", GetMaterialAsync);
         app.MapGet("/api/courses/{courseId:guid}/materials", ListCourseMaterialsAsync);
-        app.MapPut("/api/courses/{courseId:guid}/materials/{type}/{id:guid}/groups/{groupId:guid}", GrantGroupAccessAsync);
 
         return app;
     }
@@ -47,26 +45,6 @@ public static class MaterialEndpoints
             return Result.Failure(result.Error!).ToHttpResult();
 
         return Results.Ok(result.Value!.Select(MaterialResponse.From).ToList());
-    }
-
-    private static async Task<IResult> GrantGroupAccessAsync(
-        Guid courseId,
-        string type,
-        Guid id,
-        Guid groupId,
-        IGroupService groupService,
-        CancellationToken ct)
-    {
-        if (ParseType(type) is not { } materialType)
-            return Result.Failure(Error.Validation("Invalid material type.")).ToHttpResult();
-
-        var result = await groupService.GrantMaterialAccessAsync(
-            courseId,
-            groupId,
-            new MaterialRef(materialType, id),
-            ct);
-
-        return result.ToHttpResult();
     }
 
     // Names only, a number like "1" is not a valid type
