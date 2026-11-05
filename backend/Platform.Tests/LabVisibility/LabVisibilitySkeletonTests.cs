@@ -6,6 +6,8 @@ using Platform.Access.Domain.Models;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 
+using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
+
 namespace Platform.Tests.LabVisibility;
 
 public class LabVisibilitySkeletonTests
@@ -65,6 +67,6 @@ public class LabVisibilitySkeletonTests
         var role = await provider.GetRequiredService<ICourseMembership>()
             .GetRoleAsync(Guid.NewGuid(), Guid.NewGuid());
 
-        Assert.That(role, Is.EqualTo(CourseRole.None));
+        Assert.That(role, Is.EqualTo(LabVisibilityCourseRole.None));
     }
 }

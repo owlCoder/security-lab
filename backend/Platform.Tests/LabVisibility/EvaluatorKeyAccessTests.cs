@@ -12,6 +12,8 @@ using Platform.LabVisibility.Domain;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Persistence;
 
+using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
+
 namespace Platform.Tests.LabVisibility;
 
 // AUT-04 / AUD-03: ključ čita samo evaluator i nastavnik kursa, a u logu nikad nema odgovora.
@@ -60,9 +62,9 @@ public class EvaluatorKeyAccessTests
             EvaluatorKey.Create(content, [new TaskAnswerKey("t1", SecretAnswer)]));
 
         var membership = provider.GetRequiredService<InMemoryCourseMembership>();
-        membership.Set(CourseId, TeacherId, CourseRole.Teacher);
-        membership.Set(CourseId, StudentId, CourseRole.Student);
-        membership.Set(OtherCourseId, OtherTeacherId, CourseRole.Teacher);
+        membership.Set(CourseId, TeacherId, LabVisibilityCourseRole.Teacher);
+        membership.Set(CourseId, StudentId, LabVisibilityCourseRole.Student);
+        membership.Set(OtherCourseId, OtherTeacherId, LabVisibilityCourseRole.Teacher);
     }
 
     [TearDown]
