@@ -20,6 +20,12 @@
     <PackageReference Include="Moq" Version="4.21.0" />
     <PackageReference Include="NUnit" Version="5.0.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="6.3.1" />
+    <PackageReference Include="Respawn" Version="7.0.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Microsoft.AspNetCore.Mvc.Testing">
+      <HintPath>..\..\..\..\..\..\..\.nuget\packages\microsoft.aspnetcore.mvc.testing\10.0.14\lib\net10.0\Microsoft.AspNetCore.Mvc.Testing.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>
