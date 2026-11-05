@@ -1,3 +1,4 @@
+using Platform.Access.AspNet;
  using Microsoft.AspNetCore.Mvc;
  using Platform.Api.Enums.Identity;
  using Platform.Api.Models.Identity;
@@ -9,6 +10,7 @@
  [Route("api/admin/accounts")]
  public class AdminAccountsController(ChangeAccountStatus changeStatus) : ControllerBase
  {
+     [DelegatedAuthorization]
      [HttpPut("{id:guid}/status")]
      public IActionResult ChangeStatus(Guid id, [FromBody] ChangeStatusRequest body)
      {
