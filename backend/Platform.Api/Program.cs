@@ -22,15 +22,13 @@ using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
 using Platform.Authoring.Composition;
-using Platform.Identity;
-using Platform.Identity.Entities;
-using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
+using IdentityContext = Platform.Api.Interfaces.Identity.IIdentityContext;
 using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
 
@@ -83,37 +81,16 @@ builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IAccountRepository, InMemoryAccountRepository>(); // TODO: zameniti trajnim repozitorijumom (PostgreSQL)
-builder.Services.AddScoped<ISessionManager, StoreSessionManager>();   // zameniti kad IDN-02 bude gotov
-builder.Services.AddScoped<ISessionManager, SessionManager>();
+builder.Services.AddSingleton<IAccountRepository, InMemoryAccountRepository>();
+builder.Services.AddScoped<ISessionManager, StoreSessionManager>();
 builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
 builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
-builder.Services.AddScoped<ILoginService,LoginService>();
+builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddScoped<
-        Platform.Api.Interfaces.Identity.IIdentityContext,
-        Platform.Api.Services.Identity.StubIdentityContext>();
-
-    builder.Services.AddSingleton<
-        ISessionManager,
-        DevAlwaysActiveSessionManager>();
-}
-else
-{
-    builder.Services.AddScoped<
-        Platform.Api.Interfaces.Identity.IIdentityContext,
-        Platform.Api.Services.Identity.AnonymousIdentityContext>();
-
-    builder.Services.AddSingleton<
-        ISessionManager,
-        NoOpSessionRevoker>();
-}
+builder.Services.AddScoped<IdentityContext, SessionIdentityContext>();
 
 
 // Laboratories modul
@@ -166,9 +143,6 @@ if (app.Environment.IsDevelopment())
     repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
     repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
     repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
 
     // AUT-04/AUT-07 demo kurs: 1111 je nastavnik, 2222 student, 3333 nije na kursu.
     var demoCourse = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -188,9 +162,7 @@ app.MapGet("/api/health", () => Results.Ok(new
     service = "security-lab-api",
     note = "Initial scaffold; not a production-ready laboratory platform"
 })).AllowAnonymous();
-})).AllowAnonymous();
 
-app.UseMiddleware<SessionCheckMiddleware>();
 app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
