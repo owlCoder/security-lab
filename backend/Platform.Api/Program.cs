@@ -53,6 +53,9 @@ builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
+builder.Services.AddLaboratoriesPersistence(
+    builder.Configuration.GetConnectionString("Laboratories"));
+
 builder.Services.AddSingleton<IAccountRepository, InMemoryAccountRepository>();
 builder.Services.AddSingleton<ICredentialAuthenticator, UnavailableCredentialAuthenticator>();
 builder.Services.AddSingleton<ISessionIssuer, UnavailableSessionIssuer>();

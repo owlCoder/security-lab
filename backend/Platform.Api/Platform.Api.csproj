@@ -20,4 +20,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
+  <ItemGroup Label="Laboratories">
+    <ProjectReference Include="..\Platform.Laboratories.Domain\Platform.Laboratories.Domain.csproj" />
+    <ProjectReference Include="..\Platform.Laboratories.Infrastructure\Platform.Laboratories.Infrastructure.csproj" />
+  </ItemGroup>
 </Project>

@@ -86,8 +86,7 @@ Run from the repository root:
 dotnet tool restore
 ```
 
-The root `dotnet-tools.json` pins `dotnet-ef` to 10.0.4, matching the resolved EF Core
-packages. The PostgreSQL provider is 10.0.3; provider patch numbers need not match EF's.
+The root `dotnet-tools.json` pins `dotnet-ef` to 10.0.14 for the shared solution. Audit keeps its EF Core 10.0.4 packages. The PostgreSQL provider is 10.0.3; provider patch numbers need not match EF's.
 
 `AuditDbContextFactory` reads `AUDIT_MIGRATION_CONNECTION_STRING`. It does not read `.env`
 or API user-secrets and never enables sensitive-data logging. Actual database updates

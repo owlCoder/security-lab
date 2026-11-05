@@ -1,0 +1,33 @@
+name: REV-05 checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  laboratories:
+    name: REV-05 domain and persistence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore EF tool
+        run: dotnet tool restore
+      - name: Run domain and model tests
+        run: dotnet test backend/Platform.Laboratories.Tests/Platform.Laboratories.Tests.csproj --configuration Release --logger "trx;LogFileName=domain.trx" --results-directory TestResults/Domain
+      - name: Run PostgreSQL integration tests
+        run: dotnet test backend/Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj --configuration Release --logger "trx;LogFileName=postgres.trx" --results-directory TestResults/Postgres
+      - name: Check migration snapshot
+        run: dotnet ef migrations has-pending-model-changes --project backend/Platform.Laboratories.Infrastructure --startup-project backend/Platform.Laboratories.Infrastructure --context LaboratoriesDbContext --configuration Release --no-build
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rev05-test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7

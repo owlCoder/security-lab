@@ -17,4 +17,12 @@
   <Project Path="Platform.RateLimiting.Tests/Platform.RateLimiting.Tests.csproj" />
   <Project Path="Platform.Tests/Platform.Tests.csproj" />
   <Project Path="Platform.Kt1.Tests/Platform.Kt1.Tests.csproj" />
+  <Project Path="Platform.Identity.Tests/Platform.Identity.Tests.csproj" />
+  <Project Path="Platform.Identity/Platform.Identity.csproj" />
+  <Folder Name="/Publication/">
+    <Project Path="Platform.Laboratories.Domain/Platform.Laboratories.Domain.csproj" />
+    <Project Path="Platform.Laboratories.Infrastructure/Platform.Laboratories.Infrastructure.csproj" />
+    <Project Path="Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj" />
+    <Project Path="Platform.Laboratories.Tests/Platform.Laboratories.Tests.csproj" />
+  </Folder>
 </Solution>
