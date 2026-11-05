@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Platform.Access.Domain.Enums;
+using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Policies;
 using Platform.LabVisibility.Application.EvaluatorKeys;
@@ -37,7 +39,14 @@ public static class LabVisibilityServiceCollectionExtensions
         var catalog = services.GetRequiredService<InMemoryActionCatalog>();
         foreach (var action in LabVisibilityActions.All)
         {
-            catalog.Register(action);
+            // The evaluator key request contains a lab resource; other actions
+            // do not carry a resource in the current LabVisibility contracts.
+            var isKeyRead = action == LabVisibilityActions.KeyRead;
+            catalog.Register(new ActionDefinition(
+                action,
+                isKeyRead ? ActionScope.Course : ActionScope.Authenticated,
+                isKeyRead ? "lab" : null,
+                isKeyRead));
         }
 
         // Politike se dodaju ovde, svako svoju, istim obrascem.
