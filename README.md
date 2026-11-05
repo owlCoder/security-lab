@@ -80,6 +80,25 @@ CI builds and tests the whole backend through the solution file `backend/Securit
 
 If you add a backend module or a test project, add it to the solution so that CI picks it up: `dotnet sln backend/SecurityLab.slnx add backend/<Project>/<Project>.csproj`.
 
+## Trying the authoring API
+
+The Development environment identifies the caller from the configuration key `Identity:DevSubjectId`. The account `11111111-1111-1111-1111-111111111111` is listed as an author in `backend/Platform.Api/appsettings.Development.json` (`Authoring:AuthorAccountIds`). In PowerShell:
+
+```
+$env:Identity__DevSubjectId = "11111111-1111-1111-1111-111111111111"
+cd backend/Platform.Api
+dotnet run --urls http://localhost:5080
+```
+
+In a second terminal:
+
+```
+curl.exe -i http://localhost:5080/api/authoring/templates
+curl.exe -i -X POST http://localhost:5080/api/authoring/templates/a1000000-0000-4000-8000-000000000001/drafts
+```
+
+The first call lists the templates (`200`), the second creates a draft from one (`201`). Restart with another account id to see `403`, or without the variable to see `401`. Details and the full endpoint contract are in [docs/components/AUT-authoring.md](docs/components/AUT-authoring.md).
+
 ## Troubleshooting
 
 | Problem | What to do |

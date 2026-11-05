@@ -18,6 +18,7 @@ using Platform.Api.Middlewares;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Composition;
+using Platform.Authoring.Composition;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
@@ -47,6 +48,7 @@ else
 
 // Servisi sa main grane
 builder.Services.AddAudit();
+builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
@@ -122,6 +124,10 @@ if (kt1Enabled)
 // IDN-01: politike i endpoint za kreiranje naloga
 app.Services.RegisterIdentityAccess();
 app.MapAccountEndpoints();
+
+// AUT-06: radnje i politike za sablone laboratorija, pa endpointi
+app.Services.RegisterAuthoringAccess();
+app.MapAuthoringEndpoints();
 
 // AUT-04/AUT-07: radnje i politike za prikaz laboratorije
 app.Services.RegisterLabVisibilityAccess();
