@@ -44,7 +44,7 @@ describe('AUT-01 EditTaskForm', () => {
     await screen.findByDisplayValue(task.title)
     fireEvent.change(screen.getByLabelText('Naslov zadatka'), { target: { value: 'Novi naslov' } })
     fireEvent.click(screen.getByRole('button', { name: 'Sačuvaj izmene' }))
-    expect((await screen.findByRole('status')).textContent).toContain('uspešno sačuvane')
+    expect((await screen.findByText('Izmene su uspešno sačuvane.')).textContent).toContain('uspešno sačuvane')
     const [, options] = fetchMock.mock.calls[1]
     expect(options.method).toBe('PUT')
     expect(JSON.parse(options.body)).toEqual({ title: 'Novi naslov', description: task.description })
