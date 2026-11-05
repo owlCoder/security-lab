@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Platform.Access.Domain.Enums;
+using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Policies;
 using Platform.Authoring.Application;
@@ -42,7 +44,14 @@ public static class AuthoringServiceCollectionExtensions
 
         foreach (var action in AuthoringActions.All)
         {
-            catalog.Register(action);
+            // Copying a template is resource-scoped; listing templates has no resource.
+            // Preserve the strict default-deny engine's type and scope checks.
+            var isCopy = action == AuthoringActions.TemplateCopy;
+            catalog.Register(new ActionDefinition(
+                action,
+                isCopy ? ActionScope.Course : ActionScope.Authenticated,
+                isCopy ? AuthoringActions.TemplateResourceType : null,
+                false));
             policies.Register(action, policy);
         }
 
