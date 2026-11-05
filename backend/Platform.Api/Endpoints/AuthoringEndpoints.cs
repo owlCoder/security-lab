@@ -1,3 +1,4 @@
+using Platform.Access.AspNet;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
@@ -35,8 +36,11 @@ public static class AuthoringEndpoints
 {
     public static IEndpointRouteBuilder MapAuthoringEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/authoring/templates", ListTemplatesAsync);
-        app.MapPost("/api/authoring/templates/{templateId:guid}/drafts", CopyTemplateAsync);
+        // Both handlers call AuthorizeAsync and the authoring service rechecks access.
+        app.MapGet("/api/authoring/templates", ListTemplatesAsync)
+            .DelegatesToLegacyAuthorization();
+        app.MapPost("/api/authoring/templates/{templateId:guid}/drafts", CopyTemplateAsync)
+            .DelegatesToLegacyAuthorization();
         return app;
     }
 
