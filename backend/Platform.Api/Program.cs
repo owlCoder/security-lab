@@ -70,28 +70,8 @@ builder.Services.AddScoped<ChangeAccountStatus>();
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
-
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddScoped<
-        Platform.Api.Interfaces.Identity.IIdentityContext,
-        Platform.Api.Services.Identity.StubIdentityContext>();
-
-    builder.Services.AddSingleton<
-        ISessionManager,
-        DevAlwaysActiveSessionManager>();
-}
-else
-{
-    builder.Services.AddScoped<
-        Platform.Api.Interfaces.Identity.IIdentityContext,
-        Platform.Api.Services.Identity.AnonymousIdentityContext>();
-
-    builder.Services.AddSingleton<
-        ISessionManager,
-        NoOpSessionRevoker>();
-}
+// IDN-02: the caller comes from the server-side session cookie (fully qualified: Laboratories has its own IIdentityContext).
+builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
 
 // Laboratories modul
