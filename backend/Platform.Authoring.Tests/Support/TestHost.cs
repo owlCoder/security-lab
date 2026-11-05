@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Platform.Access.Composition;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Security;
+using Platform.Api.Interfaces.Identity;
 using Platform.Authoring.Composition;
 
 namespace Platform.Authoring.Tests.Support;
