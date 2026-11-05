@@ -33,6 +33,17 @@ namespace Platform.LabMetadata
                     "Laboratory objective is required.",
                     nameof(objective));
 
+
+            if (objective.Trim().Length >
+                LaboratoryMetadataValidator.MaxObjectiveLength)
+            {
+                throw new ArgumentException(
+                    $"Laboratory objective cannot exceed " +
+                    $"{LaboratoryMetadataValidator.MaxObjectiveLength} characters.",
+                    nameof(objective));
+            }
+
+
             if (!Enum.IsDefined(difficulty))
                 throw new ArgumentOutOfRangeException(nameof(difficulty));
 

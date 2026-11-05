@@ -1,9 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Access.Infrastructure.Catalog;
+using Platform.Access.Infrastructure.Policies;
+using Platform.LabVisibility.Application.EvaluatorKeys;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Auditing;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Persistence;
+using Platform.LabVisibility.Infrastructure.Policies;
 
 namespace Platform.LabVisibility.Composition;
 
@@ -21,7 +24,9 @@ public static class LabVisibilityServiceCollectionExtensions
         services.AddSingleton<InMemoryCourseMembership>();
         services.AddSingleton<ICourseMembership>(sp => sp.GetRequiredService<InMemoryCourseMembership>());
 
-        services.AddSingleton<ILabVisibilityAudit, NullLabVisibilityAudit>();
+        services.AddLogging(); // bezbedno i ako je logging već registrovan; audit piše u log
+        services.AddSingleton<ILabVisibilityAudit, LoggerLabVisibilityAudit>();
+        services.AddSingleton<EvaluatorKeyReader>();
 
         return services;
     }
@@ -35,9 +40,11 @@ public static class LabVisibilityServiceCollectionExtensions
             catalog.Register(action);
         }
 
-        // Politike se dodaju ovde, svako svoju:
-        // var policies = services.GetRequiredService<InMemoryAccessPolicyRegistry>();
-        // policies.Register(LabVisibilityActions.StudentView, new StudentViewPolicy(...));
+        // Politike se dodaju ovde, svako svoju, istim obrascem.
+        var policies = services.GetRequiredService<InMemoryAccessPolicyRegistry>();
+        policies.Register(
+            LabVisibilityActions.KeyRead,
+            ActivatorUtilities.CreateInstance<EvaluatorKeyPolicy>(services));
 
         return services;
     }

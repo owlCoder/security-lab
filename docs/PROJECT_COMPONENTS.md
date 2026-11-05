@@ -10,6 +10,8 @@ Components and requirements are defined by the Security Lab project specificatio
 | … |  |  |  |
 | Team 11 | AUT-01 Create and edit drafts | AUT-06 Templates for quick task creation | SopalovicDjordje (PR 70/2023): AUT-01, AUT-06; [AUT-01 and AUT-06](components/AUT-authoring.md) |
 | Team 12 | AUD-01 Audit record of login and changes of rights | AUD-06 Teacher view of permitted security events | Bogdan Pećanac, Aleksandar Petrović, Mladen Kovačević, Konstantin Ristivojević, Bojan Kostić, Nikola Zeković, Vanja Jovanov, Nikola Jevtić, Aleksa Mandarić, Kristijan Oros; [Audit contract](components/audit/CONTRACTS.md), [agreements](components/audit/INTEGRATION.md) |
+| Team 14 | LAB-07 Lokalizacija i pristupačne varijante | | Lana Gojković (PR46/2023): LAB-07; [LAB-07](components/LAB-07-localization.md) |
+| Team 15 | ASN-04 Maximum number of attempts | ASN-06 Individual deadline extension | [ASN-04 and ASN-06](components/ASN-04-ASN06-15.md); [ASN-06](components/ASN-06-ExtendDeadline.md) |
 | Team 32 |  |  |  |
 
 Each student documents their component using the [component template](templates/PROJECT_COMPONENT.md). Refer to the stable requirement IDs in the specification, such as `IDN-01`, `ACC-04`, `LAB-01`, `ATT-03`, and `EVAL-02`, without changing their meaning.

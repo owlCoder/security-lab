@@ -96,6 +96,7 @@ If you add a backend module or a test project, add it to the solution so that CI
 - `backend/SecurityLab.slnx` — backend solution file used by CI.
 - `backend/Platform.Api/` — API entry point.
 - `backend/Platform.Access/` — access control module (ACC-05, ACC-08).
+- `backend/Platform.Assignments/` — assignments module: assignment model, attempt limit and individual deadline extension (ASN-04, ASN-06). Its tests are in `backend/Platform.Tests/Assignments/`.
 - `backend/Platform.Audit/` and `backend/Platform.Audit.Tests/` — audit module skeleton and its tests (AUD-01).
 - `backend/Platform.Authoring/` — authoring module: laboratory drafts and templates (AUT-01, AUT-06).
 - `backend/Platform.Authoring.Tests/` — NUnit tests for the authoring module.

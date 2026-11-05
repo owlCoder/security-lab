@@ -73,6 +73,18 @@ public sealed class Assignment
     public void Archive() => Status = AssignmentStatus.Archived;
 
     public AssignmentAvailability GetAvailability(DateTimeOffset now)
+        => GetAvailability(now, null);
+
+    // ASN-06 TIM 15
+    // An individual deadline can only extend the assignment deadline, never shorten it.
+    public DateTimeOffset GetEffectiveDueAtUtc(DateTimeOffset? individualDueAtUtc)
+        => individualDueAtUtc.HasValue && individualDueAtUtc.Value > DueAtUtc
+            ? individualDueAtUtc.Value
+            : DueAtUtc;
+
+    // ASN-06 TIM 15
+    // Availability for one student who may have an individual deadline.
+    public AssignmentAvailability GetAvailability(DateTimeOffset now, DateTimeOffset? individualDueAtUtc)
     {
         if (Status == AssignmentStatus.Archived)
         {
@@ -84,7 +96,7 @@ public sealed class Assignment
             return AssignmentAvailability.NotStarted;
         }
 
-        if (!AllowStartAfterDeadline && now > DueAtUtc)
+        if (!AllowStartAfterDeadline && now > GetEffectiveDueAtUtc(individualDueAtUtc))
         {
             return AssignmentAvailability.Expired;
         }

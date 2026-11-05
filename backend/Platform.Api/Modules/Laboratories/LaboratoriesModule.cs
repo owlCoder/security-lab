@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
@@ -10,6 +11,13 @@ public static class LaboratoriesModule
     public static IServiceCollection AddLaboratories(this IServiceCollection services, IHostEnvironment environment)
     {
         services.AddHttpContextAccessor();
+
+        // LAB-01 API: skladiste i slucajevi upotrebe.
+        // KT1: skladiste u memoriji (singleton, podaci nestaju posle restarta).
+        // KT2: ovde se registruje PostgreSQL implementacija istog ILaboratoryRepository.
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
+        services.AddScoped<LaboratoryService>();
 
         if (environment.IsDevelopment())
         {

@@ -1,4 +1,7 @@
 using Platform.Api.Modules.Kt1;
+using Platform.Api.Modules.Laboratories.Application;
+using Platform.Api.Modules.Laboratories.Infrastructure;
+using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
 
 using Platform.Access.Composition;
@@ -68,10 +71,46 @@ builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 
-builder.Services.AddScoped<IIdentityContext, SessionIdentityContext>();
+
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddScoped<
+        Platform.Api.Interfaces.Identity.IIdentityContext,
+        Platform.Api.Services.Identity.StubIdentityContext>();
+
+    builder.Services.AddSingleton<
+        ISessionManager,
+        DevAlwaysActiveSessionManager>();
+}
+else
+{
+    builder.Services.AddScoped<
+        Platform.Api.Interfaces.Identity.IIdentityContext,
+        Platform.Api.Services.Identity.AnonymousIdentityContext>();
+
+    builder.Services.AddSingleton<
+        ISessionManager,
+        NoOpSessionRevoker>();
+}
+
 
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
+// Use the official LAB-01 repository contract. Never silently persist to memory in production.
+if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
+{
+    builder.Services.AddLaboratoryPersistence(builder.Configuration);
+    builder.Services.AddScoped<ILaboratoryRepository, PostgresLaboratoryRepository>();
+}
+else if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
+}
+else
+{
+    // Keep unrelated API routes available, but never silently write laboratories to memory.
+    builder.Services.AddSingleton<ILaboratoryRepository, UnavailableLaboratoryRepository>();
+}
 
 // Kreiranje aplikacije
 var app = builder.Build();

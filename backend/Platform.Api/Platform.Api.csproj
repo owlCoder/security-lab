@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Platform.Identity\Platform.Identity.csproj" />
     <ProjectReference Include="..\Platform.LabVisibility\Platform.LabVisibility.csproj" />
     <ProjectReference Include="..\Platform.Audit\Platform.Audit.csproj" />
+    <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,5 +23,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+  </ItemGroup>
+  <ItemGroup Label="Laboratories">
+    <ProjectReference Include="..\Platform.Laboratories.Domain\Platform.Laboratories.Domain.csproj" />
+    <ProjectReference Include="..\Platform.Laboratories.Infrastructure\Platform.Laboratories.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

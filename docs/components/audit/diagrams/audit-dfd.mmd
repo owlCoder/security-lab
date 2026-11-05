@@ -1,0 +1,47 @@
+flowchart LR
+  subgraph B1["Trust boundary 1: untrusted client / producer input"]
+    CLIENT["Browser or upstream module\nUntrusted route, body, headers"]
+  end
+
+  subgraph B2["Trust boundary 2: trusted application process"]
+    HOST["Platform.Api host\nAddAudit currently registers no services"]
+    ID["Identity producer\nCurrent logger writer; no persistent Audit link"]
+    ACCESS["Platform.Access decision\nCurrent NullAccessAuditWriter"]
+    DRAFT["AuditEventDraft\nCatalog + outcome + detail allowlist"]
+    CTX["Trusted context + TimeProvider\nWriter implementation; provider not registered"]
+    VALIDATE["AuditDraftValidator\nReject invalid context/schema/details"]
+    DOMAIN["Immutable AuditEvent\nServer event ID and UTC occurrence time"]
+    STORE["PostgresAuditEventStore\nParameterized append; idempotent ID"]
+    QUERY["AUD-06 course query / API\nNOT IMPLEMENTED / NOT EXPOSED"]
+  end
+
+  subgraph B3["Trust boundary 3: PostgreSQL"]
+    DB[("audit.audit_events\nRuntime role: SELECT / INSERT")]
+    MIG["Migration/bootstrap operator\nSeparate privileged setup"]
+  end
+
+  CLIENT -. "Proposed future request" .-> HOST
+  HOST --> ID
+  HOST --> ACCESS
+  ID -. "No current shared-writer flow" .-> DRAFT
+  ACCESS -. "No current forwarder" .-> DRAFT
+  HOST -. "Module not composed" .-> DRAFT
+  DRAFT -. "Writer exists but is not registered" .-> CTX
+  CTX --> VALIDATE
+  DRAFT --> VALIDATE
+  VALIDATE -->|"Accepted"| DOMAIN
+  VALIDATE -->|"Rejected: stable code; no write"| HOST
+  DOMAIN --> STORE
+  STORE -->|"Parameterized INSERT; duplicate check"| DB
+  DB -->|"Appended / already present / conflict"| STORE
+  STORE -. "Unavailable maps at writer boundary" .-> HOST
+  MIG -->|"DDL and grants"| DB
+  DB -. "Future authorized query only; no API currently" .-> QUERY
+  QUERY -. "Must authorize course before select/count/page" .-> CLIENT
+
+  classDef implemented fill:#e8f5e9,stroke:#2e7d32,color:#111;
+  classDef partial fill:#fff8e1,stroke:#f9a825,color:#111;
+  classDef absent fill:#ffebee,stroke:#c62828,color:#111;
+  class CLIENT,DB,MIG,VALIDATE,DOMAIN,STORE implemented;
+  class HOST,ID,ACCESS,DRAFT,CTX partial;
+  class QUERY absent;

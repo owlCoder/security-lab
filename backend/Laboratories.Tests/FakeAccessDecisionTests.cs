@@ -51,6 +51,29 @@ public class FakeAccessDecisionTests
         Assert.That(result.Allowed, Is.True);
     }
 
+    [TestCase(LabActions.Read)]
+    [TestCase(LabActions.Rename)]
+    public void Decide_WhenStudentReadsOrRenamesLaboratory_Denies(string action)
+    {
+        IIdentityContext student = new TestUser("ana", PlatformRole.Student);
+
+        AccessResult result = Policy.Decide(student, action);
+
+        Assert.That(result.Allowed, Is.False);
+        Assert.That(result.Reason, Is.EqualTo(DenyReason.NotPermitted));
+    }
+
+    [TestCase(LabActions.Read)]
+    [TestCase(LabActions.Rename)]
+    public void Decide_WhenTeacherReadsOrRenamesLaboratory_Allows(string action)
+    {
+        IIdentityContext teacher = new TestUser("marko", PlatformRole.Teacher);
+
+        AccessResult result = Policy.Decide(teacher, action);
+
+        Assert.That(result.Allowed, Is.True);
+    }
+
     //lazni korisnik za potrebe testova
     private sealed class TestUser : IIdentityContext
     {

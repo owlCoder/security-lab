@@ -49,6 +49,53 @@ button:disabled { opacity: .6; cursor: not-allowed; }
 .result.ok { background: #e8f5ec; border: 1px solid #9ad0a8; }
 .result.error { background: #fdecec; border: 1px solid #e3a3a3; }
 
+/* ---- IDN-05 / REV-05 UI (Daniel) ----
+   .tabs i .badge su ograniceni (main > .tabs, .badge-<status>) da ne menjaju .kt1 i druge komponente. */
+.login label, .decision-form label { display: grid; gap: 6px; margin-top: 0; }
+textarea { font: inherit; padding: 10px 12px; border: 1px solid #c5cfdb; border-radius: 8px; }
+textarea:focus-visible { outline: 2px solid #315d8a; outline-offset: 2px; }
+.login button { margin-top: 0; }
+.actions button, .card-head button, .alert button, .topbar button, .tab, button.link { margin-top: 0; }
+button.secondary { background: white; color: #315d8a; border: 1px solid #315d8a; }
+.card { background: white; border: 1px solid #e1e6ed; border-radius: 12px; padding: 22px; margin-top: 32px; }
+.topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.login form { display: grid; gap: 14px; max-width: 380px; }
+.alert { margin: 0; padding: 10px 12px; border-radius: 8px; font-size: .95rem; }
+.alert-error { background: #fdecec; color: #8a1f1f; border: 1px solid #f3c2c2; }
+.alert-warn { background: #fff6e0; color: #7a5300; border: 1px solid #f0d69a; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.card-head h2 { margin: 8px 0; }
+.muted { color: #5c6b80; }
+.small { font-size: .85rem; }
+.error-text { color: #8a1f1f; }
+.alert-ok { background: #e9f7ee; color: #1d5e33; border: 1px solid #b9e2c6; margin-top: 14px; }
+.alert p { margin: 0 0 6px; } .alert ul { margin: 6px 0; padding-left: 20px; }
+.alert .secondary { margin-top: 6px; }
+section > .alert-error { margin-top: 14px; }
+main > .tabs { display: flex; gap: 6px; margin-top: 28px; border-bottom: 1px solid #e1e6ed; }
+main > .tabs .tab { background: none; color: #315d8a; border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 14px; }
+main > .tabs .tab.active { border-bottom-color: #315d8a; }
+main > .tabs + .card { margin-top: 18px; }
+button.link { background: none; border: none; color: #315d8a; padding: 0; text-decoration: underline; }
+.table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+.table th, .table td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #edf0f4; }
+.table th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: #5c6b80; }
+.badge-draft, .badge-inreview, .badge-published, .badge-archived { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .8rem; font-weight: 700; }
+.badge-draft { background: #eef1f5; color: #44546a; }
+.badge-inreview { background: #fff3d6; color: #7a5300; }
+.badge-published { background: #e1f4e8; color: #1d5e33; }
+.badge-archived { background: #ececec; color: #555; }
+.pill { font-size: .78rem; background: #e7eef7; color: #315d8a; padding: 2px 8px; border-radius: 999px; }
+.meta { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 14px 0; }
+.meta dt { color: #5c6b80; } .meta dd { margin: 0; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+.decision-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid #edf0f4; max-width: 560px; }
+.decision-form textarea { width: 100%; resize: vertical; }
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline-item { border-left: 3px solid #c6cfdb; padding: 4px 0 14px 14px; }
+.timeline-approved { border-left-color: #3a9a5b; } .timeline-returned { border-left-color: #c98a00; }
+.timeline-head { display: flex; gap: 8px; align-items: center; }
+.comment { white-space: pre-wrap; background: #f7f9fc; border: 1px solid #e1e6ed; border-radius: 8px; padding: 8px 10px; margin: 6px 0 0; }
 
 /* ACC-04 / ADM-08 simulator styles are scoped to avoid changing other teams' forms. */
 .kt1 button, .kt1 input, .kt1 select, .kt1 textarea { font: inherit; }

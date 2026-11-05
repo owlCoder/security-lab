@@ -114,5 +114,23 @@ namespace Platform.LabMetadata.Tests
                 )
             );
         }
+
+
+        [Test]
+        public void Constructor_ShouldPreserveMaliciousInputAsPlainText()
+        {
+            var maliciousInput = "<script>alert('XSS')</script>";
+
+            var metadata = new LaboratoryMetadata(
+                Guid.NewGuid(),
+                maliciousInput,
+                LaboratoryDifficulty.Easy,
+                LaboratoryType.AccessControl,
+                new[] { "security" }
+            );
+
+            Assert.That(metadata.Objective, Is.EqualTo(maliciousInput));
+        }
+
     }
 }

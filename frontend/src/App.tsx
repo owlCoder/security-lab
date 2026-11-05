@@ -1,12 +1,17 @@
 import { useNavigate, Routes, Route } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './auth/AuthContext'
+import { apiRequest } from './api/http'
+import { getMyRevisions, getPendingReviews } from './api/revisions'
 import AppShell from './components/AppShell'
 import LandingPage from './components/LandingPage'
 import CourseworkKt1 from './components/CourseworkKt1'
+import LabsSection from './components/labs/LabsSection'
 import ProtectedRoute from './components/ProtectedRoute'
 import ProtectedApp from './components/ProtectedApp'
 import LoginPage from './login/page'
+import RevisionDetailPage from './pages/RevisionDetailPage'
+import RevisionListPage from './pages/RevisionListPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -25,14 +30,69 @@ function LoginRoute() {
   </>
 }
 
+function HealthStatus() {
+  const [health, setHealth] = useState('Provera API-ja…')
+
+  useEffect(() => {
+    apiRequest<{ status: string }>('GET', '/api/health').then(r =>
+      setHealth(!r.ok ? 'API nije dostupan (pokrenite backend).' : r.data.status === 'ok' ? 'API dostupan' : 'API nije spreman'))
+  }, [])
+
+  return <section className="card"><h2>Status razvoja</h2><p>{health}</p></section>
+}
+
+type RevisionView = { tab: 'pending' | 'mine'; revisionId?: string }
+
+// REV-05 revision review screens; the session cookie authenticates their API calls.
+function RevisionsSection() {
+  const [view, setView] = useState<RevisionView>({ tab: 'pending' })
+
+  return <>
+    <nav className="tabs" aria-label="Revizije">
+      <button className={view.tab === 'pending' ? 'tab active' : 'tab'} onClick={() => setView({ tab: 'pending' })}>Na čekanju</button>
+      <button className={view.tab === 'mine' ? 'tab active' : 'tab'} onClick={() => setView({ tab: 'mine' })}>Moje revizije</button>
+    </nav>
+
+    {view.revisionId
+      ? <RevisionDetailPage
+          key={view.revisionId}
+          revisionId={view.revisionId}
+          onBack={() => setView({ tab: view.tab })}
+        />
+      : view.tab === 'pending'
+        ? <RevisionListPage
+            key="pending"
+            title="Revizije na čekanju"
+            description="Revizije koje čekaju vaše odobrenje. Sopstvene revizije se ovde ne prikazuju kada politika zahteva drugog odobravaoca."
+            emptyText="Nema revizija koje čekaju vaše odobrenje."
+            load={getPendingReviews}
+            onOpen={id => setView({ tab: 'pending', revisionId: id })}
+          />
+        : <RevisionListPage
+            key="mine"
+            title="Moje revizije"
+            description="Nacrti i revizije koje ste predali na pregled."
+            emptyText="Nemate nacrta ni revizija na pregledu."
+            load={getMyRevisions}
+            onOpen={id => setView({ tab: 'mine', revisionId: id })}
+          />}
+  </>
+}
+
 export default function App() {
   return <AuthProvider>
     <Routes>
       <Route element={<AppShell />}>
-        <Route index element={<><LandingPage /><CourseworkKt1 /></>} />
+        <Route index element={<>
+          <LandingPage />
+          <HealthStatus />
+          {/* Komponente drugih timova sa main grane (ACC-04/ADM-08 i LAB-07) */}
+          <CourseworkKt1 />
+          <LabsSection />
+        </>} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
-          <Route path="access-demo" element={<ProtectedApp />} />
+          <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
         </Route>
       </Route>
     </Routes>

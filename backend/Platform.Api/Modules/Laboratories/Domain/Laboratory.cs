@@ -6,22 +6,49 @@ public sealed class Laboratory
 
     public Guid Id { get; }
     public string Title { get; private set; }
+    public LabStatus Status { get; }
+    public Guid CreatedBy { get; }
+    public DateTimeOffset CreatedAt { get; }
 
-    public Laboratory(string title) : this(Guid.NewGuid(), title)
+    public Laboratory(string title, Guid createdBy, TimeProvider? timeProvider = null)
+        : this(Guid.NewGuid(), title, LabStatus.Draft, createdBy,
+            (timeProvider ?? TimeProvider.System).GetUtcNow())
     {
     }
 
-    // Allows server-side reconstruction of a laboratory with its existing identity.
-    public Laboratory(Guid id, string title)
+    private Laboratory(Guid id, string title, LabStatus status, Guid createdBy, DateTimeOffset createdAt)
     {
         if (id == Guid.Empty)
         {
             throw new ArgumentException("Laboratory ID is required.", nameof(id));
         }
 
+        if (createdBy == Guid.Empty)
+        {
+            throw new ArgumentException("Laboratory creator is required.", nameof(createdBy));
+        }
+
+        if (!Enum.IsDefined(status))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status));
+        }
+
+        if (createdAt == default)
+        {
+            throw new ArgumentException("Laboratory creation time is required.", nameof(createdAt));
+        }
+
         Id = id;
         Title = ValidateTitle(title);
+        Status = status;
+        CreatedBy = createdBy;
+        CreatedAt = createdAt.ToUniversalTime();
     }
+
+    // For trusted persistence adapters; incoming API data must not select these values.
+    public static Laboratory Rehydrate(
+        Guid id, string title, LabStatus status, Guid createdBy, DateTimeOffset createdAt) =>
+        new(id, title, status, createdBy, createdAt);
 
     public void Rename(string title)
     {
