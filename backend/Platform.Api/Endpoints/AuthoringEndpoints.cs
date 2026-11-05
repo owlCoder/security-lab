@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Security;
+using Platform.Api.Interfaces.Identity;
 using Platform.Authoring.Application;
 using Platform.Authoring.Domain;
 
