@@ -1,3 +1,4 @@
+using Platform.Access.AspNet;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Api.Interfaces.Identity;
@@ -16,7 +17,9 @@ public static class AccountEndpoints
 {
     public static IEndpointRouteBuilder MapAccountEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/admin/accounts", CreateAccountAsync);
+        // CreateAccountAsync calls the platform access decision before registration.
+        app.MapPost("/api/admin/accounts", CreateAccountAsync)
+            .DelegatesToLegacyAuthorization();
         return app;
     }
 
