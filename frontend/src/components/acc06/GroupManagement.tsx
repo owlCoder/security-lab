@@ -2,13 +2,11 @@ import { useState } from 'react'
 import {
   addMember,
   createGroup,
-  grantMaterialAccess,
   listGroups,
   listMembers,
-  listVisibleMaterials,
   removeMember,
 } from '../../api/acc06'
-import type { Group, GroupMember, Material } from '../../api/acc06'
+import type { Group, GroupMember } from '../../api/acc06'
 
 type Props = {
   userId: string
@@ -28,8 +26,6 @@ export default function GroupManagement({
   const [members, setMembers] = useState<GroupMember[] | null>(null)
   const [groupName, setGroupName] = useState('')
   const [studentId, setStudentId] = useState('')
-  const [materials, setMaterials] = useState<Material[] | null>(null)
-  const [materialKey, setMaterialKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<{
     text: string
@@ -38,10 +34,6 @@ export default function GroupManagement({
 
   const selectedGroup = groups?.find(group => group.id === groupId)
   const canEditGroup = !archived && selectedGroup?.status === 'Active'
-
-  const selectedMaterial = materials?.find(
-    material => `${material.type}:${material.materialId}` === materialKey,
-  )
 
   const availableStudents = students.filter(
     student => !members?.some(member => member.userId === student.id),
@@ -69,8 +61,6 @@ export default function GroupManagement({
     setGroupId('')
     setMembers(null)
     setStudentId('')
-    setMaterialKey('')
-
     setGroups(await listGroups(userId, courseId))
   }
 
@@ -78,7 +68,6 @@ export default function GroupManagement({
     setGroupId(id)
     setMembers(null)
     setStudentId('')
-    setMaterialKey('')
     setStatus(null)
 
     if (id) {
@@ -98,7 +87,6 @@ export default function GroupManagement({
     setGroupId(created.id)
     setMembers([])
     setStudentId('')
-    setMaterialKey('')
   }
 
   async function saveMember() {
@@ -116,25 +104,6 @@ export default function GroupManagement({
     setMembers(current =>
       current?.filter(member => member.userId !== id) ?? null,
     )
-  }
-
-  async function loadMaterials() {
-    setMaterialKey('')
-    setMaterials(null)
-
-    setMaterials(await listVisibleMaterials(userId, courseId))
-  }
-
-  async function saveMaterialGrant() {
-    if (!canEditGroup || !selectedGroup || !selectedMaterial) return
-
-    const group = selectedGroup
-    const material = selectedMaterial
-
-    await run(async () => {
-      await grantMaterialAccess(userId, courseId, group.id, material)
-      setMaterialKey('')
-    }, `Materijal ${material.materialId} je dodeljen grupi „${group.name}“.`)
   }
 
   return (
@@ -267,71 +236,6 @@ export default function GroupManagement({
           </form>
         )}
       </fieldset>
-
-      {!archived && (
-        <fieldset className="work-panel" disabled={busy}>
-          <legend>Vidljivost materijala po grupi</legend>
-
-          {canEditGroup && selectedGroup ? (
-            <>
-              <p className="hint">
-                Izabrana grupa: <strong>{selectedGroup.name}</strong>
-              </p>
-
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => void run(loadMaterials, 'Materijali su učitani.')}
-              >
-                Učitaj materijale kursa
-              </button>
-
-              {materials?.length === 0 && (
-                <p className="hint">Kurs nema materijala za dodelu.</p>
-              )}
-
-              {materials && materials.length > 0 && (
-                <form onSubmit={event => {
-                  event.preventDefault()
-                  void saveMaterialGrant()
-                }}>
-                  <label>
-                    Materijal
-                    <select
-                      value={materialKey}
-                      onChange={event => setMaterialKey(event.target.value)}
-                    >
-                      <option value="">Izaberi materijal</option>
-
-                      {materials.map(material => {
-                        const key = `${material.type}:${material.materialId}`
-
-                        return (
-                          <option key={key} value={key}>
-                            {material.type} · {material.materialId}
-                          </option>
-                        )
-                      })}
-                    </select>
-                  </label>
-
-                  <p className="hint">
-                    Ako je materijal dostupan celom kursu, posle prve dodele
-                    mogu da ga vide samo studenti iz izabrane grupe. Ako je
-                    već ograničen na grupe, postojeće dodele ostaju na snazi.
-                  </p>
-
-                  <button type="submit" disabled={!selectedMaterial}>
-                    Dodeli grupi
-                  </button>
-                </form>
-              )}
-            </>
-          ) : (
-            <p className="hint">Izaberi aktivnu grupu u odeljku iznad.</p>
-          )}
-        </fieldset>
-      )}
 
       <div
         className={`result${status?.error ? ' error' : ''}`}

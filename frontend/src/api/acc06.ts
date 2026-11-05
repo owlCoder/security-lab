@@ -158,13 +158,3 @@ export async function readMaterial(
   const response = await request(userId, `/api/materials/${materialPath(material)}`)
   return response.json()
 }
-
-export async function grantMaterialAccess(
-  userId: string,
-  courseId: string,
-  groupId: string,
-  material: Material,
-): Promise<void> {
-  const path = `${coursePath(courseId)}/materials/${materialPath(material)}`
-  await request(userId, `${path}/groups/${encodeURIComponent(groupId)}`, 'PUT')
-}
