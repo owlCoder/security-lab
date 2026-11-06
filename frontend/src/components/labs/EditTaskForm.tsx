@@ -7,7 +7,6 @@ interface TaskData {
 }
 
 export interface EditTaskFormProps {
-  /** Identifier selected by the calling task list; never editable by the user. */
   taskId: string
 }
 
@@ -25,7 +24,7 @@ export function EditTaskForm({ taskId }: EditTaskFormProps) {
     setError('')
     setSuccess('')
 
-    if (!taskId.trim()) {
+    if (!taskId || !taskId.trim()) {
       setError('Nije odabran zadatak.')
       setLoading(false)
       return () => controller.abort()
@@ -69,8 +68,11 @@ export function EditTaskForm({ taskId }: EditTaskFormProps) {
         credentials: 'same-origin',
         body: JSON.stringify({ title: task.title, description: task.description }),
       })
-      if (!response.ok)
+      
+      if (!response.ok) {
         throw new Error(`Čuvanje nije uspelo (HTTP ${response.status}). Izmene nisu potvrđene.`)
+      }
+      
       setSuccess('Izmene su uspešno sačuvane.')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Čuvanje nije uspelo. Izmene nisu potvrđene.')
