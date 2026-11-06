@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
+using Microsoft.Extensions.Logging.Abstractions;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
@@ -9,6 +10,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.Identity.Services;
+using Platform.Audit.Contracts;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -32,8 +34,9 @@ public class LoginTests
 
     private Mock<ICredentialVerifier> _verifier = null!;
     private Mock<ISessionCreator> _sessions = null!;
-    private Mock<IAuditWriter> _audit = null!;
-    private List<AuditEvent> _events = null!;
+    private Mock<ISessionManager> _sessionManager = null!;
+    private Mock<ITrustedAuditWriter> _audit = null!;
+    private List<(AuditEventDraft Draft, AuditContext Context)> _events = null!;
     private LoginService _login = null!;
 
     [SetUp]
@@ -41,15 +44,31 @@ public class LoginTests
     {
         _verifier = new Mock<ICredentialVerifier>();
         _sessions = new Mock<ISessionCreator>();
-        _audit = new Mock<IAuditWriter>();
+        _sessionManager = new Mock<ISessionManager>();
+        _sessionManager.Setup(manager => manager.RevokeSession(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _audit = new Mock<ITrustedAuditWriter>();
         _events = [];
-        _audit.Setup(a => a.Write(It.IsAny<AuditEvent>())).Callback<AuditEvent>(_events.Add);
+        _audit.Setup(a => a.WriteAsync(
+                It.IsAny<AuditEventDraft>(),
+                It.IsAny<AuditContext>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AuditEventDraft, AuditContext, CancellationToken>(
+                (draft, context, _) => _events.Add((draft, context)))
+            .ReturnsAsync(AuditWriteResult.Recorded(Guid.NewGuid()));
 
         // Same defaults the old fakes had: wrong credentials, and a session store that issues a session.
         GivenCredentials(CredentialResult.Invalid);
         GivenSession(new IssuedSession(Token, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(8)));
 
-        _login = new LoginService(_verifier.Object, _sessions.Object, _audit.Object, TimeProvider.System);
+        _login = new LoginService(
+            _verifier.Object,
+            _sessions.Object,
+            _sessionManager.Object,
+            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance));
     }
 
     private void GivenCredentials(CredentialResult result) =>
@@ -79,9 +98,13 @@ public class LoginTests
         Assert.That(result.Session!.Token, Is.EqualTo(Token));
         _verifier.Verify(v => v.VerifyAsync(Email, password, It.IsAny<CancellationToken>()), Times.Once());
         _sessions.Verify(s => s.CreateAsync(id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once());
+        _sessionManager.Verify(manager => manager.RevokeSession(
+            It.IsAny<Guid>(),
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         var e = _events.Single();
-        Assert.That(e.Outcome, Is.EqualTo("success"));
-        Assert.That(e.ActorId, Is.EqualTo(id));
+        Assert.That(e.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+        Assert.That(e.Context.Actor.Id, Is.EqualTo(id));
     }
 
     [Test]
@@ -92,7 +115,7 @@ public class LoginTests
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.InvalidCredentials));
         Assert.That(result.Session, Is.Null);
         VerifyNoSessionCreated();
-        Assert.That(_events.Single().Outcome, Is.EqualTo("failure"));
+        Assert.That(_events.Single().Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
     }
 
     [TestCase(AccountStatus.Blocked)]
@@ -108,8 +131,8 @@ public class LoginTests
         Assert.That(result.Session, Is.Null);
         VerifyNoSessionCreated();
         var e = _events.Single();
-        Assert.That(e.Outcome, Is.EqualTo("denied"));
-        Assert.That(e.ActorId, Is.EqualTo(id));
+        Assert.That(e.Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+        Assert.That(e.Context.Actor.Id, Is.EqualTo(id));
     }
 
     [TestCase(null, Password)]
@@ -157,7 +180,33 @@ public class LoginTests
         var result = await _login.ExecuteAsync(Email, Password, "corr-7");
 
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Unavailable));
-        Assert.That(_events.Single().Outcome, Is.EqualTo("failure"));
+        Assert.That(_events.Single().Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+    }
+
+    [Test]
+    public async Task SuccessfulCredentials_WhenAuditIsUnavailable_DoesNotReturnSession()
+    {
+        var id = Guid.NewGuid();
+        var handle = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active));
+        GivenSession(new IssuedSession(Token, handle, DateTimeOffset.UtcNow.AddHours(8)));
+        _audit.Setup(a => a.WriteAsync(
+                It.IsAny<AuditEventDraft>(),
+                It.IsAny<AuditContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AuditWriteResult.Unavailable());
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-audit-down");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Unavailable));
+            Assert.That(result.Session, Is.Null);
+        }
+        _sessionManager.Verify(manager => manager.RevokeSession(
+            id,
+            handle,
+            CancellationToken.None), Times.Once);
     }
 
     [TestCaseSource(nameof(Passwords))]
@@ -171,7 +220,13 @@ public class LoginTests
         Assert.That(_events, Has.Count.EqualTo(2));
         foreach (var e in _events)
         {
-            var text = string.Join('|', e.Action, e.Target, e.Outcome, e.CorrelationId, e.Detail);
+            var text = string.Join('|',
+                e.Draft.EventType,
+                e.Draft.Resource?.Id,
+                e.Draft.Outcome,
+                e.Draft.Details is null ? null : string.Join(',', e.Draft.Details),
+                e.Context.Actor.Id,
+                e.Context.CorrelationId);
             Assert.That(text, Does.Not.Contain(password).And.Not.Contain(Email).And.Not.Contain(Token));
         }
     }

@@ -15,7 +15,7 @@ validator remains responsible for event catalog and detail allowlists.
 The initial migration and model snapshot are committed with the source. Migration history
 is kept in `audit.__EFMigrationsHistory`, separate from other modules' migrations.
 
-`PostgresAuditEventStore` implements an internal `IAuditEventStore` proposal for S-06.
+`PostgresAuditEventStore` implements the internal `IAuditEventStore` used by S-06.
 It rechecks the existing catalog validator, uses parameterized SQL and never overwrites
 an event. Repeating an ID with the same content returns `AlreadyPresent`; a changed
 payload returns `Conflict`. Server-assigned time is excluded from retry comparison,
@@ -25,29 +25,29 @@ transaction on a duplicate key.
 Without an explicit transaction, an append is committed by PostgreSQL before it returns.
 Inside an existing `AuditDbContext` transaction, it participates in that transaction;
 the caller must commit before reporting business success. It does not call `SaveChanges`
-or commit other pending EF changes. Database errors and cancellation propagate to the
-future writer, which must translate them according to the public audit contract.
+or commit other pending EF changes. `AuditWriter` translates expected storage failures to
+the public fail-closed result without returning database messages or event details.
 
-The internal storage interface still needs agreement with the S-06 owner. Public writer
-integration and the shared business transaction demo are pending.
-`AddAudit()` does not register persistence yet. `FindAsync` is an internal storage
-operation, not an authorized AUD-06 endpoint.
+`AddAudit(IConfiguration)` now registers `AuditDbContext`, `PostgresAuditEventStore`,
+`AuditWriter`, `IAuditWriter` and `ITrustedAuditWriter`. The API replaces the composition
+fallback context provider with `ServerAuditContextProvider`: actor identity comes only
+from the session validated by `SessionCheckMiddleware`, and correlation comes only from
+`CorrelationMiddleware`. Identity login, logout and account-status producers use the
+trusted writer boundary because those flows establish their actor at different points.
+`FindAsync` remains an internal storage operation, not an authorized AUD-06 endpoint.
 
-The S-06 branch `feature/AUD-01-audit-writer` at `db550d0` was reviewed before this PR.
-It currently defines `IAuditLogStore.AppendAsync(AuditLogEntry)`, where the entry contains
-an occurrence time and a general `IDictionary` payload snapshot. That boundary does not
-yet match the existing typed public writer contract or this store's `AuditEvent` input.
-Before integration, agree with the S-06 owner on catalog validation, trusted actor and
-correlation context, event ID/schema version and the append result/transaction semantics.
-Do not persist arbitrary payload dictionaries through an adapter that bypasses these rules.
-No S-06 implementation is changed or imported by this persistence PR.
+The S-06 writer/store contract is therefore integrated. The remaining transaction work
+is narrower: `ChangeAccountStatus` still uses `InMemoryAccountRepository` and compensates
+after an Audit failure. That is not equivalent to one PostgreSQL transaction. S-16 must
+connect the existing persistent Identity account row and Audit insert to a shared commit
+boundary, then verify the final state through a new database session.
 
 ## Architecture and data flow
 
 ```mermaid
 flowchart LR
-    Producer[Producer - pending integration] -.-> Writer[S-06 writer - pending]
-    Writer -.-> Port[IAuditEventStore - internal proposal]
+    Producer[Identity Audit producer] --> Writer[S-06 AuditWriter]
+    Writer --> Port[IAuditEventStore]
     Port --> Store[PostgresAuditEventStore]
     Store --> Context[AuditDbContext]
     Context --> Database[(audit.audit_events)]
@@ -58,7 +58,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     subgraph Server[Server process]
-        Trusted[Trusted actor and correlation context - writer integration pending]
+        Trusted[Validated session and server correlation context]
         Draft[Event draft]
         Validation[Existing catalog validator]
         Store[Audit persistence]
@@ -185,6 +185,33 @@ is intentionally forbidden. Do not point it at production or a database with rea
 With both test connection variables configured on 2026-11-04, the Audit project ran
 **113 tests: 113 passed, 0 failed, 0 skipped**. Eight of these test cases verify the actual
 bootstrapped runtime role. Without the runtime variable, those eight are explicitly skipped.
+
+## API runtime configuration
+
+The API resolves the restricted Audit connection from `ConnectionStrings:Audit`.
+For local PowerShell sessions, set it through `ConnectionStrings__Audit`; for deployed
+environments, use the platform's secret store. Never commit the password or place it in
+command-line arguments. The value must identify the restricted
+`securitylab_audit_runtime` role created by `scripts/audit/bootstrap-runtime.ps1`, not the
+bootstrap or migration account. Runtime startup never applies Audit migrations.
+
+If the setting is absent, invalid, or the Audit database is unavailable, durable Audit
+writes fail closed. In particular, a credential check does not produce a usable login:
+the API revokes the newly created server-side session and returns 503 without exposing a
+token. This is an operational dependency of the shared Identity flow, so the Audit schema,
+runtime grants, and secret must be prepared before enabling that flow.
+
+Example shape (replace the placeholders through a secret prompt or deployment secret):
+
+```powershell
+$env:ConnectionStrings__Audit = 'Host=127.0.0.1;Port=5432;Database=securitylab;Username=securitylab_audit_runtime;Password=<secret>'
+dotnet run --project backend/Platform.Api/Platform.Api.csproj
+Remove-Item Env:ConnectionStrings__Audit
+```
+
+Do not use `AUDIT_MIGRATION_CONNECTION_STRING` as the API connection. That variable is
+reserved for the privileged design-time migration tool. The two PostgreSQL test variables
+documented below are likewise test-only.
 
 ## Running PostgreSQL tests
 

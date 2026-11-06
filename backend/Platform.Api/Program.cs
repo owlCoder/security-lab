@@ -17,6 +17,8 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Services.Audit;
+using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
 using Platform.Identity;
@@ -73,7 +75,8 @@ else
     builder.Services.AddSingleton<IRequestSubjectResolver, UnauthenticatedSubjectResolver>();
 }
 
-builder.Services.AddAudit();
+builder.Services.AddAudit(builder.Configuration);
+builder.Services.AddScoped<IAuditContextProvider, ServerAuditContextProvider>();
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -95,6 +98,7 @@ builder.Services.AddScoped<ChangeAccountStatus>();
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IdentityAuditProducer>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 

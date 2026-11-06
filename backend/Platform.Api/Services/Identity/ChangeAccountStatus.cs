@@ -1,6 +1,7 @@
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
 
 namespace Platform.Api.Services.Identity;
@@ -10,77 +11,84 @@ public sealed class ChangeAccountStatus(
     IAccessDecision access,
     IAccountRepository accounts,
     ISessionManager sessions,
-    IAuditWriter audit,
-    TimeProvider clock)
+    IdentityAuditProducer audit)
 {
-    private const string AuditAction = "account.status.change";
-
-    public ChangeStatusResult Execute(Guid targetId, string? requestedStatus, string? reason, string correlationId)
+    public async Task<ChangeStatusResult> ExecuteAsync(
+        Guid targetId,
+        string? requestedStatus,
+        string? reason,
+        string correlationId,
+        CancellationToken cancellationToken = default)
     {
+        _ = reason; // Free text is deliberately never copied into AUD-01 records.
         var caller = identity.Current;
-        if (caller is null || !caller.IsAuthenticated)
-            return Reject(ChangeStatusOutcome.Unauthenticated, null, targetId, correlationId, "denied", "no authenticated caller");
+        if (caller is null || !caller.IsAuthenticated || caller.UserId is not Guid actorId)
+            return await RejectAsync(ChangeStatusOutcome.Unauthenticated, null, targetId,
+                AuditOutcome.Denied, "unauthenticated", correlationId, cancellationToken);
 
         if (!access.CanChangeAccountStatus(caller))
-            return Reject(ChangeStatusOutcome.Forbidden, caller.UserId, targetId, correlationId, "denied", "caller is not an administrator");
+            return await RejectAsync(ChangeStatusOutcome.Forbidden, actorId, targetId,
+                AuditOutcome.Denied, "forbidden", correlationId, cancellationToken);
 
         if (!TryParseStatus(requestedStatus, out var newStatus))
-            return Reject(ChangeStatusOutcome.InvalidStatus, caller.UserId, targetId, correlationId, "failure", "invalid status value");
+            return await RejectAsync(ChangeStatusOutcome.InvalidStatus, actorId, targetId,
+                AuditOutcome.Failure, "invalid_status", correlationId, cancellationToken);
 
         var account = accounts.Find(targetId);
         if (account is null)
-            return Reject(ChangeStatusOutcome.NotFound, caller.UserId, targetId, correlationId, "failure", "account not found");
+            return await RejectAsync(ChangeStatusOutcome.NotFound, actorId, targetId,
+                AuditOutcome.Failure, "not_found", correlationId, cancellationToken);
 
-        if (caller.UserId == targetId)
-            return Reject(ChangeStatusOutcome.SelfChangeNotAllowed, caller.UserId, targetId, correlationId, "failure", "administrator cannot change own status");
+        if (actorId == targetId)
+            return await RejectAsync(ChangeStatusOutcome.SelfChangeNotAllowed, actorId, targetId,
+                AuditOutcome.Failure, "self_change_not_allowed", correlationId, cancellationToken);
 
         if (account.Status == newStatus)
-            return Reject(ChangeStatusOutcome.InvalidTransition, caller.UserId, targetId, correlationId, "failure", "status is already " + newStatus);
+            return await RejectAsync(ChangeStatusOutcome.InvalidTransition, actorId, targetId,
+                AuditOutcome.Failure, "invalid_transition", correlationId, cancellationToken);
 
         var oldStatus = account.Status;
         account.Status = newStatus;
         accounts.Save(account);
 
-        // Blokiran ili arhiviran nalog gubi sve aktivne sesije odmah (spec IDN-03).
-        if (newStatus is AccountStatus.Blocked or AccountStatus.Archived)
-            sessions.RevokeAllForUser(targetId, "");
+        var auditResult = await audit.AccountStatusChangedAsync(
+            actorId, targetId, oldStatus, newStatus, correlationId,
+            cancellationToken: CancellationToken.None);
+        if (!auditResult.IsRecorded)
+        {
+            // S-12 demo fail-closed compensation. S-16 replaces this with one
+            // PostgreSQL transaction and verifies state from a new DB session.
+            account.Status = oldStatus;
+            accounts.Save(account);
+            return new ChangeStatusResult(ChangeStatusOutcome.Unavailable);
+        }
 
-        var cleanReason = CleanReason(reason);
-        var detail = $"{oldStatus}->{newStatus}" + (cleanReason is null ? "" : $" reason={cleanReason}");
-        Write(caller.UserId, targetId, correlationId, "success", detail);
+        if (newStatus is AccountStatus.Blocked or AccountStatus.Archived)
+            await sessions.RevokeAllForUser(targetId, "status_changed", cancellationToken);
 
         return new ChangeStatusResult(ChangeStatusOutcome.Success, newStatus);
     }
 
-    /// Prihvata samo imena ACTIVE / BLOCKED / ARCHIVED (bilo koja veličina slova).
-    /// Brojevi se odbijaju, jer Enum.TryParse inače prihvata i "1" ili "99".
     private static bool TryParseStatus(string? raw, out AccountStatus status)
     {
         status = default;
         if (string.IsNullOrWhiteSpace(raw)) return false;
-
         var value = raw.Trim();
         if (!value.All(char.IsLetter)) return false;
-
-        return Enum.TryParse(value, ignoreCase: true, out status) && Enum.IsDefined(status);
+        return Enum.TryParse(value, true, out status) && Enum.IsDefined(status);
     }
 
-    /// Razlog je opcioni. Skidamo kontrolne karaktere (novi red) da niko ne ubaci lažnu liniju u audit log.
-    private static string? CleanReason(string? reason)
+    private async Task<ChangeStatusResult> RejectAsync(
+        ChangeStatusOutcome outcome,
+        Guid? actorId,
+        Guid targetId,
+        AuditOutcome auditOutcome,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(reason)) return null;
-
-        var cleaned = new string(reason.Where(c => !char.IsControl(c)).Take(200).ToArray()).Trim();
-        return cleaned.Length == 0 ? null : cleaned;
-    }
-
-    private ChangeStatusResult Reject(
-        ChangeStatusOutcome outcome, Guid? actorId, Guid targetId, string correlationId, string auditOutcome, string detail)
-    {
-        Write(actorId, targetId, correlationId, auditOutcome, detail);
+        await audit.AccountStatusRejectedAsync(
+            targetId, auditOutcome, reasonCode, correlationId, actorId, cancellationToken);
         return new ChangeStatusResult(outcome);
     }
-
-    private void Write(Guid? actorId, Guid targetId, string correlationId, string outcome, string detail) =>
-        audit.Write(new AuditEvent(clock.GetUtcNow(), actorId, AuditAction, targetId.ToString(), outcome, correlationId, detail));
 }

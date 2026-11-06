@@ -4,6 +4,8 @@ using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
+using Platform.Audit.Contracts;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -50,16 +52,35 @@ public class ChangeAccountStatusTests
         public Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SessionInfo>)Array.Empty<SessionInfo>());
     }
 
-    private sealed class RecordingAudit : IAuditWriter
+    private sealed class RecordingAudit : ITrustedAuditWriter
     {
         public List<AuditEvent> Events { get; } = new();
-        public void Write(AuditEvent e) => Events.Add(e);
+        public AuditWriteResult Result { get; set; } = AuditWriteResult.Recorded(Guid.NewGuid());
+
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft,
+            AuditContext context,
+            CancellationToken cancellationToken = default)
+        {
+            Events.Add(new AuditEvent(
+                DateTimeOffset.UnixEpoch,
+                context.Actor.Id,
+                draft.EventType,
+                draft.Resource?.Id ?? "-",
+                draft.Outcome.ToString().ToLowerInvariant(),
+                context.CorrelationId,
+                draft.Details is null ? null : string.Join(',', draft.Details.Select(x => $"{x.Key}={x.Value}"))));
+            return ValueTask.FromResult(Result);
+        }
     }
 
     private static CallerIdentity Admin => new(true, AdminId, AuthenticationLevel.None, new Guid());
 
     private static (ChangeAccountStatus Sut, InMemoryAccountRepository Repo, RecordingRevoker Revoker, RecordingAudit Audit)
-        Build(CallerIdentity? caller, AccountStatus studentStatus = AccountStatus.Active)
+        Build(
+            CallerIdentity? caller,
+            AccountStatus studentStatus = AccountStatus.Active,
+            AuditWriteResult? auditResult = null)
     {
         var repo = new InMemoryAccountRepository();
         repo.Save(new UserAccount(StudentId, "student@example.com", studentStatus));
@@ -67,10 +88,14 @@ public class ChangeAccountStatusTests
 
         var revoker = new RecordingRevoker();
         var audit = new RecordingAudit();
+        if (auditResult is not null)
+            audit.Result = auditResult;
         var sut = new ChangeAccountStatus(
             new FakeIdentity(caller),
             new AdminOnlyAccessDecision(new FakeAdmins(AdminId)),
-            repo, revoker, audit, TimeProvider.System);
+            repo,
+            revoker,
+            new IdentityAuditProducer(audit, NullLogger<IdentityAuditProducer>.Instance));
 
         return (sut, repo, revoker, audit);
     }
@@ -241,4 +266,34 @@ public class ChangeAccountStatusTests
 
         Assert.That(audit.Events.Single().Detail, Does.Not.Contain("\n"));
     }
+
+    [Test]
+    public void AuditUnavailable_RollsBackStatus_AndDoesNotRevokeSessions()
+    {
+        var (sut, repo, revoker, _) = Build(
+            Admin,
+            auditResult: AuditWriteResult.Unavailable());
+
+        var result = sut.Execute(StudentId, "BLOCKED", "must not be logged", "corr-down");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(result.Outcome, Is.EqualTo(ChangeStatusOutcome.Unavailable));
+            Assert.That(repo.Find(StudentId)!.Status, Is.EqualTo(AccountStatus.Active));
+            Assert.That(revoker.Revoked, Is.Empty);
+        }
+    }
+}
+
+internal static class ChangeAccountStatusTestExtensions
+{
+    public static ChangeStatusResult Execute(
+        this ChangeAccountStatus service,
+        Guid targetId,
+        string? requestedStatus,
+        string? reason,
+        string correlationId) =>
+        service.ExecuteAsync(targetId, requestedStatus, reason, correlationId)
+            .GetAwaiter()
+            .GetResult();
 }

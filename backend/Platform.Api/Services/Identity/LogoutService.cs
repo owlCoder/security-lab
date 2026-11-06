@@ -9,10 +9,10 @@ namespace Platform.Api.Services.Identity;
 /// sessions and only touches this one session. Without a session to revoke it does nothing, so the caller
 /// answers the same in every case and learns nothing about the session state.
 /// </summary>
-public sealed class LogoutService(ISessionStore sessions, IAuditWriter audit, TimeProvider clock) : ILogoutService
+internal sealed class LogoutService(
+    ISessionStore sessions,
+    IdentityAuditProducer audit) : ILogoutService
 {
-    private const string AuditAction = "auth.logout";
-
     public async Task ExecuteAsync(string? rawToken, string correlationId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(rawToken))
@@ -22,7 +22,9 @@ public sealed class LogoutService(ISessionStore sessions, IAuditWriter audit, Ti
         if (session is null)
             return;
 
-        // Never put the token or its hash in an audit event (AUD-03). The handle is public.
-        audit.Write(new AuditEvent(clock.GetUtcNow(), session.UserId, AuditAction, session.SessionHandle.ToString(), "success", correlationId, null));
+        // Logout remains effective even if its audit record is unavailable. The producer
+        // raises a technical alarm without including the token or session identifier.
+        await audit.LogoutSucceededAsync(
+            session.UserId, correlationId, CancellationToken.None);
     }
 }
