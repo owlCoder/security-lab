@@ -12,6 +12,7 @@ namespace Platform.Identity.Tests.Integration;
 [SetUpFixture]
 public class TestDatabaseFixture
 {
+    #region Fields
     private static readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder()
         .WithImage("postgres:15-alpine")
         .WithDatabase("test_db")
@@ -22,6 +23,7 @@ public class TestDatabaseFixture
     public static string ConnectionString { get; private set; } = string.Empty;
     private static Respawner _respawner = null!;
     private static NpgsqlConnection _connection = null!;
+    #endregion
 
     [OneTimeSetUp]
     public async Task RunBeforeAnyTests()
@@ -57,7 +59,7 @@ public class TestDatabaseFixture
         await _respawner.ResetAsync(_connection);
     }
 
-    // Definicija metode za migracije
+    #region Helper methods
     private static async Task ApplyMigrationsAsync()
     {
         await using var factory = new CustomWebApplicationFactory<Program>();
@@ -69,4 +71,5 @@ public class TestDatabaseFixture
         // Primenjivanje migracije na testnu bazu
         await db.Database.MigrateAsync(); 
     }
+    #endregion
 }

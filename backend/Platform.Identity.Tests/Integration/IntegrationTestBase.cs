@@ -7,9 +7,11 @@ namespace Platform.Identity.Tests.Integration;
 [TestFixture]
 public abstract class IntegrationTestBase
 {
+    #region Properties
     protected static CustomWebApplicationFactory<Program> Factory { get; private set; } = null!;
     protected static HttpClient Client { get; private set; } = null!;
-
+    #endregion
+    
     [OneTimeSetUp]
     public void BaseClassSetup()
     {
@@ -29,33 +31,20 @@ public abstract class IntegrationTestBase
     {
         // Respawn sam automatski čisti sve tabele, bez obzira ko ih je i kada dodao
         await TestDatabaseFixture.ResetDatabaseAsync();
+        // Skida kolac iy header-a pre svakog testa
+        Client.DefaultRequestHeaders.Remove("Cookie");
     }
 
-    // Helper metoda za insertovanje u bazu
-    protected async Task InsertAsync<TEntity>(TEntity entity) where TEntity : class
+    #region Helper methods
+    // Insert u bazu
+    protected static async Task InsertAsync<TEntity>(TEntity entity) where TEntity : class
     {
         using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
         db.Set<TEntity>().Add(entity);
         await db.SaveChangesAsync();
     }
-    
-    protected static async Task<TEntity> InsertAndReturnAsync<TEntity>(TEntity entity) where TEntity : class
-    {
-        using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        db.Set<TEntity>().Add(entity);
-        await db.SaveChangesAsync();
-        return entity;
-    }
-
-    // Helper da izvučeš bilo koji servis iz aplikacije (npr. PasswordHasher)
-    protected static TService GetService<TService>() where TService : notnull
-    {
-        var scope = Factory.Services.CreateScope();
-        return scope.ServiceProvider.GetRequiredService<TService>();
-    }
-
+    // Citanje iz baze
     protected static async Task<TEntity?> GetAsync<TEntity>(Guid id) where TEntity : class
     {
         using var scope = Factory.Services.CreateScope();
@@ -63,4 +52,11 @@ public abstract class IntegrationTestBase
         var entity = await db.Set<TEntity>().FindAsync(id);
         return entity;
     }
+    // Izvlacenje servisa iz applikacije
+    protected static TService GetService<TService>() where TService : notnull
+    {
+        var scope = Factory.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<TService>();
+    }
+    #endregion
 }
