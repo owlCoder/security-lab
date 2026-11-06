@@ -7,21 +7,21 @@ namespace Platform.Identity.Tests.Integration;
 [TestFixture]
 public abstract class IntegrationTestBase
 {
-    protected static CustomWebApplicationFactory<Program> _factory = null!;
-    protected static HttpClient _client = null!;
+    protected static CustomWebApplicationFactory<Program> Factory { get; private set; } = null!;
+    protected static HttpClient Client { get; private set; } = null!;
 
     [OneTimeSetUp]
     public void BaseClassSetup()
     {
-        _factory = new CustomWebApplicationFactory<Program>();
-        _client = _factory.CreateClient();
+        Factory = new CustomWebApplicationFactory<Program>();
+        Client = Factory.CreateClient();
     }
 
     [OneTimeTearDown]
     public void BaseClassTeardown()
     {
-        _client?.Dispose();
-        _factory?.Dispose();
+        Client.Dispose();
+        Factory.Dispose();
     }
 
     [SetUp]
@@ -34,9 +34,33 @@ public abstract class IntegrationTestBase
     // Helper metoda za insertovanje u bazu
     protected async Task InsertAsync<TEntity>(TEntity entity) where TEntity : class
     {
-        using var scope = _factory.Services.CreateScope();
+        using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
         db.Set<TEntity>().Add(entity);
         await db.SaveChangesAsync();
+    }
+    
+    protected static async Task<TEntity> InsertAndReturnAsync<TEntity>(TEntity entity) where TEntity : class
+    {
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        db.Set<TEntity>().Add(entity);
+        await db.SaveChangesAsync();
+        return entity;
+    }
+
+    // Helper da izvučeš bilo koji servis iz aplikacije (npr. PasswordHasher)
+    protected static TService GetService<TService>() where TService : notnull
+    {
+        var scope = Factory.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<TService>();
+    }
+
+    protected static async Task<TEntity?> GetAsync<TEntity>(Guid id) where TEntity : class
+    {
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var entity = await db.Set<TEntity>().FindAsync(id);
+        return entity;
     }
 }
