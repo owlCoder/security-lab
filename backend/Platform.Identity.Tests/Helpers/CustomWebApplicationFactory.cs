@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Identity.Persistence;
+using Platform.Identity.Tests.Integration;
 
 namespace Platform.Identity.Tests.Helpers;
 

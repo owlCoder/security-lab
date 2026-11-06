@@ -2,11 +2,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Platform.Identity.Persistence;
+using Platform.Identity.Tests.Helpers;
 using Respawn;
 using Testcontainers.PostgreSql;
 using Table = Respawn.Graph.Table;
 
-namespace Platform.Identity.Tests.Helpers;
+namespace Platform.Identity.Tests.Integration;
 
 [SetUpFixture]
 public class TestDatabaseFixture
