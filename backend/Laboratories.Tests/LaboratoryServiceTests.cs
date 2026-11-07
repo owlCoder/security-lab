@@ -226,6 +226,95 @@ public sealed class LaboratoryServiceTests
         Assert.That(result.Status, Is.EqualTo(LabResultStatus.NotFound));
     }
 
+    // ---------- LAB-03: provera konteksta pri otvaranju ----------
+    // Studenti ne prolaze RequireLabAccess(Read) u FakeAccessDecision, pa se ovde testira servis direktno.
+
+    [Test]
+    public async Task Open_WhenStudentEnrolledOnCourse_ReturnsLaboratory()
+    {
+        Laboratory lab = await CreateAsync("marko", "Kontrola pristupa");
+        var student = new Caller("ana", PlatformRole.Student);
+        _membership.Set(CourseId, CallerId.From(student)!.Value, CourseRole.Student);
+
+        LabResult result = await _service.GetAsync(lab.Id, student, CancellationToken.None);
+
+        Assert.That(result.Status, Is.EqualTo(LabResultStatus.Ok));
+        Assert.That(result.Laboratory!.Id, Is.EqualTo(lab.Id));
+    }
+
+    [Test]
+    public async Task Open_WhenCourseTeacherIsCreator_ReturnsLaboratory()
+    {
+        Laboratory lab = await CreateAsync("marko", "Kontrola pristupa");
+
+        LabResult result = await _service.GetAsync(lab.Id, new Caller("marko", PlatformRole.Teacher), CancellationToken.None);
+
+        Assert.That(result.Status, Is.EqualTo(LabResultStatus.Ok));
+        Assert.That(result.Laboratory!.CourseId, Is.EqualTo(CourseId));
+    }
+
+    [Test]
+    public async Task Open_WhenStudentIsNotOnAnyCourse_ReturnsNotFoundEvenWithKnownId()
+    {
+        Laboratory lab = await CreateAsync("marko", "Kontrola pristupa");
+
+        LabResult result = await _service.GetAsync(lab.Id, new Caller("mila", PlatformRole.Student), CancellationToken.None);
+
+        Assert.That(result.Status, Is.EqualTo(LabResultStatus.NotFound));
+        Assert.That(result.Laboratory, Is.Null);
+    }
+
+    [Test]
+    public async Task Open_WhenStudentEnrolledOnOtherCourse_ReturnsNotFound()
+    {
+        Laboratory lab = await CreateAsync("marko", "Kontrola pristupa");
+        var student = new Caller("luka", PlatformRole.Student);
+        _membership.Set(OtherCourseId, CallerId.From(student)!.Value, CourseRole.Student);
+
+        LabResult result = await _service.GetAsync(lab.Id, student, CancellationToken.None);
+
+        Assert.That(result.Status, Is.EqualTo(LabResultStatus.NotFound));
+        Assert.That(result.Laboratory, Is.Null);
+    }
+
+    [Test]
+    public async Task Open_WhenCallerIsAnonymous_ReturnsUnauthenticated()
+    {
+        Laboratory lab = await CreateAsync("marko", "Kontrola pristupa");
+
+        LabResult result = await _service.GetAsync(lab.Id, new AnonymousIdentityContext(), CancellationToken.None);
+
+        Assert.That(result.Status, Is.EqualTo(LabResultStatus.Unauthenticated));
+        Assert.That(result.Laboratory, Is.Null);
+    }
+
+    [Test]
+    public async Task Open_ForeignAndMissingLaboratory_GiveSameResult()
+    {
+        Laboratory lab = await CreateAsync("marko", "Kontrola pristupa");
+        var outsider = new Caller("mila", PlatformRole.Student);
+
+        LabResult foreign = await _service.GetAsync(lab.Id, outsider, CancellationToken.None);
+        LabResult missing = await _service.GetAsync(Guid.NewGuid(), outsider, CancellationToken.None);
+
+        Assert.That(foreign, Is.EqualTo(missing));
+    }
+
+    [Test]
+    public async Task Open_WhenLaboratoryHasNoCourse_ReturnsNotFoundEvenToCreator()
+    {
+        // Laboratorija ucitana kroz Rehydrate bez kursa (skladiste bez kolone CourseId).
+        var marko = new Caller("marko", PlatformRole.Teacher);
+        Laboratory legacy = Laboratory.Rehydrate(
+            Guid.NewGuid(), "Bez kursa", LabStatus.Draft, CallerId.From(marko)!.Value, Now);
+        var service = new LaboratoryService(
+            new LegacyRowRepository(legacy), _membership, new FixedTimeProvider(Now), NullLogger<LaboratoryService>.Instance);
+
+        LabResult result = await service.GetAsync(legacy.Id, marko, CancellationToken.None);
+
+        Assert.That(result.Status, Is.EqualTo(LabResultStatus.NotFound));
+    }
+
     private async Task<Laboratory> CreateAsync(string user, string title)
     {
         LabResult result = await _service.CreateAsync(CourseId, title, new Caller(user, PlatformRole.Teacher), CancellationToken.None);
@@ -243,5 +332,18 @@ public sealed class LaboratoryServiceTests
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    // LAB-03: skladiste koje vraca laboratoriju bez kursa, kao PostgreSQL pre migracije Tima 20.
+    private sealed class LegacyRowRepository(Laboratory stored) : ILaboratoryRepository
+    {
+        public Task<Laboratory?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<Laboratory?>(id == stored.Id ? stored : null);
+
+        public Task AddAsync(Laboratory laboratory, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Laboratory>> ListAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task UpdateAsync(Laboratory laboratory, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LabRevision> AddRevisionAsync(Guid laboratoryId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<LabRevision>> GetRevisionsAsync(Guid laboratoryId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

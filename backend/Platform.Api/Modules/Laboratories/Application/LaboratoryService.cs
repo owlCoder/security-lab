@@ -101,9 +101,28 @@ public sealed class LaboratoryService(
         }
 
         Laboratory? laboratory = await repository.GetByIdAsync(id, cancellationToken);
-        return IsVisibleTo(laboratory, callerId.Value)
-            ? LabResult.Ok(laboratory!)
-            : LabResult.NotFound;
+        if (laboratory is null)
+        {
+            return LabResult.NotFound;
+        }
+
+        // LAB-03: kurs se uzima iz sacuvane laboratorije; za laboratoriju bez kursa clanstvo se ne pita.
+        CourseRole role = laboratory.CourseId == Guid.Empty
+            ? CourseRole.None
+            : await courseMembership.GetRoleAsync(laboratory.CourseId, callerId.Value, cancellationToken);
+
+        LabOpenDecision decision = LabOpenPolicy.DecideOpen(
+            laboratory.CourseId, role, isCreator: laboratory.CreatedBy == callerId.Value);
+        if (!decision.Allowed)
+        {
+            // Isti NotFound kao za nepostojecu laboratoriju; razlog ide samo u serverski log.
+            logger.LogWarning(
+                "Laboratory open denied: action={Action} laboratoryId={LaboratoryId} courseId={CourseId} by={CallerId} reason={Reason}",
+                LabActions.Read, laboratory.Id, laboratory.CourseId, callerId.Value, decision.Code);
+            return LabResult.NotFound;
+        }
+
+        return LabResult.Ok(laboratory);
     }
 
     public async Task<LabResult> RenameAsync(

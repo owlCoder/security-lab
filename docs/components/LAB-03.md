@@ -36,8 +36,11 @@ flowchart LR
     ACC5["UseAccessControl (ACC-05)<br/>DelegatesToLegacyAuthorization"]
     F["AccessCheckFilter<br/>IIdentityContext + IAccessDecision<br/>(401 / 403 po ulozi)"]
     E["LaboratoriesEndpoints<br/>POST /api/laboratories<br/>(400 INVALID_BODY / INVALID_COURSE)"]
-    S["LaboratoryService.CreateAsync"]
-    P["LabCoursePolicy<br/>CourseTeacher / NotCourseTeacher"]
+    S["LaboratoryService.CreateAsync<br/>kreiranje — Mihailo"]
+    P["LabCoursePolicy<br/>CourseTeacher / NotCourseTeacher<br/>kreiranje — Mihailo"]
+    E2["LaboratoriesEndpoints<br/>GET /api/laboratories/{id}<br/>(404 NOT_FOUND)"]
+    S2["LaboratoryService.GetAsync<br/>otvaranje — Vojin"]
+    P2["LabOpenPolicy<br/>CourseStudent / CourseTeacher<br/>NoCourse / NotCourseMember / NotOwner<br/>otvaranje — Vojin"]
     D["Laboratory (domen)<br/>CourseId obavezan"]
     R[["ILaboratoryRepository"]]
     IM["InMemoryLaboratoryRepository<br/>(Development)"]
@@ -67,7 +70,21 @@ flowchart LR
   S -->|"akcija, kurs, korisnik, kod"| LOG
   LV -.->|"registruje radnje"| PA
   ACC5 -.-> PA
+
+  FE -->|"GET /{id}<br/>X-Test-User"| ACC5
+  F -->|"laboratory.read"| E2 --> S2
+  S2 -->|"ucitaj laboratoriju po id"| R
+  S2 -->|"uloga na CourseId iz sacuvane laboratorije"| CM
+  S2 --> P2
+  S2 -->|"akcija, laboratorija, kurs, korisnik, kod"| LOG
+
+  classDef mihailo stroke:#2f6fb3,stroke-width:2px
+  classDef vojin stroke:#c2410c,stroke-width:2px,stroke-dasharray:4 3
+  class S,P mihailo
+  class E2,S2,P2 vojin
 ```
+
+Oznake: puni plavi okvir je kreiranje (Mihailo), isprekidani narandzasti okvir je otvaranje (Vojin). Ostali cvorovi su zajednicki ili pripadaju drugim timovima.
 
 - `LaboratoryService` zavisi samo od ugovora (`ICourseMembership`, `ILaboratoryRepository`), ne od tehnickih adaptera.
 - `LabCoursePolicy` nema zavisnosti: ulaz je uloga, izlaz je odluka sa kodom. Zato se testira bez HTTP-a i bez skladista.
@@ -142,7 +159,141 @@ sequenceDiagram
 
 ## Provera konteksta pri otvaranju (Vojin)
 
-Biće dopunjeno.
+**Student:** Vojin Jovanović / PR 156/2021
+
+**Grana:** `feature/LAB-03-provera-konteksta`
+
+### Odgovornost
+
+- `LaboratoryService.GetAsync` posle ucitavanja laboratorije pita `ICourseMembership` za ulogu pozivaoca na `laboratory.CourseId` i odluku prepusta `LabOpenPolicy.DecideOpen`.
+- Odbijanje vraca isti `404 NOT_FOUND` kao nepostojeca laboratorija. Razlog se pise samo u serverski log: `action`, `laboratoryId`, `courseId`, `callerId`, `reason`.
+- Nije menjano: `RenameAsync`, lista laboratorija, `FakeAccessDecision`, `Platform.Access` i Mihailov deo (kreiranje).
+
+Pravila `LabOpenPolicy.DecideOpen(courseId, roleOnCourse, isCreator)`, redom; podrazumevano odbijanje:
+
+| Uslov | Odluka | Kod |
+| --- | --- | --- |
+| laboratorija nema kurs (`Guid.Empty`) | odbij | `NoCourse` |
+| student na kursu | dozvoli | `CourseStudent` |
+| nastavnik na kursu i autor laboratorije | dozvoli | `CourseTeacher` |
+| nastavnik na kursu, ali nije autor | odbij | `NotOwner` (pravilo vlasnistva iz LAB-01) |
+| nije clan kursa / nepoznata uloga | odbij | `NotCourseMember` |
+
+Vlasnistvo iz LAB-01 (nastavnik vidi samo svoje laboratorije) vazi samo za nastavnike na kursu; studenti nikad nisu autori, pa za njih odlucuje upis na kurs. Autor koji vise nije clan kursa gubi pristup svojoj laboratoriji.
+
+### DFD: otvaranje laboratorije
+
+```mermaid
+flowchart LR
+  A(["Student / Nastavnik"])
+
+  subgraph TB["Granica poverenja: klijent → API (HTTP)"]
+    direction LR
+    P1["P1 API ruta<br/>GET /api/laboratories/{id}<br/>id mora biti Guid"]
+    P2["P2 Provera pristupa<br/>AccessCheckFilter: laboratory.read"]
+    P3["P3 LaboratoryService.GetAsync<br/>ucitavanje laboratorije"]
+    P4["P4 Provera kursa<br/>ICourseMembership + LabOpenPolicy"]
+  end
+
+  D1[("D1 Laboratorije<br/>Id, CourseId, CreatedBy")]
+  D2[("D2 Clanstvo na kursu")]
+  D3[("D3 Serverski log")]
+
+  A -->|"id, X-Test-User"| P1
+  P1 -->|"404 ako id nije Guid"| A
+  P1 -->|"id"| P2
+  P2 -->|"401 / 403 po globalnoj ulozi"| A
+  P2 -->|"potvrden pozivalac, id"| P3
+  P3 -->|"id"| D1
+  D1 -->|"laboratorija ili nista"| P3
+  P3 -->|"404 ako ne postoji"| A
+  P3 -->|"CourseId i CreatedBy iz sacuvane laboratorije"| P4
+  P4 -->|"(CourseId, userId)"| D2
+  D2 -->|"CourseRole"| P4
+  P4 -->|"kod odbijanja"| D3
+  P4 -->|"404 NOT_FOUND, isto kao nepostojeca"| A
+  P4 -->|"200 LaboratoryResponse"| A
+```
+
+Pretpostavke na granici: jedini ulaz od klijenta je `id` iz putanje (i identitet iz `X-Test-User` u Development rezimu). Kurs i autor nikad ne dolaze iz zahteva, vec iz D1. D2 je u Development rezimu stub u memoriji.
+
+### Zasto 404, a ne 403
+
+403 bi potvrdio da laboratorija sa tim ID-em postoji, pa bi korisnik van kursa mogao da proverava (nabraja) tudje ID-eve. Zato odbijanje vraca isti status i isto telo kao nepostojeca laboratorija (isti `LabResult.NotFound`), a pravi razlog vidi samo server u logu. Isto pravilo LAB-01 vec koristi za tudju laboratoriju.
+
+### Zasto se kurs uzima iz sacuvane laboratorije
+
+Kurs iz zahteva bi kontrolisao klijent: korisnik bi poslao kurs na kome jeste clan i tako otvorio laboratoriju sa drugog kursa (IDOR). GET ruta zato i nema `courseId`; provera uvek koristi `laboratory.CourseId` iz skladista.
+
+### Prazan `CourseId`
+
+Laboratorija ucitana kroz privremeni `Rehydrate` bez kursa (PostgreSQL pre migracije Tima 20) ima `CourseId = Guid.Empty`. Takvu laboratoriju ne otvara niko, ni autor (`NoCourse`), a clanstvo se za nju uopste ne pita. Posledica: dok Tim 20 ne doda kolonu, u PostgreSQL rezimu se ne otvara nijedna laboratorija (fail-closed).
+
+### Globalna provera i studenti
+
+`FakeAccessDecision` dozvoljava `laboratory.read` samo platformskoj ulozi `Teacher`. Student zato preko HTTP-a dobija `403` u `AccessCheckFilter`, pre `GetAsync` — za svaki ID, pa ni tako ne saznaje da li laboratorija postoji. Studentski slucajevi su pokriveni servisnim testovima (servis se poziva direktno); preko HTTP-a se LAB-03 provera dokazuje na nastavniku drugog kursa, koji globalnu proveru prolazi. `FakeAccessDecision` i `Platform.Access` nisu menjani.
+
+### Test scenariji (format iz specifikacije 8.1)
+
+| Requirement ID | Preduslov | Akcija | Ocekivano | Dokaz (test) |
+| --- | --- | --- | --- | --- |
+| LAB-03 | ana je studentkinja na kursu laboratorije | `GetAsync` | Ok, ista laboratorija | `Open_WhenStudentEnrolledOnCourse_ReturnsLaboratory` |
+| LAB-03 | marko je nastavnik kursa i autor | `GetAsync` / `GET /{id}` | Ok / 200 sa `courseId` | `Open_WhenCourseTeacherIsCreator_ReturnsLaboratory`, `GetLabById_WhenCourseTeacherOpens_Returns200WithCourse` |
+| LAB-03, SEC-01 | mila nije ni na jednom kursu, zna ID | `GetAsync` | NotFound, bez laboratorije | `Open_WhenStudentIsNotOnAnyCourse_ReturnsNotFoundEvenWithKnownId` |
+| LAB-03, SEC-01 | luka je student na drugom kursu | `GetAsync` | NotFound | `Open_WhenStudentEnrolledOnOtherCourse_ReturnsNotFound` |
+| LAB-03 | neprijavljen korisnik | `GetAsync` / `GET /{id}` | Unauthenticated / 401 | `Open_WhenCallerIsAnonymous_ReturnsUnauthenticated`, `GetLabById_WhenAnonymous_Returns401` (LAB-01) |
+| LAB-03, SEC-01 | jelena je nastavnica drugog kursa | `GET /{id}` tudje i nepostojece laboratorije | isti 404, isto telo, bez naslova, ID-a i kursa | `GetLabById_WhenTeacherOfOtherCourseOpens_Returns404SameAsMissing`, `Open_ForeignAndMissingLaboratory_GiveSameResult` |
+| LAB-03 | laboratorija bez kursa (`Rehydrate` bez kursa) | `GetAsync` od strane autora | NotFound | `Open_WhenLaboratoryHasNoCourse_ReturnsNotFoundEvenToCreator` |
+| LAB-03 | — | `DecideOpen` za svaki ishod | kodovi `CourseStudent`, `CourseTeacher`, `NotOwner`, `NotCourseMember`, `NoCourse`; nepoznata uloga odbijena | `LabOpenPolicyTests` |
+
+Rezultat: `Laboratories.Tests` 150/150 prolazi (2026-11-06, grana `feature/LAB-03-provera-konteksta`). Kontrolna provera: sa starim `GetAsync` (samo vlasnistvo) padaju `Open_WhenStudentEnrolledOnCourse_ReturnsLaboratory` i `Open_WhenLaboratoryHasNoCourse_ReturnsNotFoundEvenToCreator`; negativni testovi prolaze i sa starim pravilom jer je ono strozije, pa cuvaju granicu od buduceg popustanja.
+
+### Demonstracija
+
+Tok preko HTTP-a demonstrira se na nastavniku koji nije nastavnik kursa laboratorije: prolazi globalnu proveru (`Teacher`), a LAB-03 provera ga odbija sa 404. Studentski slucajevi se demonstriraju kroz servisne testove.
+
+```powershell
+# 1) nastavnik 1111 pravi laboratoriju na kursu aaaa -> 201, zapamtiti "id"
+curl.exe -i -X POST http://localhost:5080/api/laboratories `
+  -H "Content-Type: application/json" `
+  -H "X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher" `
+  -d '{\"title\":\"Kontrola pristupa\",\"courseId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"}'
+
+# 2) isti nastavnik otvara -> 200
+curl.exe -i http://localhost:5080/api/laboratories/<ID> `
+  -H "X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher"
+
+# 3) korisnik 3333 sa ulogom Teacher (nije clan kursa aaaa) -> 404
+curl.exe -i http://localhost:5080/api/laboratories/<ID> `
+  -H "X-Test-User: 33333333-3333-3333-3333-333333333333:Teacher"
+
+# 4) isti korisnik, nepostojeci ID -> isti 404 i isto telo kao u koraku 3
+curl.exe -i http://localhost:5080/api/laboratories/00000000-0000-0000-0000-000000000001 `
+  -H "X-Test-User: 33333333-3333-3333-3333-333333333333:Teacher"
+
+# 5) studentski slucajevi i politika kroz testove
+dotnet test backend/Laboratories.Tests --filter "FullyQualifiedName~LaboratoryServiceTests.Open_|FullyQualifiedName~LabOpenPolicyTests"
+```
+
+U Development podacima nema nastavnika drugog kursa, pa se u koracima 3 i 4 koristi korisnik 3333 sa platformskom ulogom `Teacher` (na kursu `bbbb` je student, na `aaaa` nije clan). Tacan scenario "nastavnik drugog kursa" pokriva HTTP test `GetLabById_WhenTeacherOfOtherCourseOpens_Returns404SameAsMissing`.
+
+### Sta ostaje za KT2
+
+- **ACC: `laboratory.read` za studente.** Dok ACC (sada `FakeAccessDecision`) ne dozvoli citanje studentima, student preko HTTP-a dobija 403 pre LAB-03 provere. Tada dodati HTTP testove za studentske slucajeve.
+- **Rizik LAB-04 / LAB-09 (nije reseno u LAB-03):** sve laboratorije su sada `Draft`, jer objava jos ne postoji. Kad student dobije citanje, student na kursu bi otvorio nacrt i video pun `LaboratoryResponse` (ukljucujuci `CreatedBy`). LAB-04 trazi da student ne vidi nacrt, a LAB-09 da studentski prikaz sadrzi samo dozvoljene metapodatke.
+- **`RenameAsync`:** i dalje proverava samo vlasnistvo. Treba ista provera (nastavnik na kursu i autor): sada autor koji vise nije na kursu i dalje moze da preimenuje svoju laboratoriju, ukljucujuci laboratoriju bez kursa.
+- **Lista (`GET /`):** sada vraca praznu listu. Kad se implementira, mora da filtrira po istoj politici (LAB-05: rezultati postuju prava pristupa korisnika).
+- **PostgreSQL:** dok Tim 20 ne doda kolonu `CourseId`, sve laboratorije iz baze su bez kursa i ne otvaraju se nikome (vidi Prazan `CourseId`).
+- **Audit:** kodovi odbijanja idu u serverski log; za `Platform.Audit` vazi isti predlog kao za kreiranje (Otvorene stavke).
+- **Status upisa i stanje kursa:** `ICourseMembership` vraca samo ulogu; ispisan student (ACC-15) ili arhiviran kurs (ACC-02) zavise od ACC ugovora.
+- **Preostali rizik:** clanstvo se pita samo za postojecu laboratoriju, pa se odgovori za postojecu i nepostojecu mogu neznatno razlikovati po vremenu. Za stub u memoriji to je zanemarljivo; proveriti kad clanstvo bude u bazi.
+
+### Fajlovi (otvaranje)
+
+- `backend/Platform.Api/Modules/Laboratories/Application/LabOpenPolicy.cs` (nov)
+- `backend/Platform.Api/Modules/Laboratories/Application/LaboratoryService.cs` (samo `GetAsync`)
+- `backend/Laboratories.Tests/LabOpenPolicyTests.cs` (nov)
+- `backend/Laboratories.Tests/LaboratoryServiceTests.cs`, `LaboratoriesHttpTests.cs` (nove sekcije, postojeci testovi nisu menjani)
 
 ## Bezbednosni zahtevi
 

@@ -432,6 +432,49 @@ public sealed class LaboratoriesHttpTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
 
+    // ---------- GET /{id}: provera konteksta pri otvaranju (LAB-03) ----------
+    // Student ne prolazi RequireLabAccess(Read), pa su studentski slucajevi u LaboratoryServiceTests.
+
+    [Test]
+    public async Task GetLabById_WhenCourseTeacherOpens_Returns200WithCourse()
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Otvaranje na kursu");
+
+        using var response = await client.SendAsync(CreateRequest("GET", $"{Route}{created.Id}", Teacher));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var read = await response.Content.ReadFromJsonAsync<LaboratoryResponse>();
+        Assert.That(read!.CourseId, Is.EqualTo(CourseId));
+    }
+
+    [Test]
+    public async Task GetLabById_WhenTeacherOfOtherCourseOpens_Returns404SameAsMissing()
+    {
+        // jelena prolazi globalnu proveru (Teacher), ali je nastavnica na drugom kursu.
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        factory.Services.GetRequiredService<InMemoryCourseMembership>()
+            .Set(OtherCourseId, UserGuid("jelena"), CourseRole.Teacher);
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Lab drugog kursa");
+
+        using var foreign = await client.SendAsync(CreateRequest("GET", $"{Route}{created.Id}", OtherTeacher));
+        using var missing = await client.SendAsync(CreateRequest("GET", $"{Route}{Guid.NewGuid()}", OtherTeacher));
+        string foreignBody = await foreign.Content.ReadAsStringAsync();
+        string missingBody = await missing.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(foreign.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+            Assert.That(missing.StatusCode, Is.EqualTo(foreign.StatusCode));
+            Assert.That(foreignBody, Is.EqualTo(missingBody));
+            Assert.That(foreignBody, Does.Not.Contain("Lab drugog kursa"));
+            Assert.That(foreignBody, Does.Not.Contain(created.Id.ToString()));
+            Assert.That(foreignBody, Does.Not.Contain(CourseId.ToString()));
+        });
+    }
+
     // ---------- PATCH /{id}/title: preimenovanje ----------
 
     [Test]
