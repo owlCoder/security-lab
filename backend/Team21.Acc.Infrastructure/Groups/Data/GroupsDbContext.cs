@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Team21.Acc.Core.Groups;
 using Team21.Acc.Infrastructure.Common;
 
 namespace Team21.Acc.Infrastructure.Groups.Data;
@@ -17,5 +18,12 @@ public class GroupsDbContext : TeamDbContextBase, IGroupsDbContext
 
     protected override string Schema => SchemaName;
 
-    // public DbSet<Group> Groups { get; set; }
+    // Konfiguracije su u Groups/Configurations i učitavaju se same (TeamDbContextBase.OnModelCreating).
+    public DbSet<Group> Groups { get; set; } = null!;
+
+    public DbSet<GroupMember> GroupMembers { get; set; } = null!;
+
+    public DbSet<MaterialAudience> MaterialAudiences { get; set; } = null!;
+
+    public DbSet<GroupMaterialAccess> GroupMaterialAccesses { get; set; } = null!;
 }

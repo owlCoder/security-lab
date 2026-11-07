@@ -50,7 +50,7 @@ public static class Team21AccModule
 
         services.AddTeam21AccessPolicies();
         services.AddCourses();
-        services.AddGroups();
+        services.AddGroups(builder.Environment);
 
         return builder;
     }
