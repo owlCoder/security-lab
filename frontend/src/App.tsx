@@ -12,6 +12,7 @@ import ProtectedApp from './components/ProtectedApp'
 import LoginPage from './login/page'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import DraftsPage from './pages/DraftsPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -93,6 +94,8 @@ export default function App() {
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          {/* AUT-01: nacrti zadataka, samo za prijavljene korisnike */}
+          <Route path="drafts" element={<DraftsPage />} />
         </Route>
       </Route>
     </Routes>
