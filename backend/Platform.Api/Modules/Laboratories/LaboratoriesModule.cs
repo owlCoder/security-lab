@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
+using Platform.LabMetadata;
 
 namespace Platform.Api.Modules.Laboratories;
 
@@ -21,6 +22,13 @@ public static class LaboratoriesModule
 
         if (environment.IsDevelopment())
         {
+            services.TryAddSingleton<
+                ILaboratoryMetadataRepository,
+                InMemoryLaboratoryMetadataRepository>();
+        }
+
+        if (environment.IsDevelopment())
+        {
             // FAKE implementacije - samo u Development rezimu.
             // FakeIdentityContext - IDN modul (tim 18)
             // FakeAccessDecision  - ACC modul (tim 3)
@@ -37,9 +45,17 @@ public static class LaboratoriesModule
         return services;
     }
 
-    public static IEndpointRouteBuilder MapLaboratories(this IEndpointRouteBuilder app)
+
+
+    public static IEndpointRouteBuilder MapLaboratories(
+        this IEndpointRouteBuilder app)
     {
         app.MapLaboratoriesEndpoints();
+
+        app.MapLaboratoryMetadataEndpoints();
+
         return app;
     }
+
+
 }
