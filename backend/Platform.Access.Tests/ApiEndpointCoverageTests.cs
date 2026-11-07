@@ -36,6 +36,8 @@ public class ApiEndpointCoverageTests
         "/api/labs/",
         "/api/labs/{id:guid}",
         "/api/labs/{id:guid}/title",
+        // AUT-07: PreviewStudentView poziva IAccessDecision (lab.preview + LabPreviewPolicy).
+        "/api/labs/{id:guid}/preview",
     };
 
     [Test]
