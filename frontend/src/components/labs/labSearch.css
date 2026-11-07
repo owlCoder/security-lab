@@ -1,0 +1,18 @@
+.labs .labs-panel-wide { grid-column: 1 / -1; }
+
+.labs .labs-search-row { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.labs .labs-search-row .labs-field { flex: 1 1 260px; min-width: 0; }
+.labs .labs-search-row button { margin-top: 27px; }
+.labs input[type="search"] { width: 100%; padding: 10px 12px; border: 1px solid #b9c5d3; border-radius: 8px; font: inherit; background: #fff; color: var(--labs-ink); }
+
+.labs .labs-search-results { display: grid; gap: 10px; }
+.labs .labs-search-count { margin: 0; font-weight: 650; }
+.labs .labs-search-results > .hint { margin: 0; }
+.labs .labs-search-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.labs .labs-search-item { padding: 12px 14px; border: 1px solid var(--labs-line); border-left: 4px solid var(--labs-blue); border-radius: 10px; background: var(--labs-soft); min-width: 0; }
+.labs .labs-search-title { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.labs .labs-search-item .labs-meta { margin: 8px 0 0; }
+
+@media (max-width: 560px) {
+  .labs .labs-search-row button { margin-top: 0; width: 100%; }
+}

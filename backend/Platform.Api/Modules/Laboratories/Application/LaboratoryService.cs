@@ -74,7 +74,7 @@ public sealed class LaboratoryService(
         }
 
         Laboratory? laboratory = await repository.GetByIdAsync(id, cancellationToken);
-        return IsVisibleTo(laboratory, callerId.Value)
+        return LaboratoryVisibility.IsVisibleTo(laboratory, callerId.Value)
             ? LabResult.Ok(laboratory!)
             : LabResult.NotFound;
     }
@@ -89,7 +89,7 @@ public sealed class LaboratoryService(
         }
 
         Laboratory? laboratory = await repository.GetByIdAsync(id, cancellationToken);
-        if (!IsVisibleTo(laboratory, callerId.Value))
+        if (!LaboratoryVisibility.IsVisibleTo(laboratory, callerId.Value))
         {
             return LabResult.NotFound;
         }
@@ -125,9 +125,6 @@ public sealed class LaboratoryService(
 
         return LabResult.Ok(laboratory);
     }
-
-    private static bool IsVisibleTo(Laboratory? laboratory, Guid callerId) =>
-        laboratory is not null && laboratory.CreatedBy == callerId;
 
     // Brza provera pre domena; konacno pravilo (obavezan, najvise 200 znakova) je u Laboratory.
     private static bool IsAcceptableTitle(string? title) =>

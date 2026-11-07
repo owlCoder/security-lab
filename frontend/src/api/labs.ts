@@ -67,6 +67,7 @@ const KNOWN_ERRORS: Record<string, string> = {
   INVALID_LANGUAGE: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
   INVALID_DESCRIPTION: 'Opis nije ispravan.',
   INVALID_INSTRUCTIONS: 'Uputstvo nije ispravno.',
+  INVALID_QUERY: `Unesite naziv ili deo naziva (najviše ${MAX_TITLE_LENGTH} znakova, bez kontrolnih znakova).`,
   title: `Naslov je obavezan i može imati najviše ${MAX_TITLE_LENGTH} znakova.`,
   lang: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
   language: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
@@ -203,4 +204,47 @@ export async function getLabContent(labId: string, language: string, user: TestU
   const content = parseContent(await readJson(res))
   if (!content) return { kind: 'error' }
   return { kind: 'ok', content, usedFallback: content.language !== language.toLowerCase() }
+}
+
+export const MAX_SEARCH_LENGTH = MAX_TITLE_LENGTH
+
+export interface LabSummary {
+  id: string
+  title: string
+  status: string
+  createdAt: string
+}
+
+export type SearchLabsOutcome =
+  | { kind: 'ok'; items: LabSummary[]; truncated: boolean }
+  | ApiFailure
+
+function parseSummary(value: unknown): LabSummary | null {
+  if (value === null || typeof value !== 'object') return null
+  const { id, title, status, createdAt } = value as Record<string, unknown>
+  if (typeof id !== 'string' || typeof title !== 'string' || typeof status !== 'string' || typeof createdAt !== 'string') {
+    return null
+  }
+  return { id, title, status, createdAt }
+}
+
+export async function searchLabs(query: string, user: TestUser): Promise<SearchLabsOutcome> {
+  let res: Response
+  try {
+    const params = new URLSearchParams({ q: query })
+    res = await fetch(`${LABS_BASE_PATH}/search?${params.toString()}`, {
+      headers: headersFor(user, false),
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+  } catch {
+    return { kind: 'error' }
+  }
+
+  if (res.status !== 200) return toFailure(res)
+
+  const body = await readJson(res)
+  if (!body || !Array.isArray(body.items)) return { kind: 'error' }
+  const items = body.items.map(parseSummary).filter((item): item is LabSummary => item !== null)
+  return { kind: 'ok', items, truncated: body.truncated === true }
 }

@@ -16,6 +16,16 @@ public sealed record LaboratoryResponse(
     Guid CreatedBy,
     DateTimeOffset CreatedAt);
 
+public sealed record LaboratorySearchItem(
+    Guid Id,
+    string Title,
+    string Status,
+    DateTimeOffset CreatedAt);
+
+public sealed record LaboratorySearchResponse(
+    IReadOnlyList<LaboratorySearchItem> Items,
+    bool Truncated);
+
 // Kodovi su stabilni; frontend (api/labs.ts) ih prevodi u poruke za korisnika.
 public sealed record ApiErrorResponse(string Code, string Message);
 
@@ -24,4 +34,5 @@ public static class LabErrorCodes
     public const string InvalidTitle = "INVALID_TITLE";
     public const string InvalidBody = "INVALID_BODY";
     public const string NotFound = "NOT_FOUND";
+    public const string InvalidQuery = "INVALID_QUERY";
 }

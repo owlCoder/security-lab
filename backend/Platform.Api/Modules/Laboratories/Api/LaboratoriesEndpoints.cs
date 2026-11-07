@@ -1,6 +1,7 @@
 using Platform.Access.AspNet;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Primitives;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Domain;
 
@@ -22,6 +23,8 @@ public static class LaboratoriesEndpoints
     // Naslov ima najvise 200 znakova; vece telo se ne parsira.
     private const long MaxBodyBytes = 4 * 1024;
 
+    public const string SearchQueryParameter = "q";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static IEndpointRouteBuilder MapLaboratoriesEndpoints(this IEndpointRouteBuilder app)
@@ -41,6 +44,27 @@ public static class LaboratoriesEndpoints
 
         group.MapGet("/", () => Results.Ok(Array.Empty<object>()))
             .RequireLabAccess(LabActions.List);
+
+        group.MapGet("/search", async (HttpContext http, [FromServices] LaboratorySearchService service, [FromServices] IIdentityContext caller) =>
+        {
+            http.Response.Headers.CacheControl = "no-store";
+
+            StringValues query = http.Request.Query[SearchQueryParameter];
+            if (query.Count != 1)
+            {
+                return InvalidQuery();
+            }
+
+            LabSearchResult result = await service.SearchAsync(query[0], caller, http.RequestAborted);
+            return result.Status switch
+            {
+                LabSearchStatus.Ok => Results.Ok(new LaboratorySearchResponse(
+                    result.Items.Select(ToSearchItem).ToList(), result.Truncated)),
+                LabSearchStatus.InvalidQuery => InvalidQuery(),
+                LabSearchStatus.Unauthenticated => Results.Problem(statusCode: StatusCodes.Status401Unauthorized, title: "Unauthenticated"),
+                _ => Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Unexpected error"),
+            };
+        }).RequireLabAccess(LabActions.Search);
 
         // POST /api/laboratories  ->  201 Created + Location + telo sa serverskim Id-em
         group.MapPost("/", async (HttpContext http, [FromServices] LaboratoryService service, [FromServices] IIdentityContext caller) =>
@@ -88,6 +112,9 @@ public static class LaboratoriesEndpoints
     private static LaboratoryResponse ToResponse(Laboratory lab) =>
         new(lab.Id, lab.Title, lab.Status.ToString(), lab.CreatedBy, lab.CreatedAt);
 
+    private static LaboratorySearchItem ToSearchItem(Laboratory lab) =>
+        new(lab.Id, lab.Title, lab.Status.ToString(), lab.CreatedAt);
+
     private static IResult ToFailure(LabResultStatus status) => status switch
     {
         LabResultStatus.InvalidTitle => Results.BadRequest(new ApiErrorResponse(
@@ -102,6 +129,11 @@ public static class LaboratoriesEndpoints
 
     private static IResult InvalidBody() =>
         Results.BadRequest(new ApiErrorResponse(LabErrorCodes.InvalidBody, "Request body is invalid."));
+
+    private static IResult InvalidQuery() =>
+        Results.BadRequest(new ApiErrorResponse(
+            LabErrorCodes.InvalidQuery,
+            $"Search text (q) is required, must not exceed {LabTitleSearch.MaxQueryLength} characters and must not contain control characters."));
 
     // Telo se cita rucno (ne kroz automatsko vezivanje parametara) da bi:
     //  - provera prava (filter) bila pre parsiranja nepouzdanog unosa,
