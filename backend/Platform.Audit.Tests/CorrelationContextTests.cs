@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -234,8 +233,6 @@ public sealed class CorrelationProbeController(ICorrelationContext correlation, 
     internal const string LogMessage = "correlation probe reached";
 
     [DelegatedAuthorization]
-    // AllowAnonymous: IDN-02 session check is skipped too; probe exists only in the test host
-    [AllowAnonymous]
     [HttpGet(CorrelationHostFactory.ProbePath)]
     public CorrelationProbeResult Get()
     {
