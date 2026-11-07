@@ -28,5 +28,6 @@
   <ItemGroup Label="Laboratories">
     <ProjectReference Include="..\Platform.Laboratories.Domain\Platform.Laboratories.Domain.csproj" />
     <ProjectReference Include="..\Platform.Laboratories.Infrastructure\Platform.Laboratories.Infrastructure.csproj" />
+    <ProjectReference Include="..\Platform.Prerequisites\Platform.Prerequisites.csproj" />
   </ItemGroup>
 </Project>

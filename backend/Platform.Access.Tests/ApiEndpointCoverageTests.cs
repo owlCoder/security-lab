@@ -36,6 +36,8 @@ public class ApiEndpointCoverageTests
         "/api/labs/",
         "/api/labs/{id:guid}",
         "/api/labs/{id:guid}/title",
+        "/api/laboratories/{laboratoryId:guid}/prerequisites",
+        "/api/laboratories/{laboratoryId:guid}/prerequisites/{requiredLaboratoryId:guid}",
     };
 
     [Test]

@@ -11,7 +11,12 @@ using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Access.AspNet;
+
 using Platform.Api.Development;
+using Platform.Api.Authorization;
+using Platform.Access.Infrastructure.Catalog;
+using Platform.Access.Infrastructure.Policies;
+
 using Platform.Api.Endpoints;
 using Platform.Api.Endpoints.Identity;
 using Platform.Api.Interfaces.Identity;
@@ -26,6 +31,8 @@ using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
@@ -87,6 +94,7 @@ builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
+builder.Services.AddSingleton<IPrerequisiteRepository, InMemoryPrerequisiteRepository>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -154,6 +162,42 @@ app.MapAccountEndpoints();
 
 // AUT-06: radnje i politike za sablone laboratorija, pa endpointi
 app.Services.RegisterAuthoringAccess();
+var actionCatalog = app.Services
+    .GetRequiredService<InMemoryActionCatalog>();
+
+var policyRegistry = app.Services
+    .GetRequiredService<InMemoryAccessPolicyRegistry>();
+
+var prerequisitePolicy = new PrerequisiteModificationPolicy(
+    app.Services.GetRequiredService<
+        Platform.Api.Modules.Laboratories.Application.ILaboratoryRepository>(),
+    app.Services.GetRequiredService<
+        Platform.Authoring.Application.IAuthorDirectory>());
+
+
+
+actionCatalog.Register(new ActionDefinition(
+    "prerequisites.add",
+    ActionScope.Course,
+    "laboratory",
+    true));
+
+actionCatalog.Register(new ActionDefinition(
+    "prerequisites.remove",
+    ActionScope.Course,
+    "laboratory",
+    true));
+
+actionCatalog.Register(new ActionDefinition(
+    "prerequisites.read",
+    ActionScope.Course,
+    "laboratory",
+    true));
+
+
+policyRegistry.Register("prerequisites.add", prerequisitePolicy);
+policyRegistry.Register("prerequisites.remove", prerequisitePolicy);
+policyRegistry.Register("prerequisites.read", prerequisitePolicy);
 app.MapAuthoringEndpoints();
 
 // AUT-04/AUT-07: radnje i politike za prikaz laboratorije
