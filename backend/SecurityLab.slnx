@@ -28,10 +28,4 @@
     <Project Path="Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj" />
     <Project Path="Platform.Laboratories.Tests/Platform.Laboratories.Tests.csproj" />
   </Folder>
-  <Folder Name="/Team21/">
-    <Project Path="Team21.Acc.Core/Team21.Acc.Core.csproj" />
-    <Project Path="Team21.Acc.Infrastructure/Team21.Acc.Infrastructure.csproj" />
-    <Project Path="Team21.Acc.Api/Team21.Acc.Api.csproj" />
-    <Project Path="Team21.Acc.Tests/Team21.Acc.Tests.csproj" />
-  </Folder>
 </Solution>

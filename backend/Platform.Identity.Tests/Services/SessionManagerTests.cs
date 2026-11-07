@@ -1,148 +1,219 @@
-using Moq;
+using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
+using System.Security.Cryptography;
+using System.Text;
 using Platform.Api.Enums.Identity;
-using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Api.Services.Identity;
+using Platform.Identity.Entities;
+using Platform.Identity.Enums;
+using Platform.Identity.Persistence;
 
 namespace Platform.Identity.Tests.Services;
 
 [TestFixture]
 [Category("IDN-02")]
+[Category("IDN-07")]
 public class SessionManagerTests
 {
-    private Mock<ISessionManager> _sessionManager = null!;
-
-    [SetUp]
-    public void SetUp()
+    [Test]
+    public async Task RevokeSession_RevokesOnlyOwnedSession_RejectsItsToken()
     {
-        _sessionManager = new Mock<ISessionManager>();
+        var ownerUserId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        const string revokedToken = "token-to-revoke";
+        const string otherOwnerToken = "other-session-same-owner";
+        const string foreignToken = "token-owned-by-someone-else";
+        var revokedHandle = Guid.NewGuid();
+        var otherHandle = Guid.NewGuid();
+        var foreignHandle = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using var db = new PlatformIdentityDbContext(options);
+        db.Sessions.AddRange(
+            new Session(Guid.NewGuid(), ownerUserId, TokenHash(revokedToken), revokedHandle,
+                AuthLevel.Active, now, now.AddHours(8)),
+            new Session(Guid.NewGuid(), ownerUserId, TokenHash(otherOwnerToken), otherHandle,
+                AuthLevel.Active, now, now.AddHours(8)),
+            new Session(Guid.NewGuid(), otherUserId, TokenHash(foreignToken), foreignHandle,
+                AuthLevel.Active, now, now.AddHours(8)));
+        await db.SaveChangesAsync();
+
+        var manager = new SessionManager(db);
+
+        Assert.That(await manager.RevokeSession(ownerUserId, revokedHandle), Is.True);
+        Assert.That(await manager.RevokeSession(ownerUserId, foreignHandle), Is.False);
+
+        Assert.That(await manager.ValidateAsync(revokedToken), Is.Null);
+        Assert.That(await manager.ValidateAsync(otherOwnerToken), Is.Not.Null);
+        Assert.That(await manager.ValidateAsync(foreignToken), Is.Not.Null);
     }
 
     [Test]
-    public async Task RevokeAllForUser_ReturnsConfiguredRevocationCount()
+    public async Task ListForUser_ReturnsOnlyUnrevokedUnexpiredSessionsForRequestedUser()
     {
-        var userId = Guid.NewGuid();
-        using var cancellationTokenSource = new CancellationTokenSource();
-        var cancellationToken = cancellationTokenSource.Token;
+        // Arrange
+        var requestedUserId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
 
-        _sessionManager
-            .Setup(manager => manager.RevokeAllForUser(userId, "account blocked", cancellationToken))
-            .ReturnsAsync(3);
-
-        var result = await _sessionManager.Object.RevokeAllForUser(
-            userId,
-            "account blocked",
-            cancellationToken);
-
-        Assert.That(result, Is.EqualTo(3));
-        _sessionManager.Verify(
-            manager => manager.RevokeAllForUser(userId, "account blocked", cancellationToken),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task RevokeSession_ReturnsConfiguredResult()
-    {
-        var userId = Guid.NewGuid();
-        var sessionHandle = Guid.NewGuid();
-
-        _sessionManager
-            .Setup(manager => manager.RevokeSession(userId, sessionHandle, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-
-        var result = await _sessionManager.Object.RevokeSession(userId, sessionHandle);
-
-        Assert.That(result, Is.True);
-        _sessionManager.Verify(
-            manager => manager.RevokeSession(userId, sessionHandle, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task RevokeSession_ReturnsFalseWhenConfiguredForUnknownOrForeignSession()
-    {
-        var userId = Guid.NewGuid();
-        var sessionHandle = Guid.NewGuid();
-
-        _sessionManager
-            .Setup(manager => manager.RevokeSession(userId, sessionHandle, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
-        var result = await _sessionManager.Object.RevokeSession(userId, sessionHandle);
-
-        Assert.That(result, Is.False);
-        _sessionManager.Verify(
-            manager => manager.RevokeSession(userId, sessionHandle, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task ListForUser_ReturnsConfiguredSessionInfo()
-    {
-        var userId = Guid.NewGuid();
-        var handle = Guid.NewGuid();
-        var createdAt = DateTimeOffset.UtcNow;
-        IReadOnlyList<SessionInfo> expected =
-        [
-            new SessionInfo(handle, createdAt, createdAt, createdAt.AddHours(8))
-        ];
-
-        _sessionManager
-            .Setup(manager => manager.ListForUser(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expected);
-
-        var result = await _sessionManager.Object.ListForUser(userId);
-
-        Assert.That(result, Is.EqualTo(expected));
-        _sessionManager.Verify(
-            manager => manager.ListForUser(userId, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Test]
-    public async Task ValidateAsync_ReturnsConfiguredSession()
-    {
-        var token = "session-token";
-        var expected = new ValidateSession(
+        // Active session for the requested user.
+        var requestedActive = new Session(
             Guid.NewGuid(),
+            requestedUserId,
+            TokenHash(),
             Guid.NewGuid(),
-            AuthenticationLevel.Active);
+            Platform.Identity.Enums.AuthLevel.Active,
+            now.AddHours(-2),
+            now.AddHours(6));
 
-        _sessionManager
-            .Setup(manager => manager.ValidateAsync(token, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expected);
+        // Revoked session for the requested user.
+        var requestedRevoked = new Session(
+            Guid.NewGuid(),
+            requestedUserId,
+            TokenHash(),
+            Guid.NewGuid(),
+            Platform.Identity.Enums.AuthLevel.Active,
+            now.AddHours(-2),
+            now.AddHours(6));
 
-        var result = await _sessionManager.Object.ValidateAsync(token);
+        requestedRevoked.Revoke(now);
 
-        Assert.That(result, Is.EqualTo(expected));
-        _sessionManager.Verify(
-            manager => manager.ValidateAsync(token, It.IsAny<CancellationToken>()),
-            Times.Once);
+        // Expired session for the requested user.
+        var requestedExpired = new Session(
+            Guid.NewGuid(),
+            requestedUserId,
+            TokenHash(),
+            Guid.NewGuid(),
+            Platform.Identity.Enums.AuthLevel.Active,
+            now.AddHours(-8),
+            now.AddMinutes(-1));
+
+        // Active session for another user.
+        var otherUserActive = new Session(
+            Guid.NewGuid(),
+            otherUserId,
+            TokenHash(),
+            Guid.NewGuid(),
+            Platform.Identity.Enums.AuthLevel.Active,
+            now.AddHours(-1),
+            now.AddHours(6));
+
+        var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using var db = new PlatformIdentityDbContext(options);
+
+        db.Sessions.AddRange(
+            requestedActive,
+            requestedRevoked,
+            requestedExpired,
+            otherUserActive);
+
+        await db.SaveChangesAsync();
+
+        var manager = new SessionManager(db);
+
+        // Act
+        var result = await manager.ListForUser(requestedUserId);
+
+        // Assert
+        Assert.That(result, Has.Count.EqualTo(1));
+
+        Assert.That(
+            result[0].Handle,
+            Is.EqualTo(requestedActive.SessionHandle));
+
+        Assert.That(
+            result[0].CreatedAt,
+            Is.EqualTo(requestedActive.CreatedAt));
+
+        Assert.That(
+            result[0].LastActivityAt,
+            Is.EqualTo(requestedActive.LastActivityAt));
+
+        Assert.That(
+            result[0].ExpiresAt,
+            Is.EqualTo(requestedActive.ExpiresAt));
     }
 
     [Test]
-    public async Task ValidateAsync_ReturnsNullForConfiguredUnknownToken()
+    public async Task ListForUser_ReturnsEmptyListWhenUserHasNoSessions()
     {
-        const string token = "unknown-token";
-        _sessionManager
-            .Setup(manager => manager.ValidateAsync(token, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ValidateSession?)null);
+        // Arrange
+        var requestedUserId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
 
-        var result = await _sessionManager.Object.ValidateAsync(token);
+        var otherUserSession = new Session(
+            Guid.NewGuid(),
+            otherUserId,
+            TokenHash(),
+            Guid.NewGuid(),
+            Platform.Identity.Enums.AuthLevel.Active,
+            now.AddHours(-1),
+            now.AddHours(6));
 
-        Assert.That(result, Is.Null);
-        _sessionManager.Verify(
-            manager => manager.ValidateAsync(token, It.IsAny<CancellationToken>()),
-            Times.Once);
+        var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using var db = new PlatformIdentityDbContext(options);
+
+        db.Sessions.Add(otherUserSession);
+        await db.SaveChangesAsync();
+
+        var manager = new SessionManager(db);
+
+        // Act
+        var result = await manager.ListForUser(requestedUserId);
+
+        // Assert
+        Assert.That(result, Is.Empty);
+    }
+
+    [Test]
+    public async Task ListForUser_ThrowsArgumentExceptionWhenUserIdIsEmpty()
+    {
+        // Arrange
+        var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using var db = new PlatformIdentityDbContext(options);
+
+        var manager = new SessionManager(db);
+
+        // Act & Assert
+        Assert.That(
+            async () => await manager.ListForUser(Guid.Empty),
+            Throws.ArgumentException);
     }
 
     [Test]
     public void SessionInfo_ExposesNoTokenOrHash()
     {
-        var names = typeof(SessionInfo).GetProperties().Select(property => property.Name.ToLowerInvariant());
+        // Arrange & Act
+        var propertyNames = typeof(SessionInfo)
+            .GetProperties()
+            .Select(property => property.Name.ToLowerInvariant());
 
-        Assert.That(names, Has.None.Contains("token"));
-        Assert.That(names, Has.None.Contains("hash"));
-        Assert.That(names, Has.None.Contains("cookie"));
+        // Assert
+        Assert.That(propertyNames, Has.None.Contains("token"));
+        Assert.That(propertyNames, Has.None.Contains("hash"));
+        Assert.That(propertyNames, Has.None.Contains("cookie"));
     }
+
+    private static byte[] TokenHash() =>
+        Guid.NewGuid().ToByteArray()
+            .Concat(Guid.NewGuid().ToByteArray())
+            .ToArray();
+
+    private static byte[] TokenHash(string token) =>
+        SHA256.HashData(Encoding.UTF8.GetBytes(token));
 }

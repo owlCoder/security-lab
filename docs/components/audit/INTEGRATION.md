@@ -114,16 +114,14 @@ or zero records exist, never two.
 | `Subject.Id` that is an account GUID | actor `User` with that ID | |
 | `Subject.Id` that is not a GUID (finding F5) | none | Proposal: Access agrees that `SubjectRef.Id` is the account GUID. Until then the forwarder writes nothing for such subjects and raises an alarm; it does not invent an actor. |
 | `Action` | detail `action` | Copied only if it matches the `ActionId` format. Otherwise the detail is left out and an alarm is raised; the raw value is never stored or logged. |
-| `DenialReason` | detail `denialReason` | `Unauthenticated` → `unauthenticated`, `AccountNotActive` → `account_not_active`, `UnknownAction` → `unknown_action`, `NoPolicy` → `no_policy`, `PolicyDenied` → `policy_denied`, `PolicyError` → `policy_error`. |
+| `DenialReason` | detail `denialReason` | `Unauthenticated` → `unauthenticated`, `AccountNotActive` → `account_not_active`, `UnknownAction` → `unknown_action`, `NoPolicy` → `no_policy`, `PolicyError` → `policy_error`. |
 | `PolicyId`, `PolicyVersion` | details `policyId`, `policyVersion` | Only when present and valid. |
 | `Resource` of type `Course` | `CourseId` | Only from a trusted resource resolver, never from `Details` or client input. Other resource types: no course. |
 | `CorrelationId` | `AuditContext.CorrelationId` | Must be the request's server correlation ID (S11-09). |
 
-REV-05 update (2026-11-06): Access already returns `PolicyDenied` for an expected
-policy refusal and `PolicyError` for an evaluation failure. The adapter preserves
-that distinction and the Audit value allowlist accepts `policy_denied` as an additive
-change. The existing revoked-grant HTTP test checks the persisted value, actor,
-server correlation ID and exactly one denial event. Historical records are unchanged.
+Question for Team 3 (finding F4): can a normal refusal by a policy get its own reason, for
+example `PolicyDenied`, separate from `PolicyError`? If yes, the catalog adds `policy_denied` to
+`denialReason` as a compatible change.
 
 ### S11-06 Transaction or outbox for privileged changes (D3; members 2, 3, 9 with producers)
 

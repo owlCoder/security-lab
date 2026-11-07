@@ -11,16 +11,6 @@ public sealed class AuditDraftValidatorTests
 {
     private readonly AuditDraftValidator _validator = new();
 
-    [TestCase("policy_denied")]
-    [TestCase("policy_error")]
-    public void Validate_AccessDenial_AcceptsExpectedRejectionAndEvaluationError(string reason)
-    {
-        var draft = new AuditEventDraft(AuditEventTypes.AccessDenied, AuditOutcome.Denied,
-            Details: Details(("action", "revision.read"), ("denialReason", reason)));
-
-        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
-    }
-
     private static IEnumerable<TestCaseData> ValidExamples() =>
         AuditDraftExamples.ValidPerEventType()
             .Select(example => new TestCaseData(example.Draft, example.Context)

@@ -15,7 +15,6 @@
     <ProjectReference Include="..\Platform.Identity\Platform.Identity.csproj" />
     <ProjectReference Include="..\Platform.LabVisibility\Platform.LabVisibility.csproj" />
     <ProjectReference Include="..\Platform.Audit\Platform.Audit.csproj" />
-    <ProjectReference Include="..\Team21.Acc.Api\Team21.Acc.Api.csproj" />
     <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
   </ItemGroup>

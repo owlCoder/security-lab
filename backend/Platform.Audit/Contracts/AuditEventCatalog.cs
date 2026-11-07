@@ -116,10 +116,6 @@ public static class AuditEventCatalog
                 ("filterFrom", new AuditDetailField(AuditDetailFormat.UtcTimestamp)),
                 ("filterTo", new AuditDetailField(AuditDetailFormat.UtcTimestamp)),
                 ("resultCount", new AuditDetailField(AuditDetailFormat.Count)))),
-
-        Revision(AuditEventTypes.RevisionSubmitted),
-        Revision(AuditEventTypes.RevisionApproved),
-        Revision(AuditEventTypes.RevisionReturned),
     }.ToFrozenDictionary(schema => schema.EventType, StringComparer.Ordinal);
 
     public static bool TryGet(string? eventType, [NotNullWhen(true)] out AuditEventSchema? schema)
@@ -138,18 +134,6 @@ public static class AuditEventCatalog
             ("action", new AuditDetailField(AuditDetailFormat.ActionId)),
             ("delegationId", new AuditDetailField(AuditDetailFormat.Uuid)),
             ("reasonCode", ReasonCode)));
-
-    private static AuditEventSchema Revision(string eventType) => new(eventType,
-        Outcomes((AuditOutcome.Success, User)), AuditPresence.Required, AuditPresence.Required,
-        AuditResourceTypes.Revision, Fields(
-            ("authorId", new AuditDetailField(AuditDetailFormat.Uuid)),
-            ("operationId", new AuditDetailField(AuditDetailFormat.Uuid)),
-            ("contentHash", new AuditDetailField(AuditDetailFormat.Sha256)),
-            ("laboratoryId", new AuditDetailField(AuditDetailFormat.Uuid)),
-            ("revisionNumber", new AuditDetailField(AuditDetailFormat.RevisionNumber))),
-        (eventType == AuditEventTypes.RevisionApproved
-            ? new[] { "authorId", "operationId", "contentHash", "laboratoryId", "revisionNumber" }
-            : new[] { "authorId", "operationId", "contentHash" }).ToFrozenSet(StringComparer.Ordinal));
 
     private static IReadOnlySet<AuditActorKind> Kinds(params AuditActorKind[] kinds) => kinds.ToFrozenSet();
 

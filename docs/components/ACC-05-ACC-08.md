@@ -29,85 +29,24 @@ Ugovor trenutno obuhvata:
 - `IActionCatalog`, `IAccessPolicyRegistry` i `IAccessAuditWriter` — granice za buduće adaptere.
 - `IResourceOwnershipResolver` — server-side granica za potvrdu vlasništva resursa.
 
-`IActionCatalog` izlaže tipizovane `ActionDefinition` zapise.
-
-### Trenutni katalog akcija
-
-| Akcija | Scope | Tip resursa | Privilegovana |
-|---|---|---|---|
-| `public.info.read` | `Public` | — | Ne |
-| `public.catalog.read` | `Public` | — | Ne |
-| `lab.read` | `Course` | `laboratory` | Ne |
-| `lab.draft.manage` | `Course` | `laboratory` | Ne |
-| `lab.revision.publish` | `Course` | `laboratory` | Da |
-| `lab.criteria.hidden.read` | `Course` | `laboratory` | Ne |
-| `assignment.manage` | `Course` | `assignment` | Ne |
-| `assignment.read.own` | `Course` | `assignment` | Ne |
-| `course.read` | `Authenticated` | — | Ne |
-| `course.create` | `Authenticated` | — | Da |
-| `course.archive` | `Authenticated` | — | Da |
-| `group.read` | `Authenticated` | — | Ne |
-| `group.create` | `Authenticated` | — | Da |
-| `group.member.add` | `Authenticated` | — | Da |
-| `group.member.remove` | `Authenticated` | — | Da |
-| `material.read` | `Authenticated` | — | Ne |
-| `attempt.create` | `Course` | `assignment` | Ne |
-| `attempt.read` | `Course` | `attempt` | Ne |
-| `attempt.submit` | `Course` | `attempt` | Ne |
-| `attempt.read.course` | `Course` | `attempt` | Ne |
-| `attempt.review` | `Course` | `attempt` | Da |
-| `account.status.change` | `System` | — | Da |
-| `system.config.manage` | `System` | — | Da |
-| `results.sensitive.read` | `Course` | `attempt` | Da |
-| `evaluation.task.process` | `System` | — | Ne |
-| `audit.events.read` | `Course` | `course` | Ne |
+`IActionCatalog` izlaže tipizovane `ActionDefinition` zapise. Početni katalog sadrži
+akcije iz matrice ACC-05, uključujući scope (`Public`, `System` ili `Course`),
+tip resursa i oznaku privilegovane akcije.
 
 ## Pravilo registracije akcija
 
 `Platform.Access` poseduje centralni, verzionisani katalog dozvoljenih akcija.
-Osnovne akcije se definišu u `AccessActions`. Dodatna akcija i njena politika
-mogu se registrovati samo kroz javni composition API, pre `Build()`:
-
-```csharp
-services.AddAccessAction<MyPolicy>(
-    new ActionDefinition("module.record.read", ActionScope.Course, "record", false));
-```
-
-Za politiku koja implementira već poznatu centralnu akciju koristi se
-`AddAccessPolicy<TPolicy>(actionId)`, npr.
-`services.AddAccessPolicy<CourseAuditReadPolicy>("audit.events.read")`.
-Poziv se radi u composition fazi, pre `Build()`. Hook odbija duplikate,
-nepoznate akcije i nesingleton registraciju politike. Nove akcije se dodaju uz
-eksplicitnu `ActionDefinition` kroz `AddAccessAction<TPolicy>(definition)`;
-njihovo uvođenje zahteva code review centralnog ugovora. Nepoznata akcija daje
-`UnknownAction`, a akcija bez politike `NoPolicy`.
-
-Postojeći moduli još imaju privremeni composition adapter koji registruje
-akcije/politike nakon `Build()`, ali pre `app.Run()`. To je migraciona
-kompatibilnost, ne obrazac za nove integracije. `AccessConfigurationStartupCheck`
-zamrzava katalog i registar pri pokretanju hosta; posle toga registracije
-bacaju grešku. Konkretni registry/catalog adapteri dostupni su postojećim
-modulima samo radi tog privremenog composition koraka; ne smeju se koristiti
-za autorizacione izmene tokom obrade zahteva.
-
-Politike su singleton-i jer su i decision engine i registry singleton-i.
-Zato politika, kao i svi servisi koje ona koristi, mora biti thread-safe i ne
-sme zavisiti od scoped servisa (`DbContext`, request context i slično). API host
-uključuje `ValidateScopes` i `ValidateOnBuild`, tako da captive scoped
-zavisnost sprečava host da se pokrene. Hostovi koji ugrađuju `Platform.Access`
-moraju uključiti iste DI validacije. Access ne kreira poseban scope po odluci:
-caller, subject, resource i svi podaci specifični za zahtev moraju biti
-izračunati server-side i prosleđeni kroz `AccessRequest`. Politika ne sme
-očekivati da ima pristup HTTP request scope-u. Ako je potrebna scoped
-zavisnost, to je blokada za integraciju: ne sme se registrovati politika dok
-se lifetime ugovor centralnog Access engine-a ne promeni kroz odobrenu izmenu.
+Akcija se mora dodati u `AccessActions` i registrovati kroz
+`InMemoryActionCatalog` pre nego što je bilo koji modul upotrebi u politici,
+endpoint metapodacima ili `AccessRequest`-u. Nepoznata akcija se odbija
+(`UnknownAction`), tako da novi modul ne može proširiti authorization površinu
+samostalnom konfiguracijom, bazom ili runtime registracijom.
 
 Dodavanje akcije obuhvata:
 
-1. definiciju ID-a u `AccessActions` za centralne akcije, ili composition
-   registraciju za dodatnu akciju;
+1. definiciju ID-a u `AccessActions`;
 2. deklaraciju scope-a, tipa resursa i privilegovanosti;
-3. proveru kompletnosti, validnosti i jedinstvenosti kataloga;
+3. proveru kompletnosti i jedinstvenosti kataloga;
 4. pripadajuću politiku i testove u modulu koji akciju koristi.
 
 Centralni katalog je nameran izbor za početnu verziju: omogućava pregled cele
@@ -116,33 +55,9 @@ samostalno uvedu preširoku ili nekonzistentnu dozvolu.
 
 Podaci o identitetu, ulozi, članstvu i vlasništvu moraju doći sa servera, ne iz headera, tela ili query stringa klijentskog zahteva.
 
-### Audit događaji
-
-`audit.events.read` je centralna akcija sa `Course` scope-om i resource type-om
-`course`. Resurs za odluku je tačno jedan kurs, oblika `Course/{courseId}`:
-
-- resource type je malo-slovni, case-sensitive `"course"`;
-- resource ID je ID kursa u kanonskom `Guid` `D` formatu, npr.
-  `ResourceRef("course", courseId.ToString("D"))`;
-- `courseId` mora biti utvrđen i validiran server-side iz kursa koji se čita;
-  klijentski header/body/query ne predstavljaju izvor identiteta, članstva ili
-  vlasništva;
-- `attempt`, `account` ili drugi tip resursa ne važe za ovu akciju, niti se
-  sme koristiti globalni resurs bez ID-ja kursa.
-
-Ne postoji implicitni globalni ni administratorski pristup. Audit modul
-registruje konkretnu politiku kroz `AddAccessPolicy<TPolicy>("audit.events.read")`.
-Dok politika nije registrovana, zahtev se odbija sa `NoPolicy`;
-`Platform.Access` ne implementira niti referencira Audit politiku.
-Membership/delegation status, uključujući istek i opoziv, ostaje garancija
-vlasnika stvarnog `IMembershipReader` adaptera.
-
 ## Implementacija 
 
-Registracija zavisnosti je deo `Platform.Access/Composition`. `Program.cs`
-poziva `AddAccessControl()`; moduli dodaju svoje akcije/politike kroz javni
-composition API pre `Build()`. Trenutni API još ne registruje konkretnu Audit
-politiku niti menja fail-closed membership/resource fallback-e.
+Registracija zavisnosti je deo `Platform.Access/Composition`, dok `Program.cs` samo poziva `AddAccessControl()`. Ostali moduli mogu primeniti isti obrazac.
 
 Fail-closed tok:
 
@@ -180,12 +95,7 @@ da domenski adapteri nisu registrovani; ne predstavljaju placeholder poslovnu
 logiku i ne mogu odobriti zahtev.
 
 `AddAccessControl()` registruje katalog, policy registry, decision engine, audit
-pipeline i flush servis kao singleton komponente. Politike i membership/resource
-readeri moraju biti singleton-safe. U composition fazi katalog i registar mogu
-se koristiti kroz postojeće adapterske API-je; host startup ih zamrzava pre
-prvog zahteva, pa naknadna izmena nije moguća. Moduli koji se integrišu treba da
-koriste javni `AddAccessAction`/`AddAccessPolicy` hook pre `Build()`.
-Audit loggers koriste host
+pipeline i flush servis kao singleton komponente. Audit loggers koriste host
 logger kada je dostupan, a `NullLogger` fallback u minimalnim kontejnerima; modul
 ne konfiguriše globalni logging hosta.
 
@@ -208,7 +118,7 @@ flowchart LR
   OWN[IResourceOwnershipResolver] --> POL
 ```
 
-**Veza sa platformom:** `Platform.Api` je kompozicioni sloj; moduli registruju odobrene akcije/politike pre izgradnje hosta i koriste server-side resolvere preko javnih ugovora.
+**Veza sa platformom:** `Platform.Api` je kompozicioni sloj; ostali moduli kasnije registruju svoje akcije, politike i server-side resolvere preko javnih ugovora.
 
 ## Dijagram toka podataka
 
@@ -298,12 +208,13 @@ Integraciona provera 2026-11-05: resursne akcije Authoring i LabVisibility sada 
 
 ## Migracija postojećih rutera bez promene njihovih autorizacionih pravila
 
-`DelegatedAuthorizationAttribute` i `DelegateAuthorization()` su privremeni
-migracioni most za proverene postojeće endpoint-e. Ne predstavljaju `Allow`,
-ne kreiraju Access politiku i ne zamenjuju `RequireAccess`; endpoint owner je
-odgovoran za nezavisno testirani guard, a delegacija zahteva eksplicitnu
-reviziju. Novi endpoint-i ne smeju koristiti adapter. ACC-05 coverage test
-proverava odobreni inventar ruta i odbija nepoznate/neodobrene delegacije.
+`DelegatedAuthorizationAttribute` je eksplicitni integracioni most isključivo
+za proverene starije endpoint-e koji već imaju samostalne guard-ove (LAB-01
+`RequireLabAccess` i provera vlasništva, IDN i AUT handleri sa sopstvenim
+`IAccessDecision` pozivom). Nije ekvivalent `AllowPublic`: samo ovim
+označenim rutama dopušta se izvršenje njihovih već postojećih autorizacionih
+provera. Novi neoznačeni endpoint ostaje zabranjen. ACC-05 test proverava
+tačno odobrenu listu ruta i odbija nepoznate delegacije.
 
 Audit probni `/__test/audit-events` postoji isključivo u `Testing` hostu
 i oslanja se na testovima definisan sintetički kontekst. Ne postoji u

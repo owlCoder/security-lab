@@ -40,14 +40,6 @@ internal static class AuditDraftExamples
 
         yield return (StatusChange(), UserContext);
 
-        foreach (var eventType in new[] { AuditEventTypes.RevisionSubmitted, AuditEventTypes.RevisionApproved,
-                     AuditEventTypes.RevisionReturned })
-            yield return (new AuditEventDraft(eventType, AuditOutcome.Success, CourseId,
-                new AuditResourceRef(AuditResourceTypes.Revision, TargetAccountId.ToString()),
-                Details(("authorId", UserId.ToString()), ("operationId", DelegationId.ToString()),
-                    ("contentHash", new string('a', 64)), ("laboratoryId", TargetAccountId.ToString()),
-                    ("revisionNumber", "1"))), UserContext);
-
         yield return (
             new AuditEventDraft(
                 AuditEventTypes.CourseMemberRoleChanged,

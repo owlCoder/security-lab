@@ -15,15 +15,6 @@ public static class AccessActions
                 "lab.revision.publish",
                 "lab.criteria.hidden.read",
                 "assignment.manage",
-                "assignment.read.own",
-                "course.read",
-                "course.create",
-                "course.archive",
-                "group.read",
-                "group.create",
-                "group.member.add",
-                "group.member.remove",
-                "material.read",
                 "attempt.create",
                 "attempt.read",
                 "attempt.submit",
@@ -32,8 +23,7 @@ public static class AccessActions
                 "account.status.change",
                 "system.config.manage",
                 "results.sensitive.read",
-                "evaluation.task.process",
-                "audit.events.read"
+                "evaluation.task.process"
             ],
             StringComparer.Ordinal);
 
@@ -46,15 +36,6 @@ public static class AccessActions
         LabRevisionPublish,
         LabCriteriaHiddenRead,
         AssignmentManage,
-        AssignmentReadOwn,
-        CourseRead,
-        CourseCreate,
-        CourseArchive,
-        GroupRead,
-        GroupCreate,
-        GroupMemberAdd,
-        GroupMemberRemove,
-        MaterialRead,
         AttemptCreate,
         AttemptRead,
         AttemptSubmit,
@@ -63,8 +44,7 @@ public static class AccessActions
         AccountStatusChange,
         SystemConfigManage,
         ResultsSensitiveRead,
-        EvaluationTaskProcess,
-        AuditEventsRead
+        EvaluationTaskProcess
     ];
 
     public static ActionDefinition PublicInfoRead { get; } =
@@ -87,33 +67,6 @@ public static class AccessActions
 
     public static ActionDefinition AssignmentManage { get; } =
         new("assignment.manage", ActionScope.Course, "assignment", false);
-
-    public static ActionDefinition AssignmentReadOwn { get; } =
-        new("assignment.read.own", ActionScope.Course, "assignment", false);
-
-    public static ActionDefinition CourseRead { get; } =
-        new("course.read", ActionScope.Authenticated, null, false);
-
-    public static ActionDefinition CourseCreate { get; } =
-        new("course.create", ActionScope.Authenticated, null, true);
-
-    public static ActionDefinition CourseArchive { get; } =
-        new("course.archive", ActionScope.Authenticated, null, true);
-
-    public static ActionDefinition GroupRead { get; } =
-        new("group.read", ActionScope.Authenticated, null, false);
-
-    public static ActionDefinition GroupCreate { get; } =
-        new("group.create", ActionScope.Authenticated, null, true);
-
-    public static ActionDefinition GroupMemberAdd { get; } =
-        new("group.member.add", ActionScope.Authenticated, null, true);
-
-    public static ActionDefinition GroupMemberRemove { get; } =
-        new("group.member.remove", ActionScope.Authenticated, null, true);
-
-    public static ActionDefinition MaterialRead { get; } =
-        new("material.read", ActionScope.Authenticated, null, false);
 
     public static ActionDefinition AttemptCreate { get; } =
         new("attempt.create", ActionScope.Course, "assignment", false);
@@ -141,7 +94,4 @@ public static class AccessActions
 
     public static ActionDefinition EvaluationTaskProcess { get; } =
         new("evaluation.task.process", ActionScope.System, null, false);
-
-    public static ActionDefinition AuditEventsRead { get; } =
-        new("audit.events.read", ActionScope.Course, "course", false);
 }

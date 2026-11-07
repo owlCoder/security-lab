@@ -104,6 +104,7 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
         }
 
         var permitted = await EvaluatePolicyAsync(policy, request, cancellationToken).ConfigureAwait(false);
+
         return permitted
             ? AccessDecision.Allow(policyId, correlationId, policyVersion)
             : AccessDecision.Deny(AccessDenialReason.PolicyDenied, correlationId, policyVersion);

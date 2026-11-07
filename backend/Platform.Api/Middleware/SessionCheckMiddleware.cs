@@ -39,14 +39,12 @@ public class SessionCheckMiddleware
 
         // Development-only routes of other modules that authenticate callers themselves or are anonymous demos:
         // /api/laboratories and its /api/labs alias (LAB-01 test header), /api/kt1 (ACC-04/ADM-08 synthetic KT1 cookie)
-        // /api/access/demo-deny (Access default-deny demo), and /api/courses with /api/materials (Team 21 test header).
+        // and /api/access/demo-deny (Access default-deny demo).
         if (context.RequestServices is not null
             && context.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() == true
             && (context.Request.Path.StartsWithSegments("/api/laboratories")
                 || context.Request.Path.StartsWithSegments("/api/labs")
                 || context.Request.Path.StartsWithSegments("/api/kt1")
-                || context.Request.Path.StartsWithSegments("/api/courses")
-                || context.Request.Path.StartsWithSegments("/api/materials")
                 || context.Request.Path.StartsWithSegments("/api/access/demo-deny")))
         {
             await _next(context);

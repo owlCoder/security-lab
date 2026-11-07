@@ -40,7 +40,7 @@ They can still change through review.
 | D11 | `Platform.Identity.Tests` is not in `SecurityLab.slnx`, so its tests do not run locally or in CI. | `backend/SecurityLab.slnx` | Identity team; member 1 for CI | Reported only; the Audit component does not change another team's project. |
 | D12 | `ChangeAccountStatus` writes a free-text administrator reason into its audit detail, which conflicts with AUD-03. Proposed: a reason code. | `Platform.Api` | Member 9 with Team 2 | Same as open question 1 in CONTRACTS.md. |
 | D13 | `DefaultDenyAccessDecision` calls the audit writer outside any `try`/`catch`, so a writer exception replaces the computed decision. | `Platform.Access` | Member 9 with Team 3 | Forwarder not connected; proposal in INTEGRATION.md S11-04. |
-| D14 | Resolved in current code: Access returns `PolicyDenied` when a policy returns false and `PolicyError` on evaluation failure. | `Platform.Access` and REV-05 audit adapter | Member 9 with Team 3 | REV-05 preserves `policy_denied` separately; Audit accepts both codes. The revoked-grant HTTP test checks the stored reason (2026-11-06). |
+| D14 | A policy that returns `false` gives `Deny` with reason `PolicyError`, the same as a policy that throws. | `Platform.Access` | Member 9 with Team 3 | Recorded as `policy_error`; proposal for a separate reason in INTEGRATION.md S11-05. |
 | D15 | `SubjectRef.Id` is a free string, while the audit actor ID is an account GUID. | `Platform.Access` | Member 9 with Team 3 | The forwarder records nothing for a non-GUID subject and raises an alarm (S11-05). |
 
 ## KT1 scope

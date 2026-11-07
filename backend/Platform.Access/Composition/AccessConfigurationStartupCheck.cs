@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Platform.Access.Application.Options;
 using Platform.Access.Application.Services;
 using Platform.Access.Contracts;
-using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Policies;
 
 namespace Platform.Access.Composition;
@@ -11,14 +10,11 @@ namespace Platform.Access.Composition;
 internal sealed class AccessConfigurationStartupCheck(
     IActionCatalog catalog,
     InMemoryAccessPolicyRegistry registry,
-    InMemoryActionCatalog actionCatalog,
     AccessConfigurationOptions options,
     ILogger<AccessConfigurationStartupCheck> logger) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        registry.Freeze();
-        actionCatalog.Freeze();
         var uncovered = AccessConfigurationValidator.Validate(catalog, registry.RegisteredActions, options);
 
         if (uncovered.Count > 0)

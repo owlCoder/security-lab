@@ -86,9 +86,11 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
         var now = DateTimeOffset.UtcNow;
         return await db.Sessions
             .Where(session =>
-                session.UserId == userId &&
+                session.UserId == userId && 
                 session.RevokedAt == null &&
-                session.ExpiresAt > now)
+                    session.ExpiresAt > now)     // TODO: Once the MFA/session state model is finalized (IDN-06 / TYP-05),
+                                                 // consider whether only fully authenticated sessions (AuthLevel.Active)
+                                                 // should be included in this list
             .Select(session => new SessionInfo(
                 session.SessionHandle,
                 session.CreatedAt,

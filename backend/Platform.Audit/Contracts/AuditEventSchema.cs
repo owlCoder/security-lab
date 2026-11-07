@@ -11,8 +11,7 @@ public sealed record AuditEventSchema(
     AuditPresence Course,
     AuditPresence Resource,
     string? ResourceType,
-    IReadOnlyDictionary<string, AuditDetailField> Details,
-    IReadOnlySet<string>? RequiredDetails = null);
+    IReadOnlyDictionary<string, AuditDetailField> Details);
 
 public enum AuditPresence
 {
@@ -59,7 +58,5 @@ public enum AuditDetailFormat
     UtcTimestamp,
 
     /// <summary>Integer from 0 to 100000.</summary>
-    Count,
-    Sha256,
-    RevisionNumber
+    Count
 }

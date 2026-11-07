@@ -9,5 +9,4 @@ public static class AuditResourceTypes
     public const string Account = "Account";
     public const string Course = "Course";
     public const string Delegation = "Delegation";
-    public const string Revision = "Revision";
 }

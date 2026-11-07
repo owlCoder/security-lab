@@ -41,8 +41,7 @@ public partial class PublicationDatabaseTests
         Assert.That(Status(created), Is.EqualTo(201));
 
         var revision = await db.LabRevisions.AsNoTracking().SingleAsync(value => value.CourseId == course);
-        var service = new ReviewService(factory, access, new StoredPublicationSource(factory), TimeProvider.System,
-            new Platform.Audit.Composition.PostgresTransactionalAuditWriter(TimeProvider.System));
+        var service = new ReviewService(factory, access, new StoredPublicationSource(factory), TimeProvider.System);
         var submit = await Apply(service, revision.Id, author, new ReviewCommand("submit", 1, revision.ContentHash, "submit", null));
         Assert.That(Status(submit), Is.EqualTo(200));
         var detail = (ReviewDetail)((IValueHttpResult)submit).Value!;

@@ -43,10 +43,6 @@ internal sealed partial class AuditDraftValidator
         if (!IsValidResource(schema, draft.Resource))
             return AuditRejectionCode.InvalidResource;
 
-        if (schema.RequiredDetails is not null && schema.RequiredDetails.Any(key =>
-                draft.Details is null || !draft.Details.ContainsKey(key)))
-            return AuditRejectionCode.InvalidDetailValue;
-
         return CheckDetails(schema, draft.Outcome, draft.Details);
     }
 
@@ -82,7 +78,7 @@ internal sealed partial class AuditDraftValidator
             return false;
 
         var typeAllowed = schema.ResourceType is null
-            ? resource.Type is AuditResourceTypes.Account or AuditResourceTypes.Course or AuditResourceTypes.Delegation or AuditResourceTypes.Revision
+            ? resource.Type is AuditResourceTypes.Account or AuditResourceTypes.Course or AuditResourceTypes.Delegation
             : string.Equals(resource.Type, schema.ResourceType, StringComparison.Ordinal);
 
         return typeAllowed
