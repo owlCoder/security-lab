@@ -325,7 +325,7 @@ if (app.Environment.IsDevelopment())
             decision.CorrelationId
         });
     })
-    .AllowPublic();
+    .RequireAccess(AccessActions.PublicInfoRead.Id);
 }
 
 app.Run();
