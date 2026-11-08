@@ -6,12 +6,15 @@ public sealed class UserAccount(
     Guid id,
     string email,
     AccountStatus status = AccountStatus.Active,
-    AccountRole role = AccountRole.Student)
+    AccountRole role = AccountRole.Student,
+    bool emailConfirmed = true)
 {
     public Guid Id { get; } = id;
     public string Email { get; } = email;
     public AccountStatus Status { get; set; } = status;
     public AccountRole Role { get; set; } = role;
+    public bool EmailConfirmed { get; private set; } = emailConfirmed;
+    public bool NewSessionNotificationsEnabled { get; private set; }
 
     /// <summary>BCrypt hash. Null means the account cannot log in with a password.</summary>
     public string? PasswordHash { get; private set; }
@@ -23,4 +26,9 @@ public sealed class UserAccount(
     public DateTimeOffset? LockoutEnd { get; private set; }
 
     public void SetPasswordHash(string passwordHash) => PasswordHash = passwordHash;
+
+    public void ConfirmEmail() => EmailConfirmed = true;
+
+    public void SetNewSessionNotificationsEnabled(bool enabled) =>
+        NewSessionNotificationsEnabled = enabled;
 }

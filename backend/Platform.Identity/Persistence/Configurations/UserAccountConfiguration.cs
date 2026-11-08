@@ -32,6 +32,16 @@ internal sealed class UserAccountConfiguration : IEntityTypeConfiguration<UserAc
             .HasMaxLength(20)
             .IsRequired();
 
+        builder.Property(account => account.EmailConfirmed)
+            .HasColumnName("email_confirmed")
+            .HasDefaultValue(true)
+            .IsRequired();
+
+        builder.Property(account => account.NewSessionNotificationsEnabled)
+            .HasColumnName("new_session_notifications_enabled")
+            .HasDefaultValue(false)
+            .IsRequired();
+
         builder.Property(account => account.PasswordHash)
             .HasColumnName("password_hash")
             .HasMaxLength(100);

@@ -37,7 +37,13 @@ public sealed class CredentialVerifier(
         // The account may have locked during the hash, so the store decides whether this login still counts.
         if (record is not null && passwordMatches && !wasLocked
             && await store.TryClearFailuresAsync(record.AccountId, now, ct))
-            return new CredentialResult(true, record.AccountId, record.Status);
+            return new CredentialResult(
+                true,
+                record.AccountId,
+                record.Status,
+                Email: record.Email,
+                EmailConfirmed: record.EmailConfirmed,
+                NewSessionNotificationsEnabled: record.NewSessionNotificationsEnabled);
 
         // Unknown e-mails and locked accounts run the same statements and change nothing, so timing stays equal.
         var lockoutEnd = await store.LockIfLimitReachedAsync(

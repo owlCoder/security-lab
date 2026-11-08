@@ -8,7 +8,10 @@ public sealed record CredentialResult(
     bool IsValid,
     Guid AccountId = default,
     AccountStatus Status = default,
-    bool IsLockedOut = false)
+    bool IsLockedOut = false,
+    string? Email = null,
+    bool EmailConfirmed = true,
+    bool NewSessionNotificationsEnabled = false)
 {
     public static CredentialResult Invalid { get; } = new(false);
 

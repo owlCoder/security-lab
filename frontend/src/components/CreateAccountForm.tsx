@@ -10,7 +10,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 function messageFor(outcome: CreateAccountOutcome): { ok: boolean; lines: string[] } {
   switch (outcome.kind) {
     case 'created':
-      return { ok: true, lines: ['Nalog je uspešno kreiran.'] }
+      return { ok: true, lines: ['Nalog je kreiran. Poslata je poruka za potvrdu email adrese pre prve prijave.'] }
     case 'taken':
       return { ok: false, lines: ['Nalog sa ovom email adresom već postoji.'] }
     case 'invalid':
@@ -19,6 +19,11 @@ function messageFor(outcome: CreateAccountOutcome): { ok: boolean; lines: string
       return { ok: false, lines: ['Niste prijavljeni.'] }
     case 'forbidden':
       return { ok: false, lines: ['Nemate dozvolu za kreiranje naloga.'] }
+    case 'confirmationUnavailable':
+      return {
+        ok: false,
+        lines: ['Nalog je kreiran, ali email za potvrdu nije poslat. Otvorite stranicu za potvrdu email adrese i zatražite novu poruku.'],
+      }
     default:
       return { ok: false, lines: ['Došlo je do greške. Pokušajte ponovo.'] }
   }

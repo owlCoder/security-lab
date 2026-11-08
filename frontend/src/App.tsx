@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import ConfirmEmailPage from './components/ConfirmEmailPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -93,6 +94,7 @@ export default function App() {
           <CoursesPage />
         </>} />
         <Route path="login" element={<LoginRoute />} />
+        <Route path="confirm-email" element={<ConfirmEmailPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
         </Route>

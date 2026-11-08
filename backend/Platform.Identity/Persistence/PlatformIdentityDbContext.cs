@@ -10,6 +10,7 @@ public sealed class PlatformIdentityDbContext(DbContextOptions<PlatformIdentityD
 
     public DbSet<UserAccount> Accounts => Set<UserAccount>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<EmailConfirmationToken> EmailConfirmationTokens => Set<EmailConfirmationToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -7,4 +7,7 @@ public sealed record CredentialRecord(
     AccountStatus Status,
     string? PasswordHash,
     int FailedLoginCount = 0,
-    DateTimeOffset? LockoutEnd = null);
+    DateTimeOffset? LockoutEnd = null,
+    string? Email = null,
+    bool EmailConfirmed = true,
+    bool NewSessionNotificationsEnabled = false);

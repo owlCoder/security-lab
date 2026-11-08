@@ -131,6 +131,27 @@ public class LoginTests
         Assert.That(e.ActorId, Is.EqualTo(id));
     }
 
+    [Test]
+    [Category("IDN-10")]
+    public async Task UnconfirmedEmail_IsRefusedWithoutCreatingASession()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(
+            true,
+            id,
+            AccountStatus.Active,
+            Email: Email,
+            EmailConfirmed: false));
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-unconfirmed");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.InvalidCredentials));
+        Assert.That(result.Session, Is.Null);
+        VerifyNoSessionCreated();
+        Assert.That(_events.Single().Outcome, Is.EqualTo("denied"));
+        Assert.That(_events.Single().Detail, Is.EqualTo("email is not confirmed"));
+    }
+
     [TestCase(null, Password)]
     [TestCase("", Password)]
     [TestCase("   ", Password)]
@@ -177,6 +198,36 @@ public class LoginTests
 
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Unavailable));
         Assert.That(_events.Single().Outcome, Is.EqualTo("failure"));
+    }
+
+    [Test]
+    [Category("IDN-13")]
+    public async Task NewSessionEmailIsSentOnlyWhenTheOwnerOptedIn()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(
+            true,
+            id,
+            AccountStatus.Active,
+            Email: Email,
+            NewSessionNotificationsEnabled: true));
+        var emailSender = new Mock<Platform.Api.Interfaces.Identity.IEmailSender>();
+        _login = new LoginService(
+            _verifier.Object,
+            _sessions.Object,
+            _audit.Object,
+            TimeProvider.System,
+            emailSender.Object);
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-alert");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        emailSender.Verify(sender => sender.SendAsync(
+            Email,
+            It.Is<string>(subject => subject.Contains("sign-in")),
+            It.Is<string>(body => body.Contains("new sign-in", StringComparison.OrdinalIgnoreCase)
+                && !body.Contains(Token)),
+            It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Test]

@@ -16,7 +16,7 @@ Build the initial API with `dotnet build backend/Platform.Api/Platform.Api.cspro
 2. Start PostgreSQL: `docker compose up -d db`
 3. Start the API: `dotnet run --project backend/Platform.Api --urls http://localhost:5080`
 
-In the Development environment the API applies pending identity migrations (`PlatformIdentityDbContext`, login and sessions) when it starts, then seeds the development accounts. The account registration context from IDN-01 (`AccountDbContext`) is not migrated on startup. If the database is not reachable, the API still starts and logs a warning; start the database and restart the API. Migrations are never applied on startup outside Development.
+In the Development environment the API applies pending migrations for both identity contexts (`PlatformIdentityDbContext` and the IDN-01 `AccountDbContext`) when it starts, then seeds the development accounts. If the database is not reachable, the API still starts and logs a warning; start the database and restart the API. Migrations are never applied on startup outside Development.
 
 To apply migrations without starting the API, run `dotnet tool restore` once, then:
 
@@ -33,6 +33,20 @@ After changing the identity model, add a migration:
 `dotnet ef migrations add <Name> --project backend/Platform.Identity --startup-project backend/Platform.Identity --context PlatformIdentityDbContext --output-dir Migrations`
 
 The `Migrations_MatchTheModel` test fails when a model change has no migration. The API starts without a connection string, so the database steps are only needed for work that uses the identity database.
+
+For account registration and email confirmation (IDN-10), configure an SMTP relay in `.env` or user-secrets:
+
+```
+Email__Smtp__Host=smtp.example.test
+Email__Smtp__Port=587
+Email__Smtp__EnableSsl=true
+Email__Smtp__User=security-lab
+Email__Smtp__Password=<local SMTP credential>
+Email__FromAddress=security-lab@example.test
+Frontend__BaseUrl=http://localhost:5173
+```
+
+SMTP username and password are optional for relays that do not require authentication. Without SMTP configuration, account creation cannot send the confirmation message; the API does not expose confirmation tokens in responses or logs. Users may request a new confirmation email through `/api/auth/email-confirmation/request`. New-session alerts (IDN-13) are off by default and use the same SMTP configuration.
 
 ## Reset the local identity database
 

@@ -4,11 +4,13 @@ export type CreateAccountOutcome =
   | { kind: 'invalid'; errors: string[]; correlationId?: string }
   | { kind: 'unauthenticated'; correlationId?: string }
   | { kind: 'forbidden'; correlationId?: string }
+  | { kind: 'confirmationUnavailable'; correlationId?: string }
   | { kind: 'error' }
 
 interface ApiBody {
   id?: string
   errors?: string[]
+  error?: string
   correlationId?: string
 }
 
@@ -39,6 +41,8 @@ export async function createAccount(email: string, password: string): Promise<Cr
     case 409:
       return { kind: 'taken', correlationId }
     default:
+      if (res.status === 503 && body?.error === 'confirmation_email_unavailable')
+        return { kind: 'confirmationUnavailable', correlationId }
       return { kind: 'error' }
   }
 }
