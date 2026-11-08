@@ -20,6 +20,7 @@ export default function AppShell() {
       <Link className="brand-link" to="/">Security Lab</Link>
       {user && <div className="site-nav-links">
         <Link to="/access-demo">Laboratory</Link>
+        <Link to="/my-assignments">Moji zadaci</Link>
         <button type="button" className="secondary" onClick={() => void handleLogout()}>
           Log out
         </button>

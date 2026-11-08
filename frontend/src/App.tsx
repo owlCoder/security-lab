@@ -10,6 +10,7 @@ import LabsSection from './components/labs/LabsSection'
 import ProtectedRoute from './components/ProtectedRoute'
 import ProtectedApp from './components/ProtectedApp'
 import LoginPage from './login/page'
+import MyAssignmentsPage from './pages/MyAssignmentsPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
 
@@ -93,6 +94,8 @@ export default function App() {
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          {/* ASN-02 (team 16) */}
+          <Route path="my-assignments" element={<MyAssignmentsPage />} />
         </Route>
       </Route>
     </Routes>
