@@ -58,3 +58,53 @@ A teacher sees `id`, `occurredAt`, actor kind and **account ID**, `eventType`, `
 - **Events without a course** (login, logout, account status) are not visible through this API (open question 4 in CONTRACTS.md). The teacher API shows only events of the course.
 - **Keyset cursor.** Positions are `(occurred_at, id)`. Events written during paging appear only if newer than the first page, as expected for a newest-first view.
 - **Producers.** Identity still writes to its own log writer (S11-07). This change does not make login or logout count as AUD-01 coverage; that needs the Identity teams' acceptance.
+
+## Diagrams (KT1)
+
+| KT1 stavka | Fajl |
+|-|-|
+| 3 · Dijagram arhitekture | [aud06-architecture.svg](diagrams/aud06-architecture.svg) (PNG: [aud06-architecture.png](diagrams/aud06-architecture.png)) |
+| 4 · Dijagram toka podataka (DFD) | [aud06-dfd.svg](diagrams/aud06-dfd.svg) (PNG: [aud06-dfd.png](diagrams/aud06-dfd.png)) |
+
+Izvor: [diagrams/src](diagrams/src). Stariji [audit-dfd.mmd](diagrams/audit-dfd.mmd) prikazuje stanje pre
+ovog rada (upit „not implemented”).
+
+### Arhitektura: šta dijagram prikazuje
+
+| Zahtev KT1 | Gde na dijagramu |
+|-|-|
+| Ključne komponente | `AuditEventsController`, `SessionAuditActorSource`, `AuditCourseReader`, `RequestAuditContextProvider`, `PostgresAuditEventQueryStore` (novo, zeleno); `AuditWriter + Validator`, `PostgresAuditEventStore`, `CourseAuditReadPolicy`, HTTP pipeline (postojeće, sivo) |
+| Odgovornosti | red „Odg.:” u svakoj komponenti |
+| Interfejsi | ljubičasti «interface»: `IAuditWriter`/`ITrustedAuditWriter`, `IAuditCourseReader`, `IAuditActorSource`, `ICorrelationContext`; „pruža / traži” u svakoj komponenti |
+| Zavisnosti | pune strelice (poziv), ljubičaste (korišćenje interfejsa), isprekidane sa praznim vrhom (realizacija) |
+| Veza sa platformom | narandžasto: Identity (`ISessionManager`), Access (`IAccessDecision`, `IAccessPolicy`), članstva ACC-03/07 (`IMembershipReader`), moduli proizvođači (`IAuditWriter`), frontend (HTTPS) |
+
+### DFD: elementi
+
+| Element | Sadržaj |
+|-|-|
+| Akteri | E1 nastavnik/asistent preko pregledača (isti ulaz koristi i napadač); E2 korisnik ili servis čija se akcija beleži |
+| Procesi | P1 korelacioni ID · P2 autentikacija sesije · P3 autorizacija `audit.events.read` · P4 validacija upita · P5 čitanje događaja kursa · P6 beleženje pregleda · P7 odgovor · P8 modul proizvođač · P9 kontekst zapisa · P10 validacija nacrta · P11 append-only upis |
+| Skladišta | D0 kontekst zahteva (memorija) · D1 sesije · D2 članstva/delegacije · D3 `audit.audit_events` |
+| Tokovi | 1–16 čitanje (AUD-06), W1–W8 upis (AUD-01); crveno isprekidano: 401/403/400/503 i `Rejected` |
+| Ulazi / izlazi | okvir „Ulazi / Izlazi” na dijagramu |
+| Granice poverenja | TB0 nepouzdano (pregledač, ulaz akcije) · TB1 serverski proces · TB2 PostgreSQL |
+
+Ključne bezbednosne tačke na DFD-u: kurs u upitu (tok 9) je iz RUTE koju je P3 autorizovao; tok 15 postoji
+samo posle `Recorded` (tok 14), inače 503 bez podataka; akter i korelacioni ID (W3) dolaze iz D0, nikad od E1/E2.
+
+## Tests
+
+All in `backend/Platform.Audit.Tests/Reading`, run by
+`dotnet test backend/SecurityLab.slnx --configuration Release --no-build` (after a build).
+
+| File | What it proves |
+|-|-|
+| `AuditCourseReaderTests` | only the requested course; view recorded with filters that pass the real validator; fail closed when the view is not recorded or the writer throws; invalid limit/type/outcome/time/cursor rejected before any read; non-user viewer refused; paging; cancellation |
+| `AuditCursorTests` (same file) | cursor round trip and malformed input |
+| `AuditEventsControllerTests` | parameter parsing, 400/401/503 mapping, `no-store`, viewer from server context |
+| `AuditEventsHttpTests` | real host and Access middleware: teacher and delegated assistant allowed; student, assistant without grant, teacher of another course, no session, forged token denied with no read; query-string course ignored; 503 without data; no write route |
+| `SessionAuditActorSourceTests` | actor only from a validated, fully authenticated session; headers/query never used; no context → no actor |
+| `RequestAuditContextTests` | ordinary `IAuditWriter` records session actor, server correlation and server UTC time; outside a request → `InvalidContext`; secret-like key rejected and never stored |
+| `AuditReadCompositionTests` | strict DI validation, explicit replacement of the default context provider, real host uses `SessionAuditActorSource`, the only audit route is GET with `audit.events.read` on `course` |
+| `PostgresAuditEventQueryStoreTests` | real SQL: course isolation, filters, inclusive range, keyset paging without gaps, injection-like value treated as data. Category `AuditPostgres`; **Ignored** unless `AUDIT_TEST_ADMIN_CONNECTION_STRING` is set (run with `scripts/audit/test-postgres.ps1`). |
