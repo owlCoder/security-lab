@@ -29,6 +29,10 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Persistence;
 
+using Platform.Prerequisites.Application;
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
+
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
 using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
@@ -95,8 +99,15 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddLaboratoriesPersistence(
     builder.Configuration.GetConnectionString("Laboratories"));
+// LAB-06: registracija podataka o završenim laboratorijama
+builder.Services.AddSingleton<StubCompletedLaboratories>();
+builder.Services.AddSingleton<ICompletedLaboratories>(
+    sp => sp.GetRequiredService<StubCompletedLaboratories>());
+
+// REV modul
 builder.Services.AddRevisionReviews();
-builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+builder.Services.AddRevisionSecurityPersistence(
+    builder.Configuration.GetConnectionString("Laboratories"));
 
 // IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
 builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
@@ -109,24 +120,36 @@ builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 
-builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
+builder.Services.AddScoped<
+    Platform.Api.Interfaces.Identity.IIdentityContext,
+    SessionIdentityContext>();
 
 
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
-// Use the official LAB-01 repository contract. Never silently persist to memory in production.
+
+// Koristimo PostgreSQL kada postoji Authoring konekcija.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
 {
     builder.Services.AddLaboratoryPersistence(builder.Configuration);
+
     builder.Services.AddScoped<ILaboratoryRepository, PostgresLaboratoryRepository>();
+    builder.Services.AddScoped<IPrerequisiteRepository, LabPrerequisiteStoreAdapter>();
+
+    builder.Services.AddScoped<IPrerequisiteAccessService, PrerequisiteAccessService>();
 }
-else if (builder.Environment.IsDevelopment())
+else if (builder.Environment.IsDevelopment() ||
+         builder.Environment.IsEnvironment("Testing"))
 {
+    // U razvojnom i testnom okruženju koristimo memorijske repozitorijume.
     builder.Services.AddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
+    builder.Services.AddSingleton<IPrerequisiteRepository, InMemoryPrerequisiteRepository>();
+
+    builder.Services.AddScoped<IPrerequisiteAccessService, PrerequisiteAccessService>();
 }
 else
 {
-    // Keep unrelated API routes available, but never silently write laboratories to memory.
+    // Ne koristimo memorijsko čuvanje u produkciji.
     builder.Services.AddSingleton<ILaboratoryRepository, UnavailableLaboratoryRepository>();
 }
 
