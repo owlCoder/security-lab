@@ -1,5 +1,6 @@
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
+using Platform.Api.Modules.Audit;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
@@ -86,6 +87,8 @@ else
 
 builder.Services.AddAudit();
 builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+// AUD-01: ordinary IAuditWriter gets its actor from the validated session and its correlation ID from the request.
+builder.Services.AddAuditRequestContext<SessionAuditActorSource>();
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);

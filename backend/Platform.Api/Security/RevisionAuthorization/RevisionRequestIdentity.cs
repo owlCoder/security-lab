@@ -16,7 +16,11 @@ public static class RevisionRequestIdentity
     // session before the endpoint and owns its own item.
     public const string SessionItemKey = "rev05.validated-session";
 
-    public static bool AppliesTo(HttpContext http) => http.Request.Path.StartsWithSegments("/api/revisions");
+    // /api/audit (AUD-06) reuses this session-confirmed identity: the Access middleware must see the
+    // real caller, and the audit actor is the same server-validated session.
+    public static bool AppliesTo(HttpContext http) =>
+        http.Request.Path.StartsWithSegments("/api/revisions")
+        || http.Request.Path.StartsWithSegments("/api/audit");
 
     public static SubjectRef? Subject(ValidateSession? session) =>
         session is { Level: AuthenticationLevel.Active } && session.UserId != Guid.Empty

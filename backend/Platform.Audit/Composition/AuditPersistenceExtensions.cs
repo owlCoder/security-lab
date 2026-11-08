@@ -22,6 +22,9 @@ public static class AuditPersistenceExtensions
         services.AddScoped<ITrustedAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
         services.AddScoped<IAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
         services.TryAddSingleton<ITransactionalAuditWriter, PostgresTransactionalAuditWriter>();
+        // AUD-06: read side. The reader records every view before it returns data.
+        services.AddScoped<IAuditEventQueryStore, PostgresAuditEventQueryStore>();
+        services.AddScoped<IAuditCourseReader, AuditCourseReader>();
         return services;
     }
 

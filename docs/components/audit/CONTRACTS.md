@@ -312,3 +312,13 @@ Retries are idempotent. Comments, snapshots, expected answers and secrets are no
 accepted detail keys. Existing event schemas and historical schema-version-1 records
 remain valid. This is a concrete local integration change for review, not a claim of
 prior acceptance of the other proposals in this document.
+
+## AUD-06 read side and request context (proposal, 2026-11-08)
+
+New public members, all additive (no existing member changes): `IAuditActorSource`
+(host hook for the current actor), `AddAuditRequestContext<T>()`, `IAuditCourseReader`,
+`AuditEventQuery`, `AuditEventPage`, `AuditEventView`, `AuditReadResult`, `AuditReadStatus`,
+`AuditReadLimits`. `IAuditCourseReader` assumes the caller already authorized
+`audit.events.read` for the course, and records `audit.events.viewed` before returning data.
+Details, endpoint and security properties: [AUD-06-API.md](AUD-06-API.md). Not yet accepted by
+the consumers.
