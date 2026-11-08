@@ -1,6 +1,7 @@
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Security.AccessAudit;
+using Platform.Api.Security.AccessPolicies;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
@@ -10,6 +11,7 @@ using Platform.Api.Modules.Laboratories;
 
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
+using Platform.Access.Domain.Constants;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Access.AspNet;
@@ -22,12 +24,15 @@ using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Authoring.Application;
 using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
+using Platform.Identity.Services;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
@@ -100,6 +105,93 @@ builder.Services.AddLaboratoriesPersistence(
 builder.Services.AddRevisionReviews();
 builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
+builder.Services
+    .AddAccessPolicy<PublicHealthReadPolicy>(AccessActions.PublicInfoRead.Id)
+    .AddAccessAction<CreateAccountPolicy>(
+        new ActionDefinition(
+            CreateAccountPolicy.ActionId,
+            ActionScope.Authenticated,
+            null,
+            false))
+    .AddAccessAction<AuthoringAuthorPolicy>(
+        new ActionDefinition(
+            AuthoringActions.TemplateList,
+            ActionScope.Authenticated,
+            null,
+            false))
+    .AddAccessAction<AuthoringAuthorPolicy>(
+        new ActionDefinition(
+            AuthoringActions.TemplateCopy,
+            ActionScope.Course,
+            AuthoringActions.TemplateResourceType,
+            false))
+    .AddAccessAction<ExplicitDenyAccessPolicy>(
+        new ActionDefinition(
+            LabVisibilityActions.StudentView,
+            ActionScope.Authenticated,
+            null,
+            false))
+    .AddAccessAction<ExplicitDenyAccessPolicy>(
+        new ActionDefinition(
+            LabVisibilityActions.Preview,
+            ActionScope.Authenticated,
+            null,
+            false))
+    .AddAccessAction<EvaluatorKeyPolicy>(
+        new ActionDefinition(
+            LabVisibilityActions.KeyRead,
+            ActionScope.Course,
+            "lab",
+            true))
+    .AddAccessAction<RevisionActionPolicy>(
+        new ActionDefinition(
+            RevisionActions.Create,
+            ActionScope.Course,
+            "course",
+            false))
+    .AddAccessAction<RevisionActionPolicy>(
+        new ActionDefinition(
+            RevisionActions.Read,
+            ActionScope.Course,
+            "revision",
+            false))
+    .AddAccessAction<RevisionActionPolicy>(
+        new ActionDefinition(
+            RevisionActions.Mine,
+            ActionScope.Course,
+            "revision",
+            false))
+    .AddAccessAction<RevisionActionPolicy>(
+        new ActionDefinition(
+            RevisionActions.PendingReviews,
+            ActionScope.Course,
+            "revision",
+            false))
+    .AddAccessAction<RevisionActionPolicy>(
+        new ActionDefinition(
+            RevisionActions.Submit,
+            ActionScope.Course,
+            "revision",
+            false))
+    .AddAccessAction<RevisionApprovalPolicy>(
+        new ActionDefinition(
+            RevisionActions.Approve,
+            ActionScope.Course,
+            "revision",
+            true))
+    .AddAccessAction<RevisionActionPolicy>(
+        new ActionDefinition(
+            RevisionActions.Return,
+            ActionScope.Course,
+            "revision",
+            false))
+    .AddAccessAction<RevisionApprovalPolicy>(
+        new ActionDefinition(
+            RevisionActions.UnlockAccount,
+            ActionScope.System,
+            null,
+            true));
+
 // IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
 builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
@@ -137,8 +229,6 @@ builder.Services.AddRevisionRequestIdentity();
 var app = builder.Build();
 app.UseRouting();
 
-app.Services.RegisterRevisionPolicies();
-
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
 app.UseAccessControl();
@@ -154,15 +244,12 @@ if (kt1Enabled)
 }
 
 // IDN-01: politike i endpoint za kreiranje naloga
-app.Services.RegisterIdentityAccess();
 app.MapAccountEndpoints();
 
 // AUT-06: radnje i politike za sablone laboratorija, pa endpointi
-app.Services.RegisterAuthoringAccess();
 app.MapAuthoringEndpoints();
 
 // AUT-04/AUT-07: radnje i politike za prikaz laboratorije
-app.Services.RegisterLabVisibilityAccess();
 
 // Probni nalozi samo za lokalni razvoj
 if (app.Environment.IsDevelopment())
@@ -207,7 +294,7 @@ app.MapGet("/api/health", () => Results.Ok(new
     note = "Initial scaffold; not a production-ready laboratory platform"
 }))
 .AllowAnonymous()   // IDN-02 SessionCheckMiddleware
-.AllowPublic();     // ACC-05 AccessControlMiddleware
+.RequireAccess(AccessActions.PublicInfoRead.Id);
 
 app.UseMiddleware<SessionCheckMiddleware>();
 
