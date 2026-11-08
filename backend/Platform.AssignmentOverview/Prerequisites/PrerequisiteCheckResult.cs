@@ -6,15 +6,15 @@ public static class PrerequisiteReasonCodes
 {
     public const string NotMet = "prerequisite_not_met";
     public const string InvalidStudent = "invalid_student";
-    public const string LaboratoryUnresolved = "laboratory_unresolved";
 }
  
 // ASN-07 TIM 16
-// Ishod provere preduslova za jednu dodelu. Ovo koristi i prikaz "zakljucano".
-// Sadrzi samo ID-jeve laboratorija koje fale, nikakve skrivene kriterijume.
+// Ishod provere preduslova za jednu dodelu. Ovo koristi i prikaz "zakljucano":
+// isLocked = !IsUnlocked, missingAssignmentIds = MissingAssignmentIds.
+// Sadrzi samo ID-jeve zadataka koji fale, nikakve skrivene kriterijume.
 public sealed record PrerequisiteCheckResult(
     bool IsUnlocked,
-    IReadOnlyList<Guid> MissingLaboratoryIds,
+    IReadOnlyList<Guid> MissingAssignmentIds,
     string? ReasonCode)
 {
     public static PrerequisiteCheckResult Unlocked { get; } =
@@ -23,7 +23,7 @@ public sealed record PrerequisiteCheckResult(
     public static PrerequisiteCheckResult Locked(IReadOnlyList<Guid> missing) =>
         new(false, missing, PrerequisiteReasonCodes.NotMet);
  
-    // Provera nije mogla da se uradi (nevalidan student, nepoznata revizija). Uvek zakljucano.
+    // Provera nije mogla da se uradi (npr. nevalidan student). Uvek zakljucano.
     public static PrerequisiteCheckResult Denied(string reasonCode) =>
         new(false, Array.Empty<Guid>(), reasonCode);
 }

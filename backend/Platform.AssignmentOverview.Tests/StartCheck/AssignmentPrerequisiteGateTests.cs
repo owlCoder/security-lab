@@ -1,8 +1,8 @@
 using Platform.AssignmentOverview.Prerequisites;
+using Platform.AssignmentPrerequisites.Contracts;
+using Platform.AssignmentPrerequisites.Domain;
+using Platform.AssignmentPrerequisites.Infrastructure;
 using Platform.Assignments.Domain.Models;
-using Platform.Prerequisites.Application;
-using Platform.Prerequisites.Domain;
-using Platform.Prerequisites.Infrastructure;
  
 namespace Platform.AssignmentOverview.Tests.StartCheck;
  
@@ -11,111 +11,128 @@ namespace Platform.AssignmentOverview.Tests.StartCheck;
 [TestFixture]
 public sealed class AssignmentPrerequisiteGateTests
 {
-    private readonly Guid _lab1 = Guid.NewGuid();
-    private readonly Guid _lab2 = Guid.NewGuid();
-    private readonly string _ana = Guid.NewGuid().ToString();
-    private readonly string _marko = Guid.NewGuid().ToString();
+    private const string Ana = "ana";
+    private const string Marko = "marko";
  
-    private InMemoryPrerequisiteRepository _prerequisites = null!;
-    private StubCompletedLaboratories _completed = null!;
-    private InMemoryRevisionLaboratoryResolver _resolver = null!;
+    private Assignment _first = null!;   // zadatak koji mora prvo
+    private Assignment _second = null!;  // zakljucan zadatak (zahteva _first)
+    private InMemoryAssignmentPrerequisiteStore _store = null!;
+    private InMemoryAttemptOutcomeReader _outcomes = null!;
     private AssignmentPrerequisiteGate _gate = null!;
  
     [SetUp]
     public async Task SetUp()
     {
-        _prerequisites = new InMemoryPrerequisiteRepository();
-        _completed = new StubCompletedLaboratories();
-        _resolver = new InMemoryRevisionLaboratoryResolver();
-        _resolver.Map("rev-lab1", _lab1);
-        _resolver.Map("rev-lab2", _lab2);
+        _first = NewAssignment();
+        _second = NewAssignment();
+        _store = new InMemoryAssignmentPrerequisiteStore();
+        _outcomes = new InMemoryAttemptOutcomeReader();
  
-        // Laboratorija 2 zahteva laboratoriju 1.
-        await _prerequisites.AddAsync(new LabPrerequisite(_lab2, _lab1));
+        await _store.AddAsync(new AssignmentPrerequisite(
+            "oib", _second.Id, _first.Id, CompletionRequirement.Passed, "teacher", DateTimeOffset.UtcNow));
  
-        _gate = new AssignmentPrerequisiteGate(
-            _resolver,
-            new PrerequisiteAccessService(_prerequisites, _completed));
+        _gate = new AssignmentPrerequisiteGate(_store, _outcomes);
     }
  
-    // Pozitivan: vezba bez preduslova je otkljucana.
+    // Pozitivan: zadatak bez preduslova je otkljucan.
     [Test]
     public async Task Assignment_WithoutPrerequisites_IsUnlocked()
     {
-        var result = await _gate.CheckAsync(_ana, NewAssignment("rev-lab1"));
+        var result = await _gate.CheckAsync(Ana, _first);
  
         Assert.That(result.IsUnlocked, Is.True);
-        Assert.That(result.MissingLaboratoryIds, Is.Empty);
+        Assert.That(result.MissingAssignmentIds, Is.Empty);
     }
  
-    // Negativan: preduslov nije uradjen, vezba je zakljucana i kaze sta fali.
+    // Negativan: preduslov nije uradjen, zadatak je zakljucan i kaze sta fali.
     [Test]
     public async Task Assignment_WhenPrerequisiteNotCompleted_IsLocked()
     {
-        var result = await _gate.CheckAsync(_ana, NewAssignment("rev-lab2"));
+        var result = await _gate.CheckAsync(Ana, _second);
  
         Assert.That(result.IsUnlocked, Is.False);
         Assert.That(result.ReasonCode, Is.EqualTo(PrerequisiteReasonCodes.NotMet));
-        Assert.That(result.MissingLaboratoryIds, Is.EqualTo(new[] { _lab1 }));
+        Assert.That(result.MissingAssignmentIds, Is.EqualTo(new[] { _first.Id }));
     }
  
-    // Negativan: vezbu koju je uradio drugi student ne otkljucava ovom studentu.
+    // Negativan: zadatak koji je uradio drugi student ne otkljucava ovom studentu.
     [Test]
     public async Task OtherStudentsCompletion_DoesNotUnlock()
     {
-        _completed.MarkCompleted(Guid.Parse(_marko), _lab1);
+        _outcomes.AddPassed(Marko, _first.Id);
  
-        var result = await _gate.CheckAsync(_ana, NewAssignment("rev-lab2"));
+        var result = await _gate.CheckAsync(Ana, _second);
  
         Assert.That(result.IsUnlocked, Is.False);
     }
  
-    // Pozitivan: ispunjen uslov propusta.
+    // Pozitivan: uspesno zavrsen preduslov otkljucava.
     [Test]
-    public async Task Assignment_WhenPrerequisiteCompleted_IsUnlocked()
+    public async Task Assignment_WhenPrerequisitePassed_IsUnlocked()
     {
-        _completed.MarkCompleted(Guid.Parse(_ana), _lab1);
+        _outcomes.AddPassed(Ana, _first.Id);
  
-        var result = await _gate.CheckAsync(_ana, NewAssignment("rev-lab2"));
+        var result = await _gate.CheckAsync(Ana, _second);
  
         Assert.That(result.IsUnlocked, Is.True);
     }
  
-    // Negativan: student ID nije Guid, podrazumevano odbijanje.
+    // Negativan: predato, ali jos neocenjeno ne otkljucava.
     [Test]
-    public async Task InvalidStudentId_IsDenied()
+    public async Task SubmittedButNotEvaluated_DoesNotUnlock()
     {
-        var result = await _gate.CheckAsync("ana", NewAssignment("rev-lab1"));
+        _outcomes.Add(new AttemptOutcomeSnapshot(
+            Guid.NewGuid(), _first.Id, Ana,
+            AttemptState.InEvaluation, EvaluationStatus.Pending, null));
+ 
+        var result = await _gate.CheckAsync(Ana, _second);
+ 
+        Assert.That(result.IsUnlocked, Is.False);
+    }
+ 
+    // Negativan: tehnicka greska evaluatora ne otkljucava (EVAL-06).
+    [Test]
+    public async Task TechnicalError_DoesNotUnlock()
+    {
+        _outcomes.Add(new AttemptOutcomeSnapshot(
+            Guid.NewGuid(), _first.Id, Ana,
+            AttemptState.Completed, EvaluationStatus.TechnicalError, null));
+ 
+        var result = await _gate.CheckAsync(Ana, _second);
+ 
+        Assert.That(result.IsUnlocked, Is.False);
+    }
+ 
+    // Negativan: neuspesan ishod ne otkljucava.
+    [Test]
+    public async Task FailedOutcome_DoesNotUnlock()
+    {
+        _outcomes.Add(new AttemptOutcomeSnapshot(
+            Guid.NewGuid(), _first.Id, Ana,
+            AttemptState.Completed, EvaluationStatus.Completed, EvaluationOutcome.Failed));
+ 
+        var result = await _gate.CheckAsync(Ana, _second);
+ 
+        Assert.That(result.IsUnlocked, Is.False);
+    }
+ 
+    // Negativan: nevalidan student ID, podrazumevano odbijanje (bez izuzetka).
+    [TestCase("")]
+    [TestCase("ana marko")]
+    [TestCase("ana;drop")]
+    public async Task InvalidStudentId_IsDenied(string studentId)
+    {
+        var result = await _gate.CheckAsync(studentId, _first);
  
         Assert.That(result.IsUnlocked, Is.False);
         Assert.That(result.ReasonCode, Is.EqualTo(PrerequisiteReasonCodes.InvalidStudent));
     }
  
-    // Negativan: prazan Guid nije validan student.
-    [Test]
-    public async Task EmptyGuidStudent_IsDenied()
-    {
-        var result = await _gate.CheckAsync(Guid.Empty.ToString(), NewAssignment("rev-lab1"));
- 
-        Assert.That(result.IsUnlocked, Is.False);
-        Assert.That(result.ReasonCode, Is.EqualTo(PrerequisiteReasonCodes.InvalidStudent));
-    }
- 
-    // Negativan: nepoznata revizija se ne tumaci kao "nema preduslova".
-    [Test]
-    public async Task UnknownRevision_IsDenied()
-    {
-        var result = await _gate.CheckAsync(_ana, NewAssignment("rev-nepoznata"));
- 
-        Assert.That(result.IsUnlocked, Is.False);
-        Assert.That(result.ReasonCode, Is.EqualTo(PrerequisiteReasonCodes.LaboratoryUnresolved));
-    }
- 
-    private static Assignment NewAssignment(string revisionId)
+    private static Assignment NewAssignment()
         => new(
             Guid.NewGuid(),
             "oib",
-            revisionId,
+            "revision-" + Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow.AddDays(-1),
             DateTimeOffset.UtcNow.AddDays(7),
             3);

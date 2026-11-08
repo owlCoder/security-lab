@@ -4,7 +4,7 @@ using Platform.Assignments.Contracts;
 namespace Platform.AssignmentOverview.Prerequisites;
  
 // ASN-07 TIM 16
-// Omotac oko StartAttemptService (tim 15). Redosled provera:
+// Omotac oko StartAttemptService (tim 15), koji ne menjamo. Redosled provera:
 //   1. dodela postoji, 2. student ima pravo da pokrene (autorizacija),
 //   3. preduslovi su ispunjeni, 4. tek onda poziv tudjeg servisa.
 // Autorizacija ide PRE preduslova, da student koji nema pristup ne sazna sta je zakljucano.
@@ -60,7 +60,7 @@ public sealed class GuardedStartAttemptService
         {
             throw new PrerequisitesNotMetException(
                 check.ReasonCode ?? PrerequisiteReasonCodes.NotMet,
-                check.MissingLaboratoryIds);
+                check.MissingAssignmentIds);
         }
  
         return await _inner.StartAttemptAsync(

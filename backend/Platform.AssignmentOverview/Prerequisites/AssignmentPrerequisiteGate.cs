@@ -1,6 +1,6 @@
+using Platform.AssignmentPrerequisites.Contracts;
+using Platform.AssignmentPrerequisites.Domain;
 using Platform.Assignments.Domain.Models;
-using Platform.Prerequisites.Contracts;
-using Platform.Prerequisites.Domain;
  
 namespace Platform.AssignmentOverview.Prerequisites;
  
@@ -14,18 +14,22 @@ public interface IAssignmentPrerequisiteGate
 }
  
 // ASN-07 TIM 16
-// Podrazumevano odbijanje: sve sto nije jasno (student, revizija) znaci "zakljucano".
+// Server odlucuje da li je dodela otkljucana za studenta:
+//   1. ucita preduslove dodele (IAssignmentPrerequisiteStore),
+//   2. ucita ishode pokusaja studenta za zahtevane zadatke (IAttemptOutcomeReader),
+//   3. CompletionPolicy.FindMissing vrati sta fali.
+// Podrazumevano odbijanje: nevalidan student je zakljucano, a bez ishoda pokusaja preduslov nije ispunjen.
 public sealed class AssignmentPrerequisiteGate : IAssignmentPrerequisiteGate
 {
-    private readonly IRevisionLaboratoryResolver _resolver;
-    private readonly IPrerequisiteAccessService _access;
+    private readonly IAssignmentPrerequisiteStore _store;
+    private readonly IAttemptOutcomeReader _outcomes;
  
     public AssignmentPrerequisiteGate(
-        IRevisionLaboratoryResolver resolver,
-        IPrerequisiteAccessService access)
+        IAssignmentPrerequisiteStore store,
+        IAttemptOutcomeReader outcomes)
     {
-        _resolver = resolver;
-        _access = access;
+        _store = store;
+        _outcomes = outcomes;
     }
  
     public async ValueTask<PrerequisiteCheckResult> CheckAsync(
@@ -35,28 +39,32 @@ public sealed class AssignmentPrerequisiteGate : IAssignmentPrerequisiteGate
     {
         ArgumentNullException.ThrowIfNull(assignment);
  
-        // PrerequisiteAccessService radi sa Guid studentom; StartAttemptService sa stringom.
-        if (!Guid.TryParse(studentId, out Guid studentGuid) || studentGuid == Guid.Empty)
+        // CompletionPolicy baca izuzetak za nevalidan ID, pa ga odbijamo unapred.
+        if (!Identifiers.IsValidPrincipalId(studentId))
         {
             return PrerequisiteCheckResult.Denied(PrerequisiteReasonCodes.InvalidStudent);
         }
  
-        Guid? laboratoryId = await _resolver.ResolveLaboratoryIdAsync(
-            assignment.PublishedLabRevisionId,
-            cancellationToken);
+        IReadOnlyList<AssignmentPrerequisite> prerequisites =
+            await _store.GetForAssignmentAsync(assignment.Id, cancellationToken);
  
-        if (laboratoryId is null || laboratoryId.Value == Guid.Empty)
+        if (prerequisites.Count == 0)
         {
-            return PrerequisiteCheckResult.Denied(PrerequisiteReasonCodes.LaboratoryUnresolved);
+            return PrerequisiteCheckResult.Unlocked;
         }
  
-        PrerequisiteAccessResult access = await _access.CheckAccessAsync(
-            studentGuid,
-            laboratoryId.Value,
-            cancellationToken);
+        List<Guid> requiredIds = prerequisites
+            .Select(p => p.RequiredAssignmentId)
+            .Distinct()
+            .ToList();
  
-        return access.IsUnlocked
+        IReadOnlyList<AttemptOutcomeSnapshot> attempts =
+            await _outcomes.GetForStudentAsync(studentId, requiredIds, cancellationToken);
+ 
+        IReadOnlyList<Guid> missing = CompletionPolicy.FindMissing(studentId, prerequisites, attempts);
+ 
+        return missing.Count == 0
             ? PrerequisiteCheckResult.Unlocked
-            : PrerequisiteCheckResult.Locked(access.MissingPrerequisites);
+            : PrerequisiteCheckResult.Locked(missing);
     }
 }

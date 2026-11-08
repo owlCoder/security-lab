@@ -7,14 +7,14 @@ public sealed class PrerequisitesNotMetException : Exception
 {
     public PrerequisitesNotMetException(
         string reasonCode,
-        IReadOnlyList<Guid> missingLaboratoryIds)
+        IReadOnlyList<Guid> missingAssignmentIds)
         : base("Prerequisites are not met.")
     {
         ReasonCode = reasonCode;
-        MissingLaboratoryIds = missingLaboratoryIds;
+        MissingAssignmentIds = missingAssignmentIds;
     }
  
     public string ReasonCode { get; }
  
-    public IReadOnlyList<Guid> MissingLaboratoryIds { get; }
+    public IReadOnlyList<Guid> MissingAssignmentIds { get; }
 }

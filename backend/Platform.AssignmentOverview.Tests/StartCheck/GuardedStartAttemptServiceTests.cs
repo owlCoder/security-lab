@@ -1,10 +1,9 @@
 using Platform.AssignmentOverview.Prerequisites;
 using Platform.AssignmentOverview.Tests.Support;
+using Platform.AssignmentPrerequisites.Domain;
+using Platform.AssignmentPrerequisites.Infrastructure;
 using Platform.Assignments.Application;
 using Platform.Assignments.Domain.Models;
-using Platform.Prerequisites.Application;
-using Platform.Prerequisites.Domain;
-using Platform.Prerequisites.Infrastructure;
  
 namespace Platform.AssignmentOverview.Tests.StartCheck;
  
@@ -13,34 +12,33 @@ namespace Platform.AssignmentOverview.Tests.StartCheck;
 [TestFixture]
 public sealed class GuardedStartAttemptServiceTests
 {
-    private readonly Guid _lab1 = Guid.NewGuid();
-    private readonly Guid _lab2 = Guid.NewGuid();
-    private readonly string _ana = Guid.NewGuid().ToString();
+    private const string Ana = "ana";
  
-    private StubCompletedLaboratories _completed = null!;
-    private StartCheckAttemptStore _store = null!;
+    private Assignment _first = null!;
+    private Assignment _locked = null!;
+    private InMemoryAssignmentPrerequisiteStore _store = null!;
+    private InMemoryAttemptOutcomeReader _outcomes = null!;
     private FakeAssignmentRepository _assignments = null!;
-    private Assignment _lockedAssignment = null!;
+    private StartCheckAttemptStore _attempts = null!;
     private GuardedStartAttemptService _service = null!;
  
     [SetUp]
     public async Task SetUp()
     {
-        var prerequisites = new InMemoryPrerequisiteRepository();
-        _completed = new StubCompletedLaboratories();
-        var resolver = new InMemoryRevisionLaboratoryResolver();
-        resolver.Map("rev-lab1", _lab1);
-        resolver.Map("rev-lab2", _lab2);
-        await prerequisites.AddAsync(new LabPrerequisite(_lab2, _lab1));
+        _first = NewAssignment();
+        _locked = NewAssignment();
  
-        _lockedAssignment = NewAssignment("rev-lab2");
+        _store = new InMemoryAssignmentPrerequisiteStore();
+        await _store.AddAsync(new AssignmentPrerequisite(
+            "oib", _locked.Id, _first.Id, CompletionRequirement.Passed, "teacher", DateTimeOffset.UtcNow));
+ 
+        _outcomes = new InMemoryAttemptOutcomeReader();
         _assignments = new FakeAssignmentRepository();
-        _assignments.Add(_lockedAssignment);
+        _assignments.Add(_first);
+        _assignments.Add(_locked);
+        _attempts = new StartCheckAttemptStore();
  
-        _store = new StartCheckAttemptStore();
-        var authorization = new StartCheckAuthorization(true);
- 
-        _service = Build(authorization, prerequisites, resolver);
+        _service = Build(new StartCheckAuthorization(true));
     }
  
     // Negativan: preduslov nije uradjen, pokusaj se NE pravi.
@@ -48,41 +46,35 @@ public sealed class GuardedStartAttemptServiceTests
     public void Start_WhenPrerequisiteMissing_Throws_AndCreatesNoAttempt()
     {
         var exception = Assert.ThrowsAsync<PrerequisitesNotMetException>(
-            async () => await _service.StartAttemptAsync(
-                _lockedAssignment.Id, _ana, Guid.NewGuid()));
+            async () => await _service.StartAttemptAsync(_locked.Id, Ana, Guid.NewGuid()));
  
         Assert.That(exception!.ReasonCode, Is.EqualTo(PrerequisiteReasonCodes.NotMet));
-        Assert.That(exception.MissingLaboratoryIds, Is.EqualTo(new[] { _lab1 }));
-        Assert.That(_store.StartCalls, Is.EqualTo(0));
+        Assert.That(exception.MissingAssignmentIds, Is.EqualTo(new[] { _first.Id }));
+        Assert.That(_attempts.StartCalls, Is.EqualTo(0));
     }
  
-    // Pozitivan: kad je preduslov uradjen, pokusaj se pokrece.
+    // Pozitivan: kad je preduslov uspesno uradjen, pokusaj se pokrece.
     [Test]
-    public async Task Start_WhenPrerequisiteCompleted_CreatesAttempt()
+    public async Task Start_WhenPrerequisitePassed_CreatesAttempt()
     {
-        _completed.MarkCompleted(Guid.Parse(_ana), _lab1);
+        _outcomes.AddPassed(Ana, _first.Id);
  
-        var attemptId = await _service.StartAttemptAsync(
-            _lockedAssignment.Id, _ana, Guid.NewGuid());
+        var attemptId = await _service.StartAttemptAsync(_locked.Id, Ana, Guid.NewGuid());
  
         Assert.That(attemptId, Is.Not.EqualTo(Guid.Empty));
-        Assert.That(_store.StartCalls, Is.EqualTo(1));
+        Assert.That(_attempts.StartCalls, Is.EqualTo(1));
     }
  
-    // Negativan: student bez prava ne sme da sazna da je vezba zakljucana.
+    // Negativan: student bez prava ne sme da sazna da je zadatak zakljucan.
     [Test]
     public void Start_WhenNotAuthorized_ThrowsAccessDenied_NotPrerequisiteError()
     {
-        var service = Build(
-            new StartCheckAuthorization(false),
-            new InMemoryPrerequisiteRepository(),
-            new InMemoryRevisionLaboratoryResolver());
+        var service = Build(new StartCheckAuthorization(false));
  
         Assert.ThrowsAsync<UnauthorizedAccessException>(
-            async () => await service.StartAttemptAsync(
-                _lockedAssignment.Id, _ana, Guid.NewGuid()));
+            async () => await service.StartAttemptAsync(_locked.Id, Ana, Guid.NewGuid()));
  
-        Assert.That(_store.StartCalls, Is.EqualTo(0));
+        Assert.That(_attempts.StartCalls, Is.EqualTo(0));
     }
  
     // Negativan: nepostojeca dodela.
@@ -90,29 +82,22 @@ public sealed class GuardedStartAttemptServiceTests
     public void Start_WhenAssignmentNotFound_Throws()
     {
         Assert.ThrowsAsync<KeyNotFoundException>(
-            async () => await _service.StartAttemptAsync(
-                Guid.NewGuid(), _ana, Guid.NewGuid()));
+            async () => await _service.StartAttemptAsync(Guid.NewGuid(), Ana, Guid.NewGuid()));
     }
  
-    private GuardedStartAttemptService Build(
-        StartCheckAuthorization authorization,
-        InMemoryPrerequisiteRepository prerequisites,
-        InMemoryRevisionLaboratoryResolver resolver)
+    private GuardedStartAttemptService Build(StartCheckAuthorization authorization)
     {
-        var gate = new AssignmentPrerequisiteGate(
-            resolver,
-            new PrerequisiteAccessService(prerequisites, _completed));
- 
-        var inner = new StartAttemptService(_assignments, _store, authorization);
+        var gate = new AssignmentPrerequisiteGate(_store, _outcomes);
+        var inner = new StartAttemptService(_assignments, _attempts, authorization);
  
         return new GuardedStartAttemptService(_assignments, authorization, gate, inner);
     }
  
-    private static Assignment NewAssignment(string revisionId)
+    private static Assignment NewAssignment()
         => new(
             Guid.NewGuid(),
             "oib",
-            revisionId,
+            "revision-" + Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow.AddDays(-1),
             DateTimeOffset.UtcNow.AddDays(7),
             3);
