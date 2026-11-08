@@ -54,9 +54,35 @@ public class MyAssignmentsWithDataTests
         Assert.That(ids, Is.EquivalentTo(new[]
         {
             DevelopmentAssignmentData.OibAssignmentId,
-            DevelopmentAssignmentData.SecurityAssignmentId
+            DevelopmentAssignmentData.SecurityAssignmentId,
+            DevelopmentLockData.LockedAssignmentId,
+            DevelopmentLockData.UnlockedAssignmentId
         }));
         Assert.That(ids, Does.Not.Contain(DevelopmentAssignmentData.OtherCourseAssignmentId));
+    }
+
+    // ASN-07: dodela sa nepoloženim preduslovom je u odgovoru označena kao zaključana.
+    [Test]
+    public async Task Response_MarksAssignmentWithUnfinishedPrerequisiteAsLocked()
+    {
+        using var factory = CreateFactory("Development", Guid.Parse(DevelopmentAssignmentData.StudentId));
+        using var client = factory.CreateClient();
+
+        var response = await GetAsync(client);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = json.RootElement.GetProperty("assignments").EnumerateArray()
+            .ToDictionary(a => a.GetProperty("assignmentId").GetGuid());
+
+        var locked = items[DevelopmentLockData.LockedAssignmentId];
+        Assert.That(locked.GetProperty("isLocked").GetBoolean(), Is.True);
+        Assert.That(
+            locked.GetProperty("missingAssignmentIds").EnumerateArray().Select(x => x.GetGuid()),
+            Is.EquivalentTo(new[] { DevelopmentAssignmentData.OibAssignmentId }));
+
+        var unlocked = items[DevelopmentLockData.UnlockedAssignmentId];
+        Assert.That(unlocked.GetProperty("isLocked").GetBoolean(), Is.False);
     }
 
     [Test]
