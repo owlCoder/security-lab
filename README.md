@@ -120,6 +120,7 @@ The first call lists the templates (`200`), the second creates a draft from one 
 - `backend/Platform.Identity.Tests/` — NUnit tests for the identity module and the identity part of the API.
 - `backend/Platform.Access/` — access control module (ACC-05, ACC-08).
 - `backend/Platform.Assignments/` — assignments module: assignment model, attempt limit and individual deadline extension (ASN-04, ASN-06). Its tests are in `backend/Platform.Tests/Assignments/`.
+- `backend/Platform.AssignmentPrerequisites/` and `backend/Platform.AssignmentPrerequisites.Tests/` — assignment prerequisites module and its tests (ASN-07).
 - `backend/Platform.Audit/` and `backend/Platform.Audit.Tests/` — audit module skeleton and its tests (AUD-01).
 - `backend/Platform.Authoring/` — authoring module: laboratory drafts and templates (AUT-01, AUT-06).
 - `backend/Platform.Authoring.Tests/` — NUnit tests for the authoring module.
