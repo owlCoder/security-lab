@@ -42,7 +42,8 @@ flowchart TD
 Frontend iz preview odgovora koristi `view`.
 Javni tipovi obuhvataju naslov, cilj, zadatke, tekst pitanja i opcije.
 
-Zajednički `apiRequest` upravlja zahtevima, sesijom i greškama.
+Zajednički `apiRequest` šalje zahteve i obrađuje odgovore i greške.
+Pri integraciji backend određuje identitet iz sesijskog kolačića.
 Odgovori sa statusima 401, 403 i 404 u ovom modulu prikazuju istu
 poruku „Laboratorija nije dostupna“.
 
@@ -84,7 +85,8 @@ Postojeći zajednički mock prosleđuje mu studentsku i preview rutu.
 | Nepostojeća laboratorija | `99999999-9999-9999-9999-999999999999` |
 
 Mock simulira odgovore i pravila pristupa radi razvoja frontenda.
-Provera sa stvarnim backendom ostaje zaseban integracioni korak.
+Rezultati zasebne probe sa stvarnim backendom navedeni su
+u odeljku „Zavisnosti i integracija“.
 
 ## Provere i negativni testovi
 
@@ -104,15 +106,48 @@ preview prikazu i prikaz nepostojeće laboratorije.
 
 ## Zavisnosti i integracija
 
-Studentsku backend rutu implementira Stojanović.
-Preview backend rutu implementira Cvetojević.
+Studentsku backend rutu implementira Stojanović (PR #153),
+a preview rutu Cvetojević (PR #125).
 
-Pre završetka integracije potrebno je proveriti stvarni oblik JSON
-odgovora, demo podatke i dozvoljene i odbijene zahteve prema tim rutama.
-Mock provere potvrđuju ponašanje frontenda sa simuliranim odgovorima.
+Lokalna integraciona provera frontenda izvršena je 8.11.2026. na lokalnoj grani
+`integration/AUT-07-demo`, koja uključuje frontend i Cvetojevićev
+commit `6ac5e17`. Ta verzija sadrži i Stojanovićev studentski API.
+Commitovi nespojenih studentske i preview backend grane nisu uključeni
+u frontend granu namenjenu ovom PR-u.
+
+Prošao je 71 odabrani backend test iz projekta Platform.Tests,
+sa filterom `FullyQualifiedName~LabVisibility`.
+Ovaj rezultat se odnosi na testove modula, ne na celu backend soluciju.
+
+API je pokrenut uz lokalnu PostgreSQL bazu za identitet i sesije.
+LabVisibility demo sadržaj u ovoj probi koristi InMemory skladište,
+jer ConnectionStrings:LabVisibility nije podešen.
+
+Kroz frontend, pokrenut komandom `npm run dev`, provereno je:
+
+- prijava demo studenta preko stvarnog sistema prijave;
+- prikaz objavljene laboratorije preko studentske API rute;
+- odbijanje studentskog pristupa preview prikazu nacrta;
+- isti prikaz poruke za odbijen pristup i nepostojeći ID.
+
+Uspešan nastavnički pregled nacrta još nije potvrđen u ovoj probi.
+Otkriveno je nepoklapanje demo podataka: nalog teacher@example.com
+ima ID 4444…, dok je u demo članstvu kursa kao nastavnik upisan
+ID 1111…. Prijavljeni nastavnik zato dobija odbijen pristup.
+Potrebno je da se backend demo članstvo i povezani testni podaci
+usklade, pa da se ovaj scenario ponovo proveri.
+
+Razvojni birač korisnika određuje identitet u lokalnom mock režimu.
+Pri radu sa stvarnim backendom identitet određuje prijavljena sesija;
+promena tog birača ne menja prijavljeni nalog.
 
 ## Plan za KT2
 
-Proverićemo oba ekrana sa integrisanim backend rutama i stvarnim podacima.
-Razvojni izbor korisnika povezaćemo sa dogovorenim tokom autentikacije.
-Proširićemo integracione provere za promenu korisnika i dostupnosti laboratorije.
+Ponovićemo nastavnički preview nakon usklađivanja backend demo podataka
+i proveriti oba ekrana nakon spajanja odgovarajućih PR-ova u main.
+
+Uskladićemo razvojni birač sa načinom pokretanja, tako da bude jasno
+kada se koristi mock identitet, a kada stvarna prijavljena sesija.
+
+Proširićemo integracione provere na promenu prijavljenog korisnika,
+odjavu i promenu dostupnosti laboratorije.
