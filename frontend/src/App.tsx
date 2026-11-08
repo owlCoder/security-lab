@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import PrerequisitesPage from './pages/PrerequisitesPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -93,9 +94,15 @@ export default function App() {
           <CoursesPage />
         </>} />
         <Route path="login" element={<LoginRoute />} />
-        <Route element={<ProtectedRoute />}>
-          <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
-        </Route>
+       
+    <Route element={<ProtectedRoute />}>
+      <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+        <Route
+            path="laboratories/:laboratoryId/prerequisites/edit"
+            element={<PrerequisitesPage mode="teacher" />}
+        />
+      </Route>
+
       </Route>
     </Routes>
   </AuthProvider>
