@@ -3,6 +3,8 @@ using Platform.Access.AspNet;
 using Platform.Api.Interfaces.Identity;
 using Platform.AssignmentOverview.Application;
 using Platform.AssignmentOverview.Contracts;
+using Platform.AssignmentOverview.Domain;
+using Platform.AssignmentOverview.Infrastructure;
 
 namespace Platform.Api.Endpoints;
 
@@ -42,6 +44,7 @@ public static class MyAssignmentsEndpoints
         IIdentityContext identity,
         [FromServices] IMyAssignmentsService service,
         [FromServices] AssignmentLockService locks,
+        [FromServices] ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         var correlationId = Guid.NewGuid().ToString("N");
@@ -57,15 +60,33 @@ public static class MyAssignmentsEndpoints
 
         var studentId = caller.UserId.Value.ToString();
 
-        var assignments = await service.GetForStudentAsync(
-            studentId,
-            cancellationToken);
+        IReadOnlyList<StudentAssignmentView> assignments;
+        IReadOnlyDictionary<Guid, AssignmentLockStatus> lockStatuses;
 
-        // ASN-07: zaključanost računa server; klijent je samo prikazuje.
-        var lockStatuses = await locks.GetLockStatusesAsync(
-            studentId,
-            assignments,
-            cancellationToken);
+        try
+        {
+            assignments = await service.GetForStudentAsync(
+                studentId,
+                cancellationToken);
+
+            // ASN-07: zaključanost računa server; klijent je samo prikazuje.
+            lockStatuses = await locks.GetLockStatusesAsync(
+                studentId,
+                assignments,
+                cancellationToken);
+        }
+        catch (DependencyUnavailableException ex)
+        {
+            // Fail-closed, ali kontrolisano: bez podataka, bez detalja o grešci, sa ID-jem za log.
+            loggerFactory.CreateLogger("MyAssignments").LogWarning(
+                "My assignments unavailable: {Contract} is not connected. CorrelationId {CorrelationId}",
+                ex.Contract,
+                correlationId);
+
+            return Results.Json(
+                new MyAssignmentsErrorResponse("service_unavailable", correlationId),
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
 
         return Results.Ok(new MyAssignmentsResponse(
             assignments

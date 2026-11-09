@@ -93,7 +93,7 @@ Klijent ne šalje ID studenta ni spisak dodela. Server uzima studenta iz sesije,
 ## Security requirements
 
 - Server-side access checks: zaključanost računa samo server, za studenta iz sesije. Pokušaji se traže samo za tog studenta, a `CompletionPolicy` ponovo proverava da pokušaj pripada baš njemu. Prikaz „zaključano“ nije kontrola pristupa: zabranu pokretanja radi provera pri startu (Kristina), pa uklanjanje oznake u browseru ne otključava zadatak.
-- Input validation and sensitive data: prazan ID studenta se odbija. Odgovor ne sadrži pokušaje, bodove ni ishode, samo `isLocked` i ID-jeve preduslova koje student već vidi. Van Developmenta nema izmišljenih podataka: `UnavailableAttemptOutcomeReader` i `UnavailableAssignmentPrerequisiteStore` bacaju grešku (fail-closed).
+- Input validation and sensitive data: prazan ID studenta se odbija. Odgovor ne sadrži pokušaje, bodove ni ishode, samo `isLocked` i ID-jeve preduslova koje student već vidi. Van Developmenta nema izmišljenih podataka: `UnavailableAttemptOutcomeReader` i `UnavailableAssignmentPrerequisiteStore` bacaju `DependencyUnavailableException`, a endpoint za taj slučaj vraća kontrolisan `503 service_unavailable` sa `correlationId`, bez podataka i detalja greške (fail-closed). Lista se nikad ne vraća bez zaključavanja.
 - Negative scenarios:
 
 | Pretnja | Kontrola | Test |
@@ -104,7 +104,8 @@ Klijent ne šalje ID studenta ni spisak dodela. Server uzima studenta iz sesije,
 | Otkrivanje dodele druge grupe ili kursa | u odgovor idu samo preduslovi koje student vidi (ASN-10) | `HiddenPrerequisite_LocksButIsNotRevealed` |
 | Poziv bez identiteta studenta | servis odbija prazan ID, endpoint vraća 401 | `EmptyStudentId_IsRejected`, `NoSessionCookie_Returns401_AndServiceIsNotCalled` |
 | Odgovor oda više polja nego što treba | spisak dozvoljenih polja | `ResponseContainsOnlyStudentVisibleFields` |
-| Izmišljeni podaci van razvoja | fail-closed implementacije | `OutsideDevelopment_FailsClosed_InsteadOfReturningInventedData` |
+| Izmišljeni podaci van razvoja | fail-closed implementacije, kontrolisan 503 | `OutsideDevelopment_FailsClosed_InsteadOfReturningInventedData` |
+| Lista bez zaključavanja kad preduslovi ili pokušaji nisu povezani | 503 umesto liste u kojoj je sve „otključano“ | `OutsideDevelopment_LockDependenciesUnavailable_Returns503WithoutData` |
 
 ## Pokretanje i demonstracija
 
@@ -138,7 +139,7 @@ Sve komande se pokreću iz korena repozitorijuma.
 
 - Changed files / commit / pull request: novi `AssignmentLockService`, `AssignmentLockStatus`, `DevelopmentLockData`, `UnavailableLockImplementations` u `backend/Platform.AssignmentOverview/`; polja `isLocked` i `missingAssignmentIds` u `MyAssignmentsEndpoints`; registracija u `MyAssignmentsModule`; testovi u `Platform.AssignmentOverview.Tests` i `Platform.MyAssignments.Tests`; ovaj dokument. Grana `feature/ASN-07-locked-view`, PR ka `feature/ASN-02-ASN-07`.
 - Run instructions: odeljak „Pokretanje i demonstracija“ iznad.
-- Tests and results: 8 novih jediničnih testova za `AssignmentLockService` i 1 novi integracioni test (`Response_MarksAssignmentWithUnfinishedPrerequisiteAsLocked`) prolaze; postojeći testovi ASN-02 su prošireni za nova polja i prolaze (12/12 i 12/12).
+- Tests and results: 8 novih jediničnih testova za `AssignmentLockService` i 2 nova integraciona testa (`Response_MarksAssignmentWithUnfinishedPrerequisiteAsLocked`, `OutsideDevelopment_LockDependenciesUnavailable_Returns503WithoutData`) prolaze; postojeći testovi ASN-02 su prošireni za nova polja i kontrolisan 503 i prolaze (`Platform.AssignmentOverview.Tests` 12/12, `Platform.MyAssignments.Tests` 13/13).
 - Next steps:
   - Sa Strahinjom: kolona „Status“ na stranici „Moji zadaci“ (zaključano i šta prvo uraditi), bez odlučivanja u browseru.
   - Sa Kristinom: obe strane koriste `CompletionPolicy.FindMissing`, pa prikaz i zabrana pri startu daju isti odgovor.

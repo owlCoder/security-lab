@@ -32,6 +32,6 @@ public sealed class UnavailableAssignmentRepository : IAssignmentRepository
 
 internal static class Unavailable
 {
-    public static InvalidOperationException Error(string contract) =>
-        new($"{contract} has no implementation outside Development yet.");
+    public static DependencyUnavailableException Error(string contract) =>
+        new(contract);
 }
