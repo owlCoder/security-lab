@@ -1,6 +1,6 @@
 # ASN-02 / ASN-07 — tehnički pregled za KT1 i KT2
 
-Stanje provereno 09.11.2026. na grani `feature/ASN-02-ASN-07`, revizija `f700550`. Pregled opisuje kod te revizije; implementacione veze u dijagramima ne znače da je svaka komponenta već dostupna kroz API.
+Stanje provereno 09.11.2026. na grani `feature/ASN-02-ASN-07`, revizija `b7be493`. Pregled opisuje kod te revizije; implementacione veze u dijagramima ne znače da je svaka komponenta već dostupna kroz API. PR #166 je i dalje otvoren, nije spojen ni u ovu granu ni u `origin/main` (`dcfc388`); njegova zasebna grana dodaje status zaključavanja u listu dodela.
 
 ## 1. Pregled
 
@@ -16,7 +16,7 @@ Obe komponente pripadaju [modularnom monolitu Security Lab](../ARCHITECTURE.md) 
 |---|---|
 | Servis | [`MyAssignmentsService`](../../backend/Platform.AssignmentOverview/Application/MyAssignmentsService.cs) implementira `IMyAssignmentsService`. Preko `IStudentCourseReader` dobija aktivne kurseve, a preko `IAssignmentRepository.GetForCoursesAsync` dodele. Ponovo odbacuje dodele tuđih kurseva čak i ako ih repozitorijum vrati. |
 | API | [`MyAssignmentsEndpoints`](../../backend/Platform.Api/Endpoints/MyAssignmentsEndpoints.cs): `GET /api/me/assignments`, bez ulaznog ID-ja studenta. `IIdentityContext.Current` daje identitet iz proverene sesije. Endpoint odbija neautentifikovan identitet sa `401`. |
-| Odgovor | `assignments` i `correlationId`; stavka sadrži `assignmentId`, `courseId`, `publishedLabRevisionId`, `availableFromUtc`, `dueAtUtc`, `maxAttempts`. Bez upisa vraća se prazna lista. Endpoint postavlja `Cache-Control: no-store`. |
+| Odgovor | `assignments` i `correlationId`; na ovoj reviziji stavka sadrži `assignmentId`, `courseId`, `publishedLabRevisionId`, `availableFromUtc`, `dueAtUtc`, `maxAttempts`. Bez upisa vraća se prazna lista. Endpoint postavlja `Cache-Control: no-store`. `isLocked` i `missingAssignmentIds` nisu deo DTO-a na ovoj grani; ta polja postoje na grani PR-a #166. |
 | Frontend | [`MyAssignmentsPage`](../../frontend/src/pages/MyAssignmentsPage.tsx), ruta `/my-assignments` iza `ProtectedRoute` i [`getMyAssignments`](../../frontend/src/api/myAssignments.ts). Klijent proverava oblik odgovora, zadržava dozvoljena polja i prikazuje tabelu, prazno stanje ili grešku. Vreme prikazuje u lokalnoj zoni korisnika. |
 | Registracija i podaci | [`AddMyAssignments`](../../backend/Platform.Api/Modules/MyAssignments/MyAssignmentsModule.cs) registruje servis; u Development režimu koristi `DevelopmentStudentCourseReader` i `DevelopmentAssignmentRepository`. Izvan njega registruje `Unavailable*` implementacije koje bacaju izuzetak. |
 
@@ -36,11 +36,13 @@ Ruta koristi `DelegatesToLegacyAuthorization()`: postojeći Access middleware pr
 
 Za ispunjen preduslov dovoljan je jedan odgovarajući uspešan pokušaj; kasniji neuspešan pokušaj ne poništava prethodni uspeh. Pokušaji drugih studenata ili zadataka ne računaju se. To je provereno na domenskim ulazima, bez javnog HTTP toka.
 
-[`AddAssignmentPrerequisites`](../../backend/Platform.AssignmentPrerequisites/Composition/AssignmentPrerequisitesServiceCollectionExtensions.cs) postoji, ali ga [`Program.cs`](../../backend/Platform.Api/Program.cs) ne poziva, a [`Platform.Api.csproj`](../../backend/Platform.Api/Platform.Api.csproj) nema referencu na ovaj modul. Nema API-ja za upravljanje preduslovima, autorizacije nastavnika u katalogu, niti ASN-07 polja i prikaza zaključavanja u aktuelnom frontendu.
+[`AddAssignmentPrerequisites`](../../backend/Platform.AssignmentPrerequisites/Composition/AssignmentPrerequisitesServiceCollectionExtensions.cs) postoji, ali ga [`Program.cs`](../../backend/Platform.Api/Program.cs) ne poziva, a [`Platform.Api.csproj`](../../backend/Platform.Api/Platform.Api.csproj) nema referencu na ovaj modul. Nema API-ja za upravljanje preduslovima ni autorizacije nastavnika u katalogu. PR #166 na zasebnoj grani dodaje server-side računanje `isLocked` i `missingAssignmentIds` u odgovoru liste, ali ta implementacija nije na ovoj reviziji niti na `origin/main`; aktuelni frontend i dalje nema prikaz tih polja.
+
+Status zaključavanja i serversko sprovođenje su odvojene stvari. PR #166 računa status za dodele koje su već u studentovoj listi i vraća bezbedan spisak vidljivih nedostajućih dodela. On ne dodaje proveru preduslova u `StartAttemptService` i ne uvodi javni start endpoint.
 
 ## 3. Dijagram arhitekture
 
-Legenda: **puna strelica** označava postojeći poziv, ugovor ili adapter; **isprekidana strelica** označava planiranu integraciju. ASN-07 i servis starta postoje kao kod van javnog toka. Memorijske implementacije imaju eksplicitno naveden razvojni/testni obim.
+Legenda: **puna strelica** označava postojeći poziv, ugovor ili adapter; **isprekidana strelica** označava planiranu integraciju. ASN-07 i servis starta postoje kao kod van javnog toka. Memorijske implementacije imaju eksplicitno naveden razvojni/testni obim. Status zaključavanja iz PR-a #166 nije deo prikazane revizije.
 
 ```mermaid
 %%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false, "nodeSpacing": 25, "rankSpacing": 40, "wrappingWidth": 300}}}%%
@@ -97,7 +99,7 @@ ASN-02 je povezan u [`Program.cs`](../../backend/Platform.Api/Program.cs) kroz `
 
 ## 4. Dijagram toka podataka (DFD)
 
-Legenda: **puni tokovi** postoje u kodu; **isprekidani tokovi** su planirani. Tok ASN-07 validacije i skladištenja prikazuje pozive biblioteke i adaptera, dostupne za izolovano testiranje. Njegov HTTP ulaz još ne postoji.
+Legenda: **puni tokovi** postoje u kodu; **isprekidani tokovi** su planirani. Tok ASN-07 validacije i skladištenja prikazuje pozive biblioteke i adaptera, dostupne za izolovano testiranje. Njegov HTTP ulaz još ne postoji na ovoj reviziji. PR #166 predstavlja zaseban, otvoren tok za dodavanje statusa zaključavanja u postojeći HTTP odgovor liste.
 
 ```mermaid
 %%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false, "nodeSpacing": 25, "rankSpacing": 40, "wrappingWidth": 300}}}%%
@@ -157,7 +159,7 @@ Kod ASN-02, nepoznata/opozvana/istekla sesija ili čekanje na MFA dovode do `401
 
 Kod ASN-07, katalog vraća `AssignmentNotInCourse`, `Duplicate` ili `WouldCreateCycle` bez upisa; domen odbija samoreferencu i nevalidne ulaze izuzetkom. PostgreSQL adapter dodatno koristi ograničenja baze. Memorijsko i PostgreSQL skladište su alternative, a ne dvostruki upis. `CompletionPolicy` ne čita bazu samostalno: prima snapshot-e, proverava vlasništvo i vraća odluku bez studentskih odgovora.
 
-Planirani start mora pre kreiranja pokušaja odbiti neispunjene preduslove. HTTP ruta, statusi tog odbijanja i stvarni čitač ishoda još nisu definisani implementacijom. Nijedan tok skladišta ne vraća podatke direktno studentu.
+Na ovoj reviziji planirani start mora pre kreiranja pokušaja odbiti neispunjene preduslove. PR #166 već ima izolovanu implementaciju računanja statusa zaključavanja za listu, ali nije spojen u ovu granu i ne sprovodi zabranu starta. HTTP ruta za start, statusi tog odbijanja i stvarni čitač ishoda još nisu definisani implementacijom. Nijedan tok skladišta ne vraća podatke direktno studentu.
 
 ## 5. Perzistencija
 
@@ -176,7 +178,7 @@ ASN-07 koristi EF entitet `AssignmentPrerequisiteRow`, [`AssignmentPrerequisiteC
 
 ## 6. Verifikacija i testovi
 
-Sledeći backend rezultati su **izvršeni u prethodnoj lokalnoj proveri 09.11.2026. na istoj reviziji `f700550`**, u Debug konfiguraciji sa `--no-restore --disable-build-servers`. Pri izradi ovog dokumenta testovi nisu ponovo pokretani.
+Sledeći backend rezultati su **izvršeni u prethodnoj lokalnoj proveri 09.11.2026. na kodnoj reviziji `f700550`**, koja prethodi dokumentacionom commitu `b7be493`, u Debug konfiguraciji sa `--no-restore --disable-build-servers`. Pri izradi ovog dokumenta testovi nisu ponovo pokretani.
 
 | Paket / izvor | Šta proverava | Dostupan rezultat |
 |---|---|---|
@@ -184,6 +186,7 @@ Sledeći backend rezultati su **izvršeni u prethodnoj lokalnoj proveri 09.11.20
 | [`Platform.MyAssignments.Tests`](../../backend/Platform.MyAssignments.Tests/) | HTTP tok, sesijski identitet, odbijene sesije/MFA, ignorisanje klijentskog ID-ja, polja odgovora, razvojni podaci i greška izvan Development režima. | 11 prošlo, 0 neuspešnih. |
 | [`Platform.AssignmentPrerequisites.Tests`](../../backend/Platform.AssignmentPrerequisites.Tests/) | Model, graf, katalog, `CompletionPolicy`, EF model/migracija i pomoćno čitanje konfiguracije; zasebni PostgreSQL testovi. | 67 prošlo, 5 preskočeno, 0 neuspešnih. |
 | [`myAssignments.test.tsx`](../../frontend/src/__tests__/myAssignments.test.tsx) | 10 Vitest slučajeva: zahtev bez ID-ja studenta, oblik i polja odgovora, lista/prazno stanje, 401/403, mrežna greška, tekstualni prikaz i vremenska zona. | Istorijski uspeh naveden u [frontend dokumentaciji](ASN-02-frontend.md#evidence-of-work). Ovde nije izvršeno: `frontend/node_modules` nije prisutan. |
+| PR #166, zasebna grana `feature/ASN-07-locked-view` | `AssignmentLockService`, `isLocked`, `missingAssignmentIds`, zaključavanje bez otkrivanja nevidljivih preduslova. | PR navodi 8 novih unit testova i 1 integracioni test; CI grane je uspešan. Nije deo revizije `b7be493`. |
 
 API build je u istoj prethodnoj proveri uspeo. ASN-02 HTTP testovi koriste testni `ISessionManager`; nisu dokaz kompletnog browser → realna prijava → trajne dodele toka. Frontend test za `403` proverava prikaz takvog odgovora, a ne postojanje `assignment.read.own` provere na serveru.
 
@@ -205,7 +208,7 @@ Za KT1 demonstraciju ASN-02 može se pratiti [postojeće uputstvo](ASN-02-fronte
 - **Autorizacija:** `assignment.read.own` nije povezan sa listom; katalog preduslova nema proveru prava nastavnika. `ProtectedRoute` i sakrivanje UI elemenata nisu serverska zaštita.
 - **ASN-07 javni tok:** nema registracije modula, API-ja za preduslove, start endpointa koji koristi ASN-07 niti provere preduslova u `StartAttemptService`.
 - **ATT/EVAL i integritet:** nedostaje stvarni `IAttemptOutcomeReader`; ostaju usaglašavanje važećeg rezultata pri ponovnoj evaluaciji, atomskost provere ciklusa/upisa i veza sa trajnim dodelama.
-- **Frontend i potvrda rada:** nema `isLocked`, razloga zaključavanja ni pokretanja pokušaja; prikazuju se ID-jevi i lokalna vremenska zona. Ne postoji dokaz celog ASN-07 end-to-end toka, a PostgreSQL testovi u navedenoj proveri nisu izvršeni.
+- **Frontend i potvrda rada:** na reviziji `b7be493` frontend nema `isLocked`, razlog zaključavanja ni prikaz statusa. PR #166 dodaje `isLocked` i `missingAssignmentIds` u serverski JSON odgovor, ali ne menja frontend i nije spojen u ovu granu. Ne postoji dokaz celog ASN-07 end-to-end toka, a PostgreSQL testovi u navedenoj proveri nisu izvršeni.
 
 ## 8. Planirani rad — KT2
 
@@ -217,8 +220,8 @@ Za KT1 demonstraciju ASN-02 može se pratiti [postojeće uputstvo](ASN-02-fronte
 | Serverska pravila liste | Dodati `assignment.read.own` i filtere dostupnosti/statusa, uz individualni rok, grupe i uklanjanje duplikata prema dogovorenom obimu. |
 | ASN-07 start | Uvesti obaveznu proveru preduslova pre `TryStartAsync`, povezati je sa javnim endpointom i DI konfiguracijom tako da javna putanja ne može da je zaobiđe. Identitet uzimati iz serverske sesije. |
 | Podaci i upravljanje | Implementirati ATT/EVAL čitač važećih ishoda; povezati PostgreSQL store; dodati autorizovan API za preduslove i odgovarajući audit. Rešiti konkurentne izmene grafa i referencijalni integritet. |
-| Frontend | Vraćati bezbedan status/razlog zaključavanja i prikazati ga; dodati pokretanje pokušaja, nazive kursa/laboratorije i odgovarajuću vremensku zonu. Ne otkrivati nedostupne zadatke kroz razloge zaključavanja. |
+| Frontend | Preuzeti `isLocked` i bezbedan `missingAssignmentIds` kada PR #166 bude integrisan i prikazati status; dodati pokretanje pokušaja, nazive kursa/laboratorije i odgovarajuću vremensku zonu. Ne otkrivati nedostupne zadatke kroz razloge zaključavanja. |
 | Integracioni testovi | Dokazati odbijanje direktnog start zahteva bez preduslova, nevaženje tuđeg uspešnog pokušaja, dozvolu za sopstveni ispunjen preduslov i da odbijanje ne kreira pokušaj. Dodati testove autorizacije, nedostupnih provajdera, trajnosti i konkurentnih upisa. |
 | Dokumentacija | Ažurirati oba dijagrama, ograničenja, rezultate provera i demonstraciju prema stvarno povezanoj implementaciji. |
 
-Detalji postojećih delova: [ASN-02 filtriranje](ASN-02-filtering.md), [ASN-02 frontend](ASN-02-frontend.md), [ASN-07 model](ASN-07-prerequisite-model.md). Ovaj zajednički pregled dopunjuje njihove dijagrame i tehničke dokaze.
+Detalji postojećih delova: [ASN-02 filtriranje](ASN-02-filtering.md), [ASN-02 frontend](ASN-02-frontend.md), [ASN-07 model](ASN-07-prerequisite-model.md), kao i otvoreni PR [#166 — prikaz „zaključano“](https://github.com/owlCoder/security-lab/pull/166). Ovaj zajednički pregled dopunjuje njihove dijagrame i tehničke dokaze.
