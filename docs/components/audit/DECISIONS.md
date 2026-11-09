@@ -64,6 +64,7 @@ code (`Required`, `InvalidFormat`, `UnknownValue`, `OutOfRange`); the value itse
 
 Sorting is `occurred_at DESC, id DESC` (index `ix_audit_events_course_time_id`). Instead of a
 `COUNT`, the query reads `pageSize + 1` rows and returns `hasNextPage`; there is no total count.
+`hasNextPage` is false on the last page the offset limit allows, so it never points to a refused page.
 Offset pages are not a snapshot: new events can shift later pages. A cursor stays a KT2 option.
 The DTO is an allowlist (id, time, type, outcome, actor kind and id, resource, correlation ID);
 `details` is not selected from the database until D4 decides field visibility.

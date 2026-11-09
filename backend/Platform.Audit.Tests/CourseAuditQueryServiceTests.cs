@@ -63,6 +63,39 @@ public sealed class CourseAuditQueryServiceTests
         Assert.That(result.Page.HasNextPage, Is.True);
     }
 
+    [Test]
+    public async Task Query_OnLastAllowedPage_TrimsExtraRowButReportsNoNextPage()
+    {
+        // page=101, pageSize=100: offset 10 000 is allowed; page 102 (offset 10 100) is refused.
+        var result = await Service(new FakeReader(101)).QueryAsync(
+            new CourseAuditQuery(CourseK, Page: "101", PageSize: "100"));
+
+        Assert.That(result.Status, Is.EqualTo(CourseAuditQueryStatus.Ok));
+        Assert.That(result.Page!.Items, Has.Count.EqualTo(100));
+        Assert.That(result.Page.HasNextPage, Is.False);
+
+        var next = await Service(new FakeReader(0)).QueryAsync(
+            new CourseAuditQuery(CourseK, Page: "102", PageSize: "100"));
+        Assert.That(next.Status, Is.EqualTo(CourseAuditQueryStatus.Invalid));
+    }
+
+    [TestCase("100", "100")]  // next page 101 has offset 10 000: allowed
+    [TestCase("200", "50")]   // next page 201 has offset 10 000: allowed
+    public async Task Query_WhenNextPageIsWithinOffsetLimit_ReportsNextPage(string page, string pageSize)
+    {
+        var size = int.Parse(pageSize);
+        var result = await Service(new FakeReader(size + 1)).QueryAsync(
+            new CourseAuditQuery(CourseK, Page: page, PageSize: pageSize));
+
+        Assert.That(result.Page!.Items, Has.Count.EqualTo(size));
+        Assert.That(result.Page.HasNextPage, Is.True);
+
+        var nextPage = (int.Parse(page) + 1).ToString();
+        var next = await Service(new FakeReader(0)).QueryAsync(
+            new CourseAuditQuery(CourseK, Page: nextPage, PageSize: pageSize));
+        Assert.That(next.Status, Is.EqualTo(CourseAuditQueryStatus.Ok));
+    }
+
     [TestCase(0)]
     [TestCase(10)]
     public async Task Query_WhenReaderReturnsAtMostPageSize_HasNoNextPage(int rows)

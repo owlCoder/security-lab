@@ -49,8 +49,11 @@ internal sealed class CourseAuditQueryService(CourseAuditQueryNormalizer normali
             return CourseAuditQueryResult.Unavailable;
         }
 
-        var hasNextPage = rows.Count > normalized.PageSize;
-        var items = hasNextPage ? rows.Take(normalized.PageSize).ToArray() : rows;
+        // Trimming depends only on the extra row. The flag also requires that the next page passes the
+        // offset limit, otherwise it would announce a page the normalizer refuses as OutOfRange.
+        var hasMoreRows = rows.Count > normalized.PageSize;
+        var items = hasMoreRows ? rows.Take(normalized.PageSize).ToArray() : rows;
+        var hasNextPage = hasMoreRows && normalized.NextPageIsAllowed;
 
         return CourseAuditQueryResult.Ok(new CourseAuditPage(
             normalized.CourseId, normalized.From, normalized.To, normalized.Page, normalized.PageSize,

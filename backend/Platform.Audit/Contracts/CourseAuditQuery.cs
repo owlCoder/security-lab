@@ -83,7 +83,8 @@ public sealed record CourseAuditEventDto(
 
 /// <summary>
 /// One page, sorted by <c>OccurredAt DESC, Id DESC</c>. There is no total count: <see cref="HasNextPage"/>
-/// comes from reading one extra row. Pages are not a snapshot; new events can shift later pages.
+/// comes from reading one extra row, and is false when the next page would exceed
+/// <see cref="CourseAuditQueryLimits.MaxOffset"/>. Pages are not a snapshot; new events can shift later pages.
 /// <see cref="From"/> (inclusive) and <see cref="To"/> (exclusive) are the normalized UTC range.
 /// </summary>
 public sealed record CourseAuditPage(

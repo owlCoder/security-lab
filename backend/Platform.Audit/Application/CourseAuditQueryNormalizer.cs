@@ -17,6 +17,9 @@ internal sealed record NormalizedCourseAuditQuery(
     int PageSize)
 {
     public int Offset => (Page - 1) * PageSize;
+
+    /// <summary>True when page <c>Page + 1</c> would pass the same offset limit as this page.</summary>
+    public bool NextPageIsAllowed => CourseAuditQueryNormalizer.IsOffsetAllowed(Page + 1L, PageSize);
 }
 
 /// <summary>
@@ -29,6 +32,10 @@ internal sealed record NormalizedCourseAuditQuery(
 /// </summary>
 internal sealed partial class CourseAuditQueryNormalizer(TimeProvider timeProvider)
 {
+    /// <summary>The single offset rule (T11): <c>(page - 1) * pageSize</c> must not exceed MaxOffset.</summary>
+    internal static bool IsOffsetAllowed(long page, int pageSize) =>
+        (page - 1) * pageSize <= CourseAuditQueryLimits.MaxOffset;
+
     private static readonly string[] OutcomeNames = ["success", "denied", "failure"];
 
     // Same characters as the correlation ID in the audit contract. \z, not $: $ also accepts a final newline.
@@ -80,7 +87,7 @@ internal sealed partial class CourseAuditQueryNormalizer(TimeProvider timeProvid
         }
 
         if (page is not null && pageSize is not null
-            && (long)(page.Value - 1) * pageSize.Value > CourseAuditQueryLimits.MaxOffset)
+            && !IsOffsetAllowed(page.Value, pageSize.Value))
             errors.Add(new(CourseAuditQueryField.Page, CourseAuditQueryErrorCode.OutOfRange));
 
         var range = ResolveRange(query.From, from, query.To, to, errors);
