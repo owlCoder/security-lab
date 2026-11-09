@@ -43,6 +43,9 @@ public static class AssignmentsApiServiceCollectionExtensions
         services.TryAddSingleton<IDeadlineExtensionAuthorization, DenyAllDeadlineExtensionAuthorization>();
         services.TryAddSingleton<ICourseEnrollmentCheck, NoActiveEnrollmentCheck>();
 
+        // Eksplicitna prijava nepovezanih portova pri pokretanju (umesto tihog odbijanja).
+        services.AddHostedService<AssignmentsCompositionCheck>();
+
         return services;
     }
 }

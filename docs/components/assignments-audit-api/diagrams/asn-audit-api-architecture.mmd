@@ -25,10 +25,12 @@ flowchart TB
       CTX["SessionAssignmentAuditContextProvider<br/>akter + korelacioni ID"]:::mine
       MAP["AssignmentAuditDraftMapper<br/>allowlist, bez tajni"]:::mine
       COMP["AddAssignmentsApi()<br/>DI + fail-closed podrazumevani portovi"]:::mine
+      CHECK["AssignmentsCompositionCheck<br/>log nepovezanih portova pri startu"]:::mine
+      COMP --> CHECK
       CTRL --> CALLER
       CTRL --> SAH
       CTRL --> EAH
-      SAH -->|"AssignmentAuditDraft"| WRITER
+      SAH -.->|"posle odluke, best-effort"| WRITER
       ADAPT -->|"AssignmentAuditDraft"| WRITER
       WRITER --> CTX
       WRITER --> MAP

@@ -188,6 +188,77 @@ public sealed class StartAttemptApiHandlerTests
         Assert.That(forbidden.StatusCode, Is.EqualTo(StatusCodes.Status404NotFound));
     }
 
+    // ---------- pad audita ne menja odluku (nalaz iz review-a) ----------
+
+    [Test]
+    public async Task Start_WhenAuditThrowsAfterSuccess_Returns201_WithSingleAttemptAndSingleAuditCall()
+    {
+        var assignment = AddAssignment(maxAttempts: 3);
+        _audit.ThrowOnWrite = new InvalidOperationException("audit down");
+        var key = NewKey();
+
+        var first = await _handler.HandleAsync(Student, assignment.Id, key);
+        var retry = await _handler.HandleAsync(Student, assignment.Id, key);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.StatusCode, Is.EqualTo(StatusCodes.Status201Created));
+            Assert.That(retry.StatusCode, Is.EqualTo(StatusCodes.Status201Created));
+            Assert.That(((StartAttemptResponse)retry.Body).AttemptId,
+                Is.EqualTo(((StartAttemptResponse)first.Body).AttemptId));
+            Assert.That(_attempts.Count(assignment.Id, Student), Is.EqualTo(1));
+            // Po jedan zapis po zahtevu, oba Success; nema naknadnog „Failure/unavailable”.
+            Assert.That(_audit.Drafts, Has.Count.EqualTo(2));
+            Assert.That(_audit.Drafts.Select(d => d.Outcome), Is.All.EqualTo(AssignmentAuditOutcome.Success));
+            Assert.That(_logger.Entries.Any(e => e.EventId.Id == AssignmentAuditWriter.AlarmEvent.Id), Is.True);
+            Assert.That(_logger.AllText, Does.Not.Contain("audit down"));
+        });
+    }
+
+    [Test]
+    public async Task Start_WhenAuditThrowsOnDenial_StillReturnsSame404()
+    {
+        var assignment = AddAssignment(maxAttempts: 2);
+        _audit.ThrowOnWrite = new TimeoutException();
+
+        var forbidden = await _handler.HandleAsync(Outsider, assignment.Id, NewKey());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(forbidden.StatusCode, Is.EqualTo(StatusCodes.Status404NotFound));
+            Assert.That(Code(forbidden), Is.EqualTo(AssignmentErrorCodes.AssignmentNotAvailable));
+            Assert.That(_audit.Drafts.Single().Outcome, Is.EqualTo(AssignmentAuditOutcome.Denied));
+            Assert.That(_attempts.Count(assignment.Id, Outsider), Is.EqualTo(0));
+        });
+    }
+
+    [Test]
+    public async Task Start_WhenAuditThrowsAboveLimit_StillReturns409_WithoutNewAttempt()
+    {
+        var assignment = AddAssignment(maxAttempts: 1);
+        await _handler.HandleAsync(Student, assignment.Id, NewKey());
+        _audit.ThrowOnWrite = new InvalidOperationException();
+
+        var result = await _handler.HandleAsync(Student, assignment.Id, NewKey());
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.StatusCode, Is.EqualTo(StatusCodes.Status409Conflict));
+            Assert.That(_attempts.Count(assignment.Id, Student), Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task Start_WhenAuditThrowsWithoutActor_StillReturns401()
+    {
+        var assignment = AddAssignment(maxAttempts: 2);
+        _audit.ThrowOnWrite = new InvalidOperationException();
+
+        var result = await _handler.HandleAsync(null, assignment.Id, NewKey());
+
+        Assert.That(result.StatusCode, Is.EqualTo(StatusCodes.Status401Unauthorized));
+    }
+
     // Ugovor sa članom 2: handler prepoznaje limit po poruci servisa.
     [Test]
     public void LimitMessage_MatchesStartAttemptService()

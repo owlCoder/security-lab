@@ -7,6 +7,7 @@ using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Api.Modules.Assignments.Audit;
 using Platform.Assignments.Contracts;
 using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
@@ -20,7 +21,9 @@ namespace Platform.Tests.AssignmentsAuditApi;
 // CorrelationMiddleware -> AccessControlMiddleware -> SessionCheckMiddleware -> AssignmentsController
 // -> use-case (član 2/3) -> naš audit adapter. Zamenjeni su samo spoljni izvori: sesija (kolačić
 // SecurityLab.Session=<userId>), status naloga, portovi članova 1 i 4 i skladište Audit modula.
-internal sealed class AssignmentsHostFactory(bool useFakePorts = true) : WebApplicationFactory<Program>
+internal sealed class AssignmentsHostFactory(
+    bool useFakePorts = true,
+    IAssignmentAuditWriter? assignmentAuditOverride = null) : WebApplicationFactory<Program>
 {
     public const string Course = "c0c0c0c0-0000-4000-8000-000000000015";
     public const string Teacher = "11111111-1111-1111-1111-111111111111";
@@ -58,6 +61,13 @@ internal sealed class AssignmentsHostFactory(bool useFakePorts = true) : WebAppl
             // Audit modul (tim 12) bez baze; ponaša se kao pravi katalog.
             services.RemoveAll<ITrustedAuditWriter>();
             services.AddSingleton<ITrustedAuditWriter>(Audit);
+
+            // Za testove pada audita: writer koji baca izuzetak umesto da vrati false.
+            if (assignmentAuditOverride is not null)
+            {
+                services.RemoveAll<IAssignmentAuditWriter>();
+                services.AddSingleton(assignmentAuditOverride);
+            }
 
             if (!useFakePorts)
             {

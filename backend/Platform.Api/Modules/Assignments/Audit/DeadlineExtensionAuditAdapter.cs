@@ -23,15 +23,14 @@ public sealed class DeadlineExtensionAuditAdapter(IAssignmentAuditWriter writer)
 
         try
         {
-            return await writer.WriteAsync(ToDraft(entry), cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
+            // Odluku je servis već doneo: prekinut zahtev ne sme da izgubi zapis, pa se token
+            // pozivaoca namerno ne prosleđuje (isto kao kod ASN-04).
+            return await writer.WriteAsync(ToDraft(entry), CancellationToken.None);
         }
         catch (Exception)
         {
-            // Ugovor: false kada zapis nije sačuvan. Alarm je već podigao AssignmentAuditWriter.
+            // Ugovor porta: false kada zapis nije sačuvan, nikad izuzetak. Izuzetak iz audita ne sme
+            // da promeni ishod use-case-a (403 ostaje 403, 400 ostaje 400).
             return false;
         }
     }

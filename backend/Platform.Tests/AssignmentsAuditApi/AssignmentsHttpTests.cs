@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Platform.Api.Modules.Assignments.Audit;
+using Platform.Api.Modules.Assignments.Composition;
 using Platform.Assignments.Domain.Models;
 using Platform.Audit.Contracts;
 
@@ -27,11 +29,7 @@ public sealed class AssignmentsHttpTests
     {
         _factory = new AssignmentsHostFactory();
         _client = _factory.CreateClient();
-
-        _factory.StartAuthorization.Allow(Student, Course);
-        _factory.StartAuthorization.Allow(BlockedStudent, Course);
-        _factory.DeadlineAuthorization.Allow(Teacher, Course);
-        _factory.Enrollment.Enroll(Student, Course);
+        Seed(_factory);
     }
 
     [OneTimeTearDown]
@@ -42,7 +40,12 @@ public sealed class AssignmentsHttpTests
     }
 
     [SetUp]
-    public void SetUp() => _factory.Audit.Clear();
+    public void SetUp()
+    {
+        _factory.Audit.Clear();
+        _factory.Audit.ThrowOnWrite = null;
+        _factory.Audit.Behavior = null;
+    }
 
     // ---------- ASN-04: započni pokušaj ----------
 
@@ -222,7 +225,103 @@ public sealed class AssignmentsHttpTests
         Assert.That(stored, Is.Null);
     }
 
+    // ---------- pad audita ne menja odluku (nalaz iz review-a) ----------
+
+    [Test]
+    public async Task StartAttempt_WhenAuditModuleThrowsAfterSuccess_Returns201_AndRetryDoesNotDuplicate()
+    {
+        var assignment = AddAssignment(maxAttempts: 3);
+        _factory.Audit.ThrowOnWrite = new InvalidOperationException("audit db down");
+        var key = NewKey();
+
+        using var first = await _client.SendAsync(AssignmentsHostFactory.StartAttempt(assignment.Id, Student, key));
+        using var retry = await _client.SendAsync(AssignmentsHostFactory.StartAttempt(assignment.Id, Student, key));
+        var firstId = (await Json(first)).GetProperty("attemptId").GetGuid();
+        var retryId = (await Json(retry)).GetProperty("attemptId").GetGuid();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+            Assert.That(retry.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+            Assert.That(retryId, Is.EqualTo(firstId));
+            Assert.That(_factory.Attempts.Count(assignment.Id, Student), Is.EqualTo(1));
+            // Jedan pokušaj upisa po zahtevu (Success), bez naknadnog Failure zapisa.
+            Assert.That(_factory.Audit.Calls, Has.Count.EqualTo(2));
+            Assert.That(_factory.Audit.Calls.Select(c => c.Draft.Outcome), Is.All.EqualTo(AuditOutcome.Success));
+        });
+    }
+
+    [Test]
+    public async Task StartAttempt_WhenAssignmentAuditWriterThrows_DecisionsAreUnchanged()
+    {
+        using var factory = new AssignmentsHostFactory(
+            assignmentAuditOverride: new RecordingAssignmentAuditWriter { ThrowOnWrite = new InvalidOperationException() });
+        Seed(factory);
+        using var client = factory.CreateClient();
+        var assignment = AddAssignment(factory, maxAttempts: 1);
+
+        using var created = await client.SendAsync(AssignmentsHostFactory.StartAttempt(assignment.Id, Student, NewKey()));
+        using var limit = await client.SendAsync(AssignmentsHostFactory.StartAttempt(assignment.Id, Student, NewKey()));
+        using var denied = await client.SendAsync(AssignmentsHostFactory.StartAttempt(assignment.Id, Outsider, NewKey()));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(created.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+            Assert.That(limit.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+            Assert.That(denied.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+            Assert.That(factory.Attempts.Count(assignment.Id, Student), Is.EqualTo(1));
+            Assert.That(factory.Attempts.Count(assignment.Id, Outsider), Is.EqualTo(0));
+        });
+    }
+
+    [Test]
+    public async Task ExtendDeadline_WhenAuditFails_DenialStays403_AndSuccessStays200()
+    {
+        using var factory = new AssignmentsHostFactory(
+            assignmentAuditOverride: new RecordingAssignmentAuditWriter { ThrowOnWrite = new InvalidOperationException() });
+        Seed(factory);
+        factory.Audit.ThrowOnWrite = new InvalidOperationException();
+        using var client = factory.CreateClient();
+        var assignment = AddAssignment(factory, maxAttempts: 2);
+        var json = $"{{\"newDueAtUtc\":\"{Iso(DateTimeOffset.UtcNow.AddDays(14))}\"}}";
+
+        using var denied = await client.SendAsync(
+            AssignmentsHostFactory.ExtendDeadline(assignment.Id, Student, Student, json));
+        using var allowed = await client.SendAsync(
+            AssignmentsHostFactory.ExtendDeadline(assignment.Id, Student, Teacher, json));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(denied.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(allowed.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(factory.DeadlineStore.SaveCount, Is.EqualTo(1));
+        });
+    }
+
     // ---------- podrazumevana kompozicija (bez adaptera članova 1 i 4) ----------
+
+    [Test]
+    public void CompositionCheck_ReportsEveryUnconnectedPort_InDefaultComposition()
+    {
+        using var factory = new AssignmentsHostFactory(useFakePorts: false);
+        using var scope = factory.Services.CreateScope();
+
+        var notConfigured = AssignmentsCompositionCheck.GetNotConfiguredPorts(scope.ServiceProvider);
+
+        Assert.That(notConfigured, Is.EquivalentTo(new[]
+        {
+            "IAssignmentRepository", "IAttemptStore", "IDeadlineExtensionStore",
+            "IStartAttemptAuthorization", "IDeadlineExtensionAuthorization", "ICourseEnrollmentCheck",
+        }));
+    }
+
+    [Test]
+    public void CompositionCheck_IsEmpty_WhenRealAdaptersAreRegistered()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        Assert.That(AssignmentsCompositionCheck.GetNotConfiguredPorts(scope.ServiceProvider), Is.Empty);
+    }
 
     [Test]
     public async Task DefaultComposition_HostStarts_AndEverythingIsDenied()
@@ -242,12 +341,22 @@ public sealed class AssignmentsHttpTests
         });
     }
 
-    private Assignment AddAssignment(int maxAttempts)
+    private Assignment AddAssignment(int maxAttempts) => AddAssignment(_factory, maxAttempts);
+
+    private static Assignment AddAssignment(AssignmentsHostFactory factory, int maxAttempts)
     {
         var assignment = new Assignment(
             Guid.NewGuid(), Course, "revision-1", null, DateTimeOffset.UtcNow.AddDays(7), maxAttempts);
-        _factory.Assignments.Add(assignment);
+        factory.Assignments.Add(assignment);
         return assignment;
+    }
+
+    private static void Seed(AssignmentsHostFactory factory)
+    {
+        factory.StartAuthorization.Allow(Student, Course);
+        factory.StartAuthorization.Allow(BlockedStudent, Course);
+        factory.DeadlineAuthorization.Allow(Teacher, Course);
+        factory.Enrollment.Enroll(Student, Course);
     }
 
     private static string NewKey() => Guid.NewGuid().ToString("D");

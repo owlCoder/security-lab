@@ -72,6 +72,13 @@ aktera, kurs, broj pokušaja ni trenutni rok. Eventualna polja `actorId`/`course
 Nikad se ne upisuju: token, kolačić ili ID sesije, lozinke, telo zahteva, poruke izuzetaka, slobodan tekst.
 Nevažeće vrednosti se izbacuju, ne prepisuju se u log ni u izuzetak.
 
+**Audit nikad ne menja odluku.** Use-case prvo odluči (i eventualno sačuva pokušaj ili rok), iz ishoda se
+napravi HTTP odgovor, a audit se piše tek posle, van `try` bloka use-case-a, kao best-effort korak koji ne
+baca izuzetke. Ako audit padne: uspešan start ostaje `201` (ponovljen zahtev sa istim `Idempotency-Key`
+vraća isti pokušaj), odbijanje ostaje `404`/`403`, nema drugog „Failure” zapisa za isti zahtev, a podiže se
+tehnički alarm bez detalja izuzetka. Isto važi za ASN-06 (`DeadlineExtensionAuditAdapter` vraća `false`
+umesto izuzetka). Izuzetak je samo `Success` za ASN-06, koji član 1 upisuje u istoj transakciji sa rokom.
+
 **Ko upisuje šta:** ASN-04 svaki ishod upisuje `StartAttemptApiHandler` (servis člana 2 nema audit port).
 ASN-06 `Denied` i `Failure` upisuje servis člana 3 kroz `DeadlineExtensionAuditAdapter`; `Success` upisuje
 `IDeadlineExtensionStore.SaveAsync` (član 1) u istoj transakciji, za šta može da koristi
@@ -101,16 +108,29 @@ naše nacrte čim tim 12 doda tipove. Otvorena tačka iz `ASN-06-contracts.md`: 
 - **Bez nabrajanja:** ASN-04 vraća isti `404` za nepostojeću i zabranjenu dodelu; ASN-06 isti `403`.
 - **Validacija ulaza:** `Idempotency-Key` mora biti GUID; rok mora imati eksplicitnu zonu (`Z` ili `±hh:mm`), do
   40 znakova; student ID proverava servis (`PrincipalId`).
-- **Fail-closed:** bez adaptera članova 1/4 start vraća 404, produženje 403; neuspeh audita ne menja odluku;
-  tehnička greška daje `503` bez detalja.
+- **Fail-closed:** bez adaptera članova 1/4 start vraća 404, produženje 403; neuspeh audita ne menja odluku
+  (testirano i kada writer baci izuzetak); tehnička greška use-case-a daje `503` bez detalja.
 - **Negativni scenariji (testirani):** bez sesije, blokiran nalog, student van kursa, nastavnik drugog kursa,
   student koji šalje `actorId` nastavnika u telu, nepostojeća dodela, limit dostignut, istekao rok, ponovljen
   `Idempotency-Key`, rok bez zone/u prošlosti/raniji, nevažeći student ID, student nije upisan, pad skladišta,
   pad audita, prekinut zahtev, ubačene vrednosti nalik tajnama.
 
+## Eksplicitno ograničenje: produkcioni portovi
+
+Produkcione implementacije portova pripadaju članu 1 (`IAssignmentRepository`, `IAttemptStore`,
+`IDeadlineExtensionStore`) i članu 4 (`IStartAttemptAuthorization`, `IDeadlineExtensionAuthorization`,
+`ICourseEnrollmentCheck`) i nisu deo ove celine. Dok ih ne registruju:
+
+- `AddAssignmentsApi()` registruje fail-closed podrazumevane implementacije (oznaka `IFailClosedAssignmentPort`):
+  ASN-04 vraća `404`, ASN-06 `403`; ništa se ne čita ni ne menja.
+- `AssignmentsCompositionCheck` pri pokretanju hosta loguje spisak nepovezanih portova (`Warning` u
+  Development, `Error` van njega), pa ograničenje nije tiho.
+- Kada član 1 ili 4 registruje pravi adapter (pre ili posle `AddAssignmentsApi()`), on se koristi umesto
+  podrazumevanog, a provera ga više ne prijavljuje (testovi `CompositionCheck_*`).
+
 ## Dokaz rada
 
-- **Fajlovi:** `backend/Platform.Api/Modules/Assignments/**` (novo), `backend/Platform.Api/Program.cs`
+- **Fajlovi:** `backend/Platform.Api/Modules/Assignments/**` (novo, uključujući `AssignmentsCompositionCheck`), `backend/Platform.Api/Program.cs`
   (+2 linije), `backend/Platform.Api/Platform.Api.csproj` (+referenca na `Platform.Assignments`),
   `backend/Platform.Access.Tests/ApiEndpointCoverageTests.cs` (+2 rute u inventar),
   `backend/Platform.Tests/AssignmentsAuditApi/**` (testovi), `docs/components/assignments-audit-api/**`.
@@ -120,9 +140,9 @@ naše nacrte čim tim 12 doda tipove. Otvorena tačka iz `ASN-06-contracts.md`: 
   dotnet test backend/SecurityLab.slnx --configuration Release --no-build
   ```
   Samo moji testovi: `dotnet test backend/Platform.Tests/Platform.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~AssignmentsAuditApi"`
-- **Testovi (85 slučajeva, NUnit):** `AssignmentAuditDraftMapperTests` 20, `AssignmentAuditWriterTests` 10,
-  `DeadlineExtensionAuditAdapterTests` 8, `StartAttemptApiHandlerTests` 13, `ExtendDeadlineApiHandlerTests` 21,
-  `AssignmentsHttpTests` 13 (ceo HTTP pipeline preko `WebApplicationFactory<Program>`). Portovi članova 1 i 4 i
+- **Testovi (94 slučaja, NUnit):** `AssignmentAuditDraftMapperTests` 20, `AssignmentAuditWriterTests` 10,
+  `DeadlineExtensionAuditAdapterTests` 8, `StartAttemptApiHandlerTests` 17, `ExtendDeadlineApiHandlerTests` 21,
+  `AssignmentsHttpTests` 18 (ceo HTTP pipeline preko `WebApplicationFactory<Program>`). Portovi članova 1 i 4 i
   Audit skladište su test dvojnici; pravi `StartAttemptService` i `ExtendDeadlineService` se koriste.
 - **Demonstracija (KT1):** pokrenuti `AssignmentsHttpTests` i pokazati: 401 bez sesije, 201 i audit sa akterom i
   istim `X-Correlation-ID`, 409 iznad limita, isti 404 za tuđu i nepostojeću dodelu, 403 za studenta na ASN-06

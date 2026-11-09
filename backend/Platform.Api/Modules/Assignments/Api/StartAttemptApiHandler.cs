@@ -10,6 +10,12 @@ namespace Platform.Api.Modules.Assignments.Api;
 /// Izlaže use-case „započni pokušaj” (član 2, <see cref="StartAttemptService"/>) preko HTTP-a i
 /// beleži svaki ishod. <c>StartAttemptService</c> nema audit port, pa se, da se ne menja tuđi kod,
 /// zapis piše ovde, posle odluke servisa. Logiku limita i dostupnosti ne ponavljamo.
+/// <para>
+/// Redosled je namerno razdvojen: (1) use-case odlučuje i eventualno menja stanje, (2) iz ishoda se
+/// pravi HTTP odgovor, (3) tek onda ide audit kao best-effort korak van <c>try</c> bloka use-case-a.
+/// Pad audita nikad ne menja već donetu odluku: uspešno sačuvan pokušaj ostaje 201, odbijanje ostaje
+/// odbijanje, i nema drugog („Failure”) audit zapisa za isti zahtev.
+/// </para>
 /// </summary>
 public sealed class StartAttemptApiHandler(
     StartAttemptService service,
@@ -30,9 +36,11 @@ public sealed class StartAttemptApiHandler(
         if (actorId is null)
         {
             // SessionCheckMiddleware već vraća 401 bez sesije; ovo je slučaj neaktivnog naloga.
-            await AuditAsync(assignmentId, null, AssignmentAuditOutcome.Denied,
-                StartAttemptReasonCodes.Unauthenticated, null);
-            return Error(StatusCodes.Status401Unauthorized, AssignmentErrorCodes.Unauthenticated);
+            var unauthenticated = new Outcome(
+                Error(StatusCodes.Status401Unauthorized, AssignmentErrorCodes.Unauthenticated),
+                AssignmentAuditOutcome.Denied, StartAttemptReasonCodes.Unauthenticated);
+            await TryAuditAsync(assignmentId, null, unauthenticated);
+            return unauthenticated.Result;
         }
 
         // Idempotentnost (ASN-04): isti ključ ne sme da potroši još jedan pokušaj.
@@ -41,13 +49,31 @@ public sealed class StartAttemptApiHandler(
             return Error(StatusCodes.Status400BadRequest, AssignmentErrorCodes.InvalidRequestId);
         }
 
+        // (1) + (2): odluka use-case-a i HTTP odgovor. Audit ovde NE učestvuje.
+        var outcome = await ExecuteAsync(actorId, assignmentId, requestId, cancellationToken);
+
+        // (3): best-effort audit; ne baca i ne menja outcome.Result.
+        await TryAuditAsync(assignmentId, actorId, outcome);
+
+        return outcome.Result;
+    }
+
+    private async Task<Outcome> ExecuteAsync(
+        string actorId,
+        Guid assignmentId,
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var attemptId = await service.StartAttemptAsync(
                 assignmentId, actorId, requestId, cancellationToken);
 
-            await AuditAsync(assignmentId, actorId, AssignmentAuditOutcome.Success, null, attemptId);
-            return new AssignmentApiResult(StatusCodes.Status201Created, new StartAttemptResponse(attemptId));
+            return new Outcome(
+                new AssignmentApiResult(StatusCodes.Status201Created, new StartAttemptResponse(attemptId)),
+                AssignmentAuditOutcome.Success,
+                ReasonCode: null,
+                attemptId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -55,61 +81,69 @@ public sealed class StartAttemptApiHandler(
         }
         catch (KeyNotFoundException)
         {
-            await AuditAsync(assignmentId, actorId, AssignmentAuditOutcome.Failure,
-                StartAttemptReasonCodes.NotFound, null);
             // Isti odgovor kao za zabranjen pristup: ID dodele se ne može pogađati.
-            return Error(StatusCodes.Status404NotFound, AssignmentErrorCodes.AssignmentNotAvailable);
+            return new Outcome(
+                Error(StatusCodes.Status404NotFound, AssignmentErrorCodes.AssignmentNotAvailable),
+                AssignmentAuditOutcome.Failure, StartAttemptReasonCodes.NotFound);
         }
         catch (UnauthorizedAccessException)
         {
-            await AuditAsync(assignmentId, actorId, AssignmentAuditOutcome.Denied,
-                StartAttemptReasonCodes.Forbidden, null);
-            return Error(StatusCodes.Status404NotFound, AssignmentErrorCodes.AssignmentNotAvailable);
+            return new Outcome(
+                Error(StatusCodes.Status404NotFound, AssignmentErrorCodes.AssignmentNotAvailable),
+                AssignmentAuditOutcome.Denied, StartAttemptReasonCodes.Forbidden);
         }
         catch (InvalidOperationException exception) when (exception.Message == LimitReachedMessage)
         {
             // ASN-04: pokušaj iznad limita se odbija; ništa se ne kreira ni menja.
-            await AuditAsync(assignmentId, actorId, AssignmentAuditOutcome.Failure,
-                StartAttemptReasonCodes.AttemptLimitReached, null);
-            return Error(StatusCodes.Status409Conflict, AssignmentErrorCodes.AttemptLimitReached);
+            return new Outcome(
+                Error(StatusCodes.Status409Conflict, AssignmentErrorCodes.AttemptLimitReached),
+                AssignmentAuditOutcome.Failure, StartAttemptReasonCodes.AttemptLimitReached);
         }
         catch (InvalidOperationException)
         {
             // Istekla, još nedostupna ili arhivirana dodela (ASN-03).
-            await AuditAsync(assignmentId, actorId, AssignmentAuditOutcome.Failure,
-                StartAttemptReasonCodes.NotAvailable, null);
-            return Error(StatusCodes.Status409Conflict, AssignmentErrorCodes.AssignmentClosed);
+            return new Outcome(
+                Error(StatusCodes.Status409Conflict, AssignmentErrorCodes.AssignmentClosed),
+                AssignmentAuditOutcome.Failure, StartAttemptReasonCodes.NotAvailable);
         }
         catch (Exception exception)
         {
-            // Skladište ili autorizacija nisu dostupni. Klijent ne dobija interne detalje.
+            // Skladište ili autorizacija nisu dostupni (izuzetak iz use-case-a, ne iz audita).
             logger.LogError("Start attempt failed with {ExceptionType}.", exception.GetType().Name);
-            await AuditAsync(assignmentId, actorId, AssignmentAuditOutcome.Failure,
-                StartAttemptReasonCodes.Unavailable, null);
-            return Error(StatusCodes.Status503ServiceUnavailable, AssignmentErrorCodes.TemporarilyUnavailable);
+            return new Outcome(
+                Error(StatusCodes.Status503ServiceUnavailable, AssignmentErrorCodes.TemporarilyUnavailable),
+                AssignmentAuditOutcome.Failure, StartAttemptReasonCodes.Unavailable);
         }
     }
 
-    // Akcija je već odlučena: CancellationToken.None da prekinut zahtev ne izgubi zapis.
-    private async Task AuditAsync(
-        Guid assignmentId,
-        string? studentId,
-        AssignmentAuditOutcome outcome,
-        string? reasonCode,
-        Guid? attemptId)
+    /// <summary>
+    /// Jedan audit zapis po zahtevu, posle odluke. Nikad ne baca: pad čitanja kursa, writer-a ili
+    /// Audit modula samo se loguje kao tehnički alarm (bez detalja izuzetka). CancellationToken.None
+    /// jer je odluka već doneta i prekinut zahtev ne sme da izgubi zapis.
+    /// </summary>
+    private async Task TryAuditAsync(Guid assignmentId, string? studentId, Outcome outcome)
     {
-        var courseId = await TryGetCourseIdAsync(assignmentId);
+        try
+        {
+            var courseId = await TryGetCourseIdAsync(assignmentId);
 
-        await audit.WriteAsync(
-            new AssignmentAuditDraft(
-                AssignmentAuditActions.StartAttempt,
-                outcome,
-                assignmentId,
-                courseId,
-                studentId,
-                reasonCode,
-                AttemptId: attemptId),
-            CancellationToken.None);
+            await audit.WriteAsync(
+                new AssignmentAuditDraft(
+                    AssignmentAuditActions.StartAttempt,
+                    outcome.AuditOutcome,
+                    assignmentId,
+                    courseId,
+                    studentId,
+                    outcome.ReasonCode,
+                    AttemptId: outcome.AttemptId),
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(AssignmentAuditWriter.AlarmEvent,
+                "Start attempt audit failed with {ExceptionType}; HTTP {StatusCode} is kept.",
+                exception.GetType().Name, outcome.Result.StatusCode);
+        }
     }
 
     // Kurs se uzima iz same dodele (pouzdan izvor), nikad od klijenta. Najbolji pokušaj:
@@ -129,4 +163,10 @@ public sealed class StartAttemptApiHandler(
 
     private static AssignmentApiResult Error(int statusCode, string code) =>
         new(statusCode, new AssignmentErrorResponse(code));
+
+    private sealed record Outcome(
+        AssignmentApiResult Result,
+        AssignmentAuditOutcome AuditOutcome,
+        string? ReasonCode,
+        Guid? AttemptId = null);
 }
