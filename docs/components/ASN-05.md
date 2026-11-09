@@ -6,9 +6,149 @@
 
 The work is split between team members. Each section below describes one part.
 
-## Igor
+## Igor Ivanović — assignment scope and group check when starting an attempt
 
-To be completed.
+**Student:** Igor Ivanović / PR 70/2018
+
+### Responsibilities and boundaries
+
+- Processes and user scenarios: a teacher creates an assignment for a whole course or for one group on the course. A student starts an attempt on an assignment. For a group assignment, only a member of that group may start it; a student of another group gets the same denial as any unauthorized caller, even when they know the assignment ID.
+- What this part does:
+  - `Assignment.Scope` (`Course` / `Group`) and `Assignment.GroupId`. The domain rejects a `Group` assignment without a `GroupId` (null, empty or whitespace), a `Course` assignment with a `GroupId`, and `Unspecified` or unknown scope values.
+  - `StartAttemptService.StartAttemptAsync`: a group check (`IsInAssignmentGroupAsync`) using `IGroupMembership` and `AssignmentGroupPolicy`, after the course check and before availability and the attempt limit.
+- What this part does NOT do: it does not change `AssignmentGroupPolicy`, `IGroupMembership` or `InMemoryGroupMembership` (Đorđe), does not filter the list (Andrija), and does not register anything in DI or add an API route. `StartAttemptService` is not registered anywhere yet, so no running endpoint changes.
+- Contracts with other modules:
+  - `IStartAttemptAuthorization`: `AccessStartAttemptAuthorization` adapter (#105) confirms an active student of the course.
+  - `IGroupMembership` and `AssignmentGroupPolicy` (ASN-05, Đorđe): used as they are.
+  - `IAssignmentRepository`, `IAttemptStore` (existing, Team 15): not changed.
+- Implementation status: implemented and covered by NUnit tests. DI registration and the API route are next steps.
+
+### Order of checks
+
+1. Load the assignment by ID; a missing one gives `Assignment not found.` (existing behaviour, unchanged).
+2. `IStartAttemptAuthorization.CanStartAsync`: active student of the stored `CourseId`, otherwise `Access denied.`
+3. Group check (ASN-05): for a `Group` assignment, `IGroupMembership.IsGroupMemberAsync(studentId, CourseId, GroupId)` with the values from the stored assignment, then `AssignmentGroupPolicy.DecideVisibility`. A denial gives the same `Access denied.` A `Course` assignment does not call the membership check.
+4. Availability (`Assignment is not available.`).
+5. Attempt limit and creation (`IAttemptStore.TryStartAsync`).
+
+The group check comes before availability, so a student of another group does not even learn whether the assignment has expired. An error in the membership check denies access (fail closed); cancellation is passed on.
+
+### Component architecture
+
+```mermaid
+flowchart LR
+  API["Start attempt endpoint<br/>(next step)"]
+
+  subgraph Assignments["Platform.Assignments"]
+    S["StartAttemptService<br/>StartAttemptAsync"]
+    G["Group check (ASN-05)<br/>IsInAssignmentGroupAsync<br/>(Igor)"]
+    A["Assignment<br/>CourseId, Scope, GroupId<br/>(Igor)"]
+    REPO[["IAssignmentRepository"]]
+    AU[["IStartAttemptAuthorization"]]
+    GM[["IGroupMembership<br/>(Đorđe)"]]
+    P["AssignmentGroupPolicy<br/>(Đorđe)"]
+    AS[["IAttemptStore"]]
+  end
+
+  ACC["AccessStartAttemptAuthorization<br/>(#105, active student of the course)"]
+
+  API -->|"assignmentId, studentId, requestId"| S
+  S --> REPO --> A
+  S -->|"1. course"| AU --> ACC
+  S -->|"2. group"| G
+  G -->|"Group scope only"| GM
+  G --> P
+  S -->|"3. availability, limit"| AS
+
+  classDef igor stroke:#2f6fb3,stroke-width:2px
+  class G,A igor
+```
+
+The blue outline marks this part. The list (Andrija) uses the same policy, so a guessed assignment ID cannot bypass list filtering.
+
+### Data flow diagram: starting an attempt on a group assignment
+
+```mermaid
+flowchart LR
+  ST(["Student"])
+
+  subgraph TB["Trust boundary: client → server"]
+    direction LR
+    P1["P1 Load assignment<br/>by assignmentId"]
+    P2["P2 Course check<br/>IStartAttemptAuthorization"]
+    P3["P3 Group check (ASN-05)<br/>IGroupMembership + AssignmentGroupPolicy"]
+    P4["P4 Availability"]
+    P5["P5 Limit and create attempt"]
+  end
+
+  D1[("D1 Assignments<br/>CourseId, Scope, GroupId")]
+  D2[("D2 Course enrollment")]
+  D3[("D3 Group membership")]
+  D4[("D4 Attempts")]
+
+  ST -->|"assignmentId, requestId"| P1
+  P1 -->|"id"| D1
+  D1 -->|"assignment or nothing"| P1
+  P1 -->|"Assignment not found"| ST
+  P1 -->|"CourseId from D1"| P2
+  P2 -->|"(studentId, CourseId)"| D2
+  P2 -->|"Access denied"| ST
+  P2 -->|"active student"| P3
+  P3 -->|"(studentId, CourseId, GroupId from D1)"| D3
+  D3 -->|"yes / no"| P3
+  P3 -->|"Access denied (same as P2)"| ST
+  P3 -->|"member, or course assignment"| P4
+  P4 -->|"Assignment is not available"| ST
+  P4 --> P5
+  P5 -->|"new attempt"| D4
+  P5 -->|"attemptId / Maximum number of attempts reached"| ST
+```
+
+Assumptions at the boundary: `studentId` must come from the server session, never from the request (the API route is a next step and must keep this). `CourseId` and `GroupId` always come from D1, never from the client; otherwise a student could send their own group and start another group's assignment (IDOR). D2 and D3 are fakes or in-memory implementations until the membership owners provide real adapters.
+
+### Security requirements
+
+- Server-side access checks: course check, then group check, before anything about the assignment's state is revealed.
+- Deny by default: another group, no group, the same group ID on another course, a failed course check or a failed membership check all deny.
+- Sensitive data: the same `Access denied.` for every reason; the policy reason code is never returned to the client.
+- Input validation: the domain rejects invalid scope and `GroupId` combinations, so an inconsistent assignment cannot be created.
+
+### Tests
+
+`backend/Platform.Tests/Assignments/StartAttemptServiceTests.cs` and `AssignmentTests.cs`.
+
+| Requirement ID | Precondition | Action | Expected | Evidence (test) |
+| --- | --- | --- | --- | --- |
+| ASN-05 | member of `group-a`, assignment for `group-a` | start attempt | attempt created | `StartAttempt_GroupAssignment_WhenStudentIsGroupMember_Succeeds` |
+| ASN-05, SEC-01 | member of `group-b`, assignment for `group-a` | start attempt | `Access denied.`, no attempt | `StartAttempt_GroupAssignment_WhenStudentIsInAnotherGroup_IsDeniedWithoutAttempt` |
+| ASN-05 | enrolled student in no group | start attempt | `Access denied.` | `StartAttempt_GroupAssignment_WhenStudentIsInNoGroup_IsDenied` |
+| ASN-05 | same group ID, but on another course | start attempt | `Access denied.` | `StartAttempt_GroupAssignment_WhenGroupMatchesOnAnotherCourse_IsDenied` |
+| ASN-05, ASN-16 | group member who fails the course check | start attempt | `Access denied.` | `StartAttempt_GroupAssignment_WhenCourseAuthorizationFails_IsDeniedEvenForGroupMember` |
+| ASN-05, ACC-05 | membership check throws | start attempt | `Access denied.` | `StartAttempt_GroupAssignment_WhenMembershipCheckFails_IsDenied` |
+| ASN-05 | non-member, expired assignment | start attempt | `Access denied.`, not "not available" | `StartAttempt_GroupAssignment_WhenNotMemberAndExpired_DeniesBeforeRevealingAvailability` |
+| ASN-05 | course assignment | start attempt | attempt created; membership not asked | `StartAttempt_CourseAssignment_DoesNotRequireGroupMembership` |
+| ASN-05 | — | create assignment with invalid scope / `GroupId` | `ArgumentException` | `Create_WithGroupScopeAndMissingGroupId_Throws`, `Create_WithCourseScopeAndNonNullGroupId_Throws`, `Create_WithInvalidScope_Throws` |
+
+```powershell
+dotnet test backend/Platform.Tests --filter "FullyQualifiedName~StartAttemptServiceTests|FullyQualifiedName~AssignmentTests"
+```
+
+Control check: with the group check disabled, 5 of the new negative tests fail.
+
+### Next steps
+
+- DI registration of `StartAttemptService` and an API route that takes `studentId` from the session, with HTTP negative tests for a student of another group.
+- Real `IGroupMembership` adapter (membership owners).
+- Teacher access to a group assignment is not covered by the policy yet.
+- Record the denial reason in the server log / Audit module.
+
+### Files
+
+- `backend/Platform.Assignments/Domain/Models/Assignment.cs`
+- `backend/Platform.Assignments/Domain/Enums/AssignmentScope.cs`
+- `backend/Platform.Assignments/Application/StartAttemptService.cs`
+- `backend/Platform.Tests/Assignments/StartAttemptServiceTests.cs`
+- `backend/Platform.Tests/Assignments/AssignmentTests.cs`
 
 ## Đorđe Marković – group membership and visibility policy
 
