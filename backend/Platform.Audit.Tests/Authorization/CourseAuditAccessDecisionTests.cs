@@ -50,7 +50,7 @@ public sealed class CourseAuditAccessDecisionTests
     public async Task SingletonPolicy_ResolvesFromDifferentScopes_WithoutCapturingRequestState()
     {
         var memberships = new StubCourseAuditMemberships();
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         var services = new ServiceCollection();
         services.AddSingleton<IMembershipReader>(memberships);
         services.AddAccessControl();
@@ -63,7 +63,7 @@ public sealed class CourseAuditAccessDecisionTests
         Assert.That(firstPolicy, Is.SameAs(secondPolicy));
         Assert.That(await firstPolicy.EvaluateAsync(Request()), Is.True);
         Assert.That(await secondPolicy.EvaluateAsync(Request(accountId: OtherAccountId)), Is.False);
-        memberships.Set(Membership() with { Status = MembershipStatus.Left });
+        memberships.Set(AuditAuthorizationExamples.Membership() with { Status = MembershipStatus.Left });
         Assert.That(await secondPolicy.EvaluateAsync(Request()), Is.False);
     }
 
@@ -102,8 +102,8 @@ public sealed class CourseAuditAccessDecisionTests
     public async Task PublicComposition_UsesRealAccessDecision_AndAuditsEachDecisionOnce()
     {
         var memberships = new StubCourseAuditMemberships();
-        memberships.Set(Membership());
-        memberships.Set(Membership(CourseRole.Student, courseId: CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Student, courseId: CourseL));
         var audit = new RecordingAccessAuditWriter();
         var services = new ServiceCollection();
         services.AddSingleton<IMembershipReader>(memberships);
