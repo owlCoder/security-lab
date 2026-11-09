@@ -20,7 +20,11 @@ namespace Platform.SessionSecurity.Contracts;
 /// Absolute end of the chain. A rotation copies it unchanged, so a rotation never
 /// extends the lifetime of a session.
 /// </param>
-/// <param name="RevokedAt">When the session was revoked; null while it is active.</param>
+/// <param name="RevokedAt">When the session was revoked; null while it is not revoked.</param>
+/// <param name="IsPendingActivation">
+/// True for a replacement that a rotation stored but did not activate yet. A pending session is
+/// never accepted: it becomes usable only after the rotation was audited (AUD-10, fail-closed).
+/// </param>
 public sealed record RotatableSession(
     Guid ChainId,
     string? SubjectId,
@@ -28,14 +32,23 @@ public sealed record RotatableSession(
     SessionPrivilegeLevel PrivilegeLevel,
     DateTimeOffset IssuedAt,
     DateTimeOffset AbsoluteExpiresAt,
-    DateTimeOffset? RevokedAt = null)
+    DateTimeOffset? RevokedAt = null,
+    bool IsPendingActivation = false)
 {
     public bool IsRevoked => RevokedAt is not null;
 
     public bool IsExpiredAt(DateTimeOffset now) => now >= AbsoluteExpiresAt;
 
+    /// <summary>
+    /// The only check a session validation needs: not revoked, not pending activation and not
+    /// past its absolute expiry.
+    /// </summary>
+    public bool IsActiveAt(DateTimeOffset now) =>
+        !IsRevoked && !IsPendingActivation && !IsExpiredAt(now);
+
     // AUD-03: the default record ToString would print the token hash and the chain ID.
     public override string ToString() =>
         $"RotatableSession {{ PrivilegeLevel = {PrivilegeLevel}, IssuedAt = {IssuedAt:O}, " +
-        $"AbsoluteExpiresAt = {AbsoluteExpiresAt:O}, IsRevoked = {IsRevoked} }}";
+        $"AbsoluteExpiresAt = {AbsoluteExpiresAt:O}, IsRevoked = {IsRevoked}, " +
+        $"IsPendingActivation = {IsPendingActivation} }}";
 }
