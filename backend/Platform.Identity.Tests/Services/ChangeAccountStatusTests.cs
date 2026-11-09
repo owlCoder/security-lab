@@ -31,8 +31,6 @@ public class ChangeAccountStatusTests
 
         public void AddSession(Guid userId, Guid sessionHandle) => _activeSessions.Add((userId, sessionHandle));
 
-        public bool IsSessionActive(Guid userId, Guid sessionHandle) => _activeSessions.Contains((userId, sessionHandle));
-
         public Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)
         {
             _activeSessions.RemoveWhere(session => session.UserId == userId);
@@ -40,7 +38,21 @@ public class ChangeAccountStatusTests
             int count = Revoked.Count;
             return Task.FromResult(count);
         }
-        public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) => Task.FromResult<ValidateSession?>(null);
+        public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)
+        {
+            if (!Guid.TryParse(token, out var handle))
+                return Task.FromResult<ValidateSession?>(null);
+
+            foreach (var session in _activeSessions)
+            {
+                if (session.SessionHandle == handle)
+                    return Task.FromResult<ValidateSession?>(
+                        new ValidateSession(session.SessionHandle, session.UserId, AuthenticationLevel.Active));
+            }
+
+            return Task.FromResult<ValidateSession?>(null);
+        }
+
         public Task<bool> RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default)
         {
             Revoked.Add(ownerUserId);
@@ -117,22 +129,25 @@ public class ChangeAccountStatusTests
         Assert.That(repo.Find(StudentId)!.Status, Is.EqualTo(AccountStatus.Active));
         Assert.That(revoker.Revoked, Is.Empty);
     }
-
+    
     [Test]
-    public void ReactivatingAccount_DoesNotRestorePreviouslyRevokedSessions()
+    public async Task ReactivatingAccount_DoesNotRestorePreviouslyRevokedSessions()
     {
         var (sut, _, revoker, _) = Build(Admin);
 
         var sessionId = Guid.NewGuid();
         revoker.AddSession(StudentId, sessionId);
 
+        // Sanity check: the session is valid before blocking
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Not.Null);
+
         sut.Execute(StudentId, "BLOCKED", null, "corr-1");
 
-        Assert.That(revoker.IsSessionActive(StudentId, sessionId), Is.False);
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Null);
 
         sut.Execute(StudentId, "ACTIVE", null, "corr-2");
 
-        Assert.That(revoker.IsSessionActive(StudentId, sessionId), Is.False);
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Null);
     }
 
     // --- negativni bezbednosni testovi ---
