@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Platform.Assignments\Platform.Assignments.csproj" />
+    <ProjectReference Include="..\Platform.AssignmentPrerequisites\Platform.AssignmentPrerequisites.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
