@@ -95,6 +95,25 @@ public class LoginTests
         Assert.That(_events.Single().Outcome, Is.EqualTo("failure"));
     }
 
+    [Test]
+    [Category("IDN-05")]
+    public async Task LockedAccount_IsRefused_LikeAWrongPassword_AndOnlyTheAuditDiffers()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(CredentialResult.LockedOut(id));
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-locked");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.InvalidCredentials));
+        Assert.That(result.Session, Is.Null);
+        VerifyNoSessionCreated();
+        var e = _events.Single();
+        Assert.That(e.Outcome, Is.EqualTo("failure"));
+        Assert.That(e.Detail, Is.EqualTo("account locked"));
+        Assert.That(e.Target, Is.EqualTo(id.ToString()));
+        Assert.That(e.ActorId, Is.Null, "the caller is not proven to own the account");
+    }
+
     [TestCase(AccountStatus.Blocked)]
     [TestCase(AccountStatus.Archived)]
     public async Task BlockedOrArchived_WithCorrectPassword_IsRefused_LikeAWrongPassword(AccountStatus status)
@@ -158,6 +177,25 @@ public class LoginTests
 
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Unavailable));
         Assert.That(_events.Single().Outcome, Is.EqualTo("failure"));
+    }
+
+    [Test]
+    [Category("IDN-03")]
+    public async Task AccountBlockedAfterTheStatusCheck_IsRefused_LikeAnyBlockedLogin_AndNoSuccessIsAudited()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active));
+        _sessions
+            .Setup(s => s.CreateAsync(id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AccountNotActiveException(id));
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-raced");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.InvalidCredentials));
+        Assert.That(result.Session, Is.Null);
+        var e = _events.Single();
+        Assert.That(e.Outcome, Is.EqualTo("denied"));
+        Assert.That(e.ActorId, Is.EqualTo(id));
     }
 
     [TestCaseSource(nameof(Passwords))]

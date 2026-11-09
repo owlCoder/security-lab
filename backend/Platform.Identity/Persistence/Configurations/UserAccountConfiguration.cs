@@ -36,6 +36,14 @@ internal sealed class UserAccountConfiguration : IEntityTypeConfiguration<UserAc
             .HasColumnName("password_hash")
             .HasMaxLength(100);
 
+        builder.Property(account => account.FailedLoginCount)
+            .HasColumnName("failed_login_count")
+            .HasDefaultValue(0)
+            .IsRequired();
+
+        builder.Property(account => account.LockoutEnd)
+            .HasColumnName("lockout_end");
+
         builder.HasIndex(account => account.Email)
             .IsUnique()
             .HasDatabaseName("ux_accounts_email");

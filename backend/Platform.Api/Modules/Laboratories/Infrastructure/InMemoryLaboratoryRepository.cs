@@ -11,7 +11,7 @@ namespace Platform.Api.Modules.Laboratories.Infrastructure;
 public sealed class InMemoryLaboratoryRepository : ILaboratoryRepository
 {
     private sealed record StoredLaboratory(
-        Guid Id, string Title, LabStatus Status, Guid CreatedBy, DateTimeOffset CreatedAt);
+        Guid Id, Guid CourseId, string Title, LabStatus Status, Guid CreatedBy, DateTimeOffset CreatedAt);
 
     private readonly object _sync = new();
     private readonly Dictionary<Guid, StoredLaboratory> _laboratories = new();
@@ -71,7 +71,7 @@ public sealed class InMemoryLaboratoryRepository : ILaboratoryRepository
                 throw new LaboratoryNotFoundException(laboratory.Id);
             }
 
-            // Autor i vreme kreiranja se ne menjaju izmenom; menjaju se naslov i status.
+            // Kurs, autor i vreme kreiranja se ne menjaju izmenom; menjaju se naslov i status.
             _laboratories[laboratory.Id] = existing with
             {
                 Title = laboratory.Title,
@@ -115,8 +115,8 @@ public sealed class InMemoryLaboratoryRepository : ILaboratoryRepository
     }
 
     private static StoredLaboratory ToStored(Laboratory laboratory) =>
-        new(laboratory.Id, laboratory.Title, laboratory.Status, laboratory.CreatedBy, laboratory.CreatedAt);
+        new(laboratory.Id, laboratory.CourseId, laboratory.Title, laboratory.Status, laboratory.CreatedBy, laboratory.CreatedAt);
 
     private static Laboratory ToDomain(StoredLaboratory stored) =>
-        Laboratory.Rehydrate(stored.Id, stored.Title, stored.Status, stored.CreatedBy, stored.CreatedAt);
+        Laboratory.Rehydrate(stored.Id, stored.CourseId, stored.Title, stored.Status, stored.CreatedBy, stored.CreatedAt);
 }

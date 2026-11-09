@@ -1,0 +1,80 @@
+/* ACC-01 — izolovani stilovi; ne utiču na druge stranice. */
+.courses-page {
+  --course-ink: #172b46;
+  --course-muted: #64748b;
+  --course-line: #dce5ef;
+  --course-blue: #315f93;
+  --course-soft: #f4f7fb;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 36px 24px 64px;
+  color: var(--course-ink);
+  font-family: 'Segoe UI', Arial, sans-serif;
+}
+.courses-page, .courses-page * { box-sizing: border-box; }
+.courses-page .courses-header { margin-bottom: 26px; }
+.courses-page .eyebrow { margin: 0 0 10px; color: var(--course-blue); font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.courses-page .courses-header h1 { margin: 0 0 9px; font-size: clamp(28px, 4vw, 38px); line-height: 1.2; font-weight: 750; letter-spacing: -.025em; }
+.courses-page .courses-description { margin: 0; color: var(--course-muted); font-size: 15px; line-height: 1.55; }
+.courses-page .courses-section { padding: 28px; border: 1px solid var(--course-line); border-radius: 18px; background: #fff; box-shadow: 0 9px 35px rgba(25, 53, 84, .055); }
+.courses-page .courses-section-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+.courses-page .courses-section-header h2 { margin: 0 0 6px; font-size: 21px; line-height: 1.3; }
+.courses-page .courses-section-header p { margin: 0; color: var(--course-muted); font-size: 14px; line-height: 1.5; }
+.courses-page button { font-family: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+.courses-page button:disabled { opacity: .58; cursor: not-allowed; }
+.courses-page .primary-button, .courses-page .secondary-button, .courses-page .confirm-archive-button, .courses-page .archive-button { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 10px 16px; border-radius: 9px; line-height: 1.25; white-space: nowrap; }
+.courses-page .primary-button { background: var(--course-blue); border: 1px solid var(--course-blue); color: white; }
+.courses-page .primary-button:hover:not(:disabled) { background: #234c79; }
+.courses-page .secondary-button { background: white; border: 1px solid #cbd5e1; color: #334155; }
+.courses-page .secondary-button:hover:not(:disabled) { background: #f1f5f9; }
+.courses-page .archive-button { background: #fff8eb; border: 1px solid #f5d59b; color: #8e570e; }
+.courses-page .archive-button:hover:not(:disabled) { background: #fff0d4; }
+.courses-page .confirm-archive-button { background: #b45309; border: 1px solid #b45309; color: white; }
+.courses-page .confirm-archive-button:hover:not(:disabled) { background: #92400e; }
+.courses-page :is(button, input, textarea, select):focus-visible { outline: 3px solid #9bc5f3; outline-offset: 2px; }
+.courses-page .demo-note { margin: 18px 0 24px; padding: 14px 17px; background: #eff6fd; border-left: 4px solid #7ba6d6; border-radius: 9px; color: #46617e; font-size: 13px; line-height: 1.65; }
+.courses-page .course-form { display: block; margin: 20px 0 27px; padding: 25px; border: 1px solid var(--course-line); border-radius: 14px; background: var(--course-soft); }
+.courses-page .course-form h3 { margin: 0 0 22px; font-size: 19px; line-height: 1.4; }
+.courses-page .course-form .form-group { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin: 0 0 18px; width: 100%; }
+.courses-page .course-form .form-group label { display: block; margin: 0; font-size: 14px; font-weight: 650; color: #273d57; }
+.courses-page .course-form .form-group input, .courses-page .course-form .form-group textarea { display: block; width: 100%; max-width: 100%; min-width: 0; margin: 0; padding: 11px 13px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #172b46; font: inherit; font-size: 14px; line-height: 1.55; }
+.courses-page .course-form .form-group textarea { min-height: 112px; resize: vertical; }
+.courses-page .course-form .form-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.courses-page .form-error, .courses-page .success-message { margin: 14px 0; padding: 12px 15px; border-radius: 9px; font-size: 14px; line-height: 1.55; }
+.courses-page .form-error { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; }
+.courses-page .success-message { background: #effaf4; border: 1px solid #bde7cd; color: #166534; }
+.courses-page .toolbar { display: grid; grid-template-columns: minmax(0, 2fr) minmax(170px, 1fr); gap: 16px; align-items: end; margin: 26px 0 12px; padding-top: 22px; border-top: 1px solid #e8eef5; }
+.courses-page .toolbar label { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 13px; font-weight: 650; color: #334155; }
+.courses-page .toolbar input, .courses-page .toolbar select { display: block; width: 100%; min-width: 0; min-height: 43px; margin: 0; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #172b46; font: inherit; font-size: 14px; }
+.courses-page .count { margin: 9px 0 17px; color: var(--course-muted); font-size: 13px; }
+.courses-page .course-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.courses-page .course-card { display: flex; flex-direction: column; gap: 13px; min-width: 0; margin: 0; padding: 21px; border: 1px solid var(--course-line); border-radius: 13px; background: #fff; box-shadow: 0 3px 12px rgba(30, 60, 90, .035); }
+.courses-page .course-card:hover { border-color: #a8bfd9; }
+.courses-page .card-top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px; }
+.courses-page .card-top h3 { margin: 0; font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
+.courses-page .course-status { display: inline-flex; align-items: center; flex-shrink: 0; padding: 6px 11px; border-radius: 999px; font-size: 12px; font-weight: 750; }
+.courses-page .status-active { background: #dcfce7; color: #166534; }
+.courses-page .status-archived { background: #e9eef5; color: #526278; }
+.courses-page .course-code { margin: 0; color: var(--course-blue); font-weight: 750; font-size: 13px; overflow-wrap: anywhere; }
+.courses-page .course-description { flex: 1; margin: 0; color: var(--course-muted); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.courses-page .card-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 4px; padding-top: 15px; border-top: 1px solid #ebeff5; }
+.courses-page .course-id { color: #8392a6; font-size: 12px; }
+.courses-page .courses-empty { padding: 40px 20px; border: 1px dashed #cbd5e1; border-radius: 12px; background: #fafcff; color: var(--course-muted); text-align: center; font-size: 14px; }
+.courses-page .modal-overlay { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 22px; background: rgba(13, 30, 53, .62); }
+.courses-page .archive-modal { width: 100%; max-width: 470px; padding: 27px; border-radius: 15px; background: white; box-shadow: 0 22px 55px rgba(10, 24, 41, .22); }
+.courses-page .archive-modal h2 { margin: 0 0 12px; font-size: 22px; }
+.courses-page .archive-modal p { color: #475569; line-height: 1.6; }
+.courses-page .archive-modal .archive-warning { padding: 12px 14px; border-radius: 9px; background: #fffbeb; border: 1px solid #fde68a; }
+.courses-page .archive-modal .form-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+@media (max-width: 740px) {
+  .courses-page { padding: 25px 15px 45px; }
+  .courses-page .courses-section { padding: 19px; }
+  .courses-page .courses-section-header { align-items: stretch; }
+  .courses-page .course-list { grid-template-columns: 1fr; }
+  .courses-page .toolbar { grid-template-columns: 1fr; }
+}
+@media (max-width: 460px) {
+  .courses-page .course-form { padding: 17px; }
+  .courses-page .course-form .form-actions { flex-direction: column-reverse; }
+  .courses-page .course-form .form-actions button { width: 100%; }
+}

@@ -10,12 +10,17 @@ public sealed class InMemoryActionCatalog : IActionCatalog
 {
     private readonly Dictionary<string, ActionDefinition> actions =
         new(StringComparer.Ordinal);
+    private readonly object registrationLock = new();
+    private bool isFrozen;
 
-    public InMemoryActionCatalog()
+    public InMemoryActionCatalog(IEnumerable<ActionDefinition>? additionalDefinitions = null)
     {
-        ActionCatalogValidator.ValidateCompleteness(AccessActions.All, AccessActions.RequiredIds);
+        var definitions = AccessActions.All
+            .Concat(additionalDefinitions ?? [])
+            .ToArray();
+        ActionCatalogValidator.ValidateCompleteness(definitions, AccessActions.RequiredIds);
 
-        foreach (var action in AccessActions.All)
+        foreach (var action in definitions)
         {
             Register(action);
         }
@@ -32,9 +37,26 @@ public sealed class InMemoryActionCatalog : IActionCatalog
     {
         ActionCatalogValidator.Validate(definition);
 
-        if (!actions.TryAdd(definition.Id, definition))
+        lock (registrationLock)
         {
-            throw new InvalidOperationException($"Action '{definition.Id}' is already registered.");
+            if (isFrozen)
+            {
+                throw new InvalidOperationException(
+                    "Access actions cannot be registered after application startup.");
+            }
+
+            if (!actions.TryAdd(definition.Id, definition))
+            {
+                throw new InvalidOperationException($"Action '{definition.Id}' is already registered.");
+            }
+        }
+    }
+
+    internal void Freeze()
+    {
+        lock (registrationLock)
+        {
+            isFrozen = true;
         }
     }
 

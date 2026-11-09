@@ -19,13 +19,22 @@ public sealed class AccessAuditCompositionTests
 
     private static readonly ServiceProviderOptions Strict = new() { ValidateScopes = true, ValidateOnBuild = true };
 
-    private sealed class FixedPolicy(bool permitted) : IAccessPolicy
+    private sealed class TaskPolicy : IAccessPolicy
     {
         public string Id => "test.policy";
         public string Version => "v1";
 
         public ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(permitted);
+            ValueTask.FromResult(true);
+    }
+
+    private sealed class AccountPolicy : IAccessPolicy
+    {
+        public string Id => "test.account-policy";
+        public string Version => "v1";
+
+        public ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(true);
     }
 
     private static ServiceProvider Build(
@@ -52,12 +61,10 @@ public sealed class AccessAuditCompositionTests
             services.AddSingleton<TimeProvider>(clock);
         }
 
+        services.AddAccessPolicy<TaskPolicy>("evaluation.task.process");
+        services.AddAccessPolicy<AccountPolicy>("account.status.change");
         services.AddAccessControl();
         var built = services.BuildServiceProvider(Strict);
-
-        var registry = built.GetRequiredService<InMemoryAccessPolicyRegistry>();
-        registry.Register("evaluation.task.process", new FixedPolicy(true));
-        registry.Register("account.status.change", new FixedPolicy(true));
         return built;
     }
 

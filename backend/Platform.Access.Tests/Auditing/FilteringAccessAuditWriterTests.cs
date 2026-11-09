@@ -13,7 +13,8 @@ public sealed class FilteringAccessAuditWriterTests
     private static readonly string[] PrivilegedActions =
     [
         "lab.revision.publish", "attempt.review", "account.status.change",
-        "system.config.manage", "results.sensitive.read",
+        "system.config.manage", "results.sensitive.read", "course.create",
+        "course.archive", "group.create", "group.member.add", "group.member.remove",
     ];
 
     private RecordingAuditSink _sink = null!;
