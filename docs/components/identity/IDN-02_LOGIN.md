@@ -40,13 +40,13 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 | US-03 session store | Done. `StoreSessionCreator` connects login to `ISessionStore`. The two level enums have different numeric values, so `StoreSessionCreator` maps them by name. |
 | US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions; `StoreSessionManager.ValidateAsync` refuses them. |
 | US-07, US-08 frontend | Send the request with credentials included. Read only the status code and `code`; show one generic message for `401`. |
-| US-09 seed users | Done. `DevelopmentAccountSeeder` seeds four accounts into `identity.accounts` with a BCrypt hash and lower-case e-mails (see [`DEVELOPMENT.md`](../../DEVELOPMENT.md)). Seeding into the in-memory `IAccountRepository` does not make login work. |
-| IDN-03 | Login reads the status from `identity.accounts`, while `PUT /api/admin/accounts/{id}/status` still changes the in-memory account. Until `IAccountRepository` is backed by the database, an account blocked through the endpoint can still log in. |
+| US-09 seed users | Done. `DevelopmentAccountSeeder` seeds four accounts into `identity.accounts` with a BCrypt hash and lower-case e-mails (see [`DEVELOPMENT.md`](../../DEVELOPMENT.md)). |
+| IDN-03 | Done. Login reads the status from `identity.accounts`, and `PUT /api/admin/accounts/{id}/status` writes to the same table (`EfAccountStatusStore`), so a blocked or archived account cannot log in. Blocking also revokes its sessions in the same transaction. See [`IDN-03_ACCOUNT_STATUS.md`](../../IDN-03_ACCOUNT_STATUS.md). |
 | US-13 tests | Use an `ISessionCreator` mock (Moq) as in `Platform.Identity.Tests/Services/LoginTests.cs`. |
 
 ## Known limitations
 
-- No attempt limiting (IDN-05) and no CSRF token (US-15) yet. `Login` has a comment where the limiter would be called.
+- No CSRF token (US-15) yet. Per-account lockout (IDN-05) is in `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md).
 - No MFA: every successful login is `Active` until an MFA policy (IDN-06, US-12) exists.
 - No registration (IDN-01): accounts exist only through seeding or direct database work.
 - The login does not revoke a session that was sent with the request.

@@ -48,6 +48,7 @@ public partial class PublicationDatabaseTests
         await database.StartAsync();
         await using var context = CreateContext();
         await context.Database.MigrateAsync();
+        await Platform.Audit.Composition.AuditPersistenceExtensions.MigrateAuditDatabaseAsync(database.GetConnectionString());
     }
 
     [OneTimeTearDown]

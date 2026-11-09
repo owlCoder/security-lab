@@ -17,6 +17,7 @@ public static class CourseRolePolicies
         new(AccessActions.LabRevisionPublish, Teachers),
         new(AccessActions.LabCriteriaHiddenRead, Teachers),
         new(AccessActions.AssignmentManage, Teachers),
+        new(AccessActions.AssignmentReadOwn, Students, RequiresOwnership: true),
         new(AccessActions.AttemptCreate, Students),
         new(AccessActions.AttemptRead, Students, RequiresOwnership: true),
         new(AccessActions.AttemptSubmit, Students, RequiresOwnership: true),
