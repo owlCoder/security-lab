@@ -9,6 +9,8 @@ public sealed class InMemoryAccessPolicyRegistry : IAccessPolicyRegistry
 {
     private readonly ConcurrentDictionary<string, IAccessPolicy> policies =
         new(StringComparer.Ordinal);
+    private readonly object registrationLock = new();
+    private bool isFrozen;
 
     public IReadOnlyCollection<string> RegisteredActions => policies.Keys.ToArray();
 
@@ -29,9 +31,26 @@ public sealed class InMemoryAccessPolicyRegistry : IAccessPolicyRegistry
                 $"Policy for '{action}' must declare a non-empty Id and Version.");
         }
 
-        if (!policies.TryAdd(action, policy))
+        lock (registrationLock)
         {
-            throw new InvalidOperationException($"Policy for '{action}' is already registered.");
+            if (isFrozen)
+            {
+                throw new InvalidOperationException(
+                    "Access policies cannot be registered after application startup.");
+            }
+
+            if (!policies.TryAdd(action, policy))
+            {
+                throw new InvalidOperationException($"Policy for '{action}' is already registered.");
+            }
+        }
+    }
+
+    internal void Freeze()
+    {
+        lock (registrationLock)
+        {
+            isFrozen = true;
         }
     }
 

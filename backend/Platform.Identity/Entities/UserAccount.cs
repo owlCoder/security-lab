@@ -16,5 +16,11 @@ public sealed class UserAccount(
     /// <summary>BCrypt hash. Null means the account cannot log in with a password.</summary>
     public string? PasswordHash { get; private set; }
 
+    /// <summary>IDN-05: consecutive failed logins since the last success or lockout.</summary>
+    public int FailedLoginCount { get; private set; }
+
+    /// <summary>IDN-05: logins are refused until this moment. Null or past means not locked.</summary>
+    public DateTimeOffset? LockoutEnd { get; private set; }
+
     public void SetPasswordHash(string passwordHash) => PasswordHash = passwordHash;
 }

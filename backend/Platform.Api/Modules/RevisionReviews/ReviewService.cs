@@ -1,6 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Platform.Api.Security.RevisionAuthorization;
+using Platform.Audit.Contracts;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
@@ -15,7 +18,8 @@ public sealed class ReviewService(
     IDbContextFactory<LaboratoriesDbContext> contexts,
     IAccessDecision access,
     IPublicationSource publication,
-    TimeProvider clock)
+    TimeProvider clock,
+    ITransactionalAuditWriter audit)
 {
     public const string ReadAction = "revision.read";
     public const string PendingAction = "revision.pending.reviews";
@@ -113,6 +117,12 @@ public sealed class ReviewService(
         try
         {
             await db.SaveChangesAsync(ct);
+            var draft = RevisionAuditEventFactory.CreateCompletedEvent(command.Action, operation.Id,
+                revision.Id, revision.CourseId, revision.AuthorId, command.Hash, operation.LaboratoryId, operation.Number);
+            var recorded = await audit.WriteAsync(draft, new AuditContext(AuditActor.ForUser(actor), traceId),
+                transaction.GetDbTransaction(), ct);
+            if (!recorded.IsRecorded)
+                return Error(503, "audit_unavailable");
             await transaction.CommitAsync(ct);
         }
         catch (DbUpdateConcurrencyException)

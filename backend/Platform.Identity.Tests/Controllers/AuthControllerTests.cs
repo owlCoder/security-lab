@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Api.Controllers.Identity;
+using Platform.Api.Contracts.Identity;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
@@ -59,16 +60,80 @@ public class AuthControllerTests
         var result = _controller.Me() as OkObjectResult;
 
         Assert.That(result, Is.Not.Null);
-        var body = result!.Value!;
-        var names = body.GetType().GetProperties().Select(p => p.Name).ToArray();
-        Assert.That(names, Is.EquivalentTo(["userId", "level"]));
-        Assert.That(body.GetType().GetProperty("userId")!.GetValue(body), Is.EqualTo(userId));
-        Assert.That(body.GetType().GetProperty("level")!.GetValue(body), Is.EqualTo("Active"));
+        var body = result!.Value as MeResponse;
+        Assert.That(body, Is.Not.Null);
+        Assert.That(body!.UserId, Is.EqualTo(userId));
+        Assert.That(body.Level, Is.EqualTo("Active"));
         Assert.That(_controller.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
     }
 
     private void CallerIs(CallerIdentity? caller) =>
         _identity.Setup(i => i.Current).Returns(caller);
+
+    [Test]
+    public async Task Login_Success_ReturnsLoginResponseAndSetsSessionCookie()
+    {
+        var userId = Guid.NewGuid();
+        const string email = "test@platform.com";
+        const string password = "SecurePassword123!";
+        const string token = "opaque-session-token-value";
+        var expiresAt = DateTimeOffset.UtcNow.AddHours(1);
+        var http = _controller.HttpContext;
+        var request = new LoginRequest(email, password);
+
+        _login
+            .Setup(service => service.ExecuteAsync(
+                email,
+                password,
+                http.TraceIdentifier,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LoginResult(
+                LoginOutcome.Success,
+                userId,
+                new IssuedSession(token, Guid.NewGuid(), expiresAt)));
+
+        var response = await _controller.Login(request, CancellationToken.None);
+
+        var result = response as OkObjectResult;
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.Value, Is.EqualTo(new LoginResponse(userId)));
+        Assert.That(http.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
+        Assert.That(http.Response.Headers.SetCookie.ToString(), Does.Contain($"{SessionCookie.Name}={token}"));
+        _login.Verify(
+            service => service.ExecuteAsync(email, password, http.TraceIdentifier, CancellationToken.None),
+            Times.Once);
+    }
+
+    [TestCase(LoginOutcome.InvalidRequest, 400, "invalid_request")]
+    [TestCase(LoginOutcome.Unavailable, 503, "login_unavailable")]
+    [TestCase(LoginOutcome.InvalidCredentials, 401, "invalid_credentials")]
+    public async Task Login_Failure_ReturnsExpectedStatusAndError(
+        LoginOutcome outcome,
+        int expectedStatusCode,
+        string expectedCode)
+    {
+        var http = _controller.HttpContext;
+        var request = new LoginRequest("test@platform.com", "SecurePassword123!");
+
+        _login
+            .Setup(service => service.ExecuteAsync(
+                request.Email,
+                request.Password,
+                http.TraceIdentifier,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LoginResult(outcome));
+
+        var response = await _controller.Login(request, CancellationToken.None);
+
+        var result = response as ObjectResult;
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result!.StatusCode, Is.EqualTo(expectedStatusCode));
+        Assert.That(result.Value, Is.Not.Null);
+        Assert.That(result.Value!.GetType().GetProperty("code")!.GetValue(result.Value),
+            Is.EqualTo(expectedCode));
+        Assert.That(http.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
+        Assert.That(http.Response.Headers.ContainsKey("Set-Cookie"), Is.False);
+    }
 
     [Test]
     public async Task Logout_RevokesCookieSession_AndClearsTheCookieWithItsAttributes()

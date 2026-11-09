@@ -10,8 +10,10 @@ import LabsSection from './components/labs/LabsSection'
 import ProtectedRoute from './components/ProtectedRoute'
 import ProtectedApp from './components/ProtectedApp'
 import LoginPage from './login/page'
+import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import LabVisibilitySection from './labs/LabVisibilitySection'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -89,6 +91,8 @@ export default function App() {
           {/* Komponente drugih timova sa main grane (ACC-04/ADM-08 i LAB-07) */}
           <CourseworkKt1 />
           <LabsSection />
+          <CoursesPage />
+          <LabVisibilitySection />
         </>} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>

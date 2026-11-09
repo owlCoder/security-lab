@@ -20,7 +20,8 @@ public partial class PublicationDatabaseTests
     {
         var author = Guid.NewGuid();
         var course = Guid.NewGuid();
-        var laboratory = new Laboratory("Log exercise", author);
+        // LAB-03: laboratorija sada zahteva kurs
+        var laboratory = new Laboratory(course, "Log exercise", author);
         var repository = new InMemoryLaboratoryRepository();
         await repository.AddAsync(laboratory);
         await using var db = CreateContext();
@@ -41,7 +42,8 @@ public partial class PublicationDatabaseTests
         Assert.That(Status(created), Is.EqualTo(201));
 
         var revision = await db.LabRevisions.AsNoTracking().SingleAsync(value => value.CourseId == course);
-        var service = new ReviewService(factory, access, new StoredPublicationSource(factory), TimeProvider.System);
+        var service = new ReviewService(factory, access, new StoredPublicationSource(factory), TimeProvider.System,
+            new Platform.Audit.Composition.PostgresTransactionalAuditWriter(TimeProvider.System));
         var submit = await Apply(service, revision.Id, author, new ReviewCommand("submit", 1, revision.ContentHash, "submit", null));
         Assert.That(Status(submit), Is.EqualTo(200));
         var detail = (ReviewDetail)((IValueHttpResult)submit).Value!;

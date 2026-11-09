@@ -26,7 +26,8 @@ those records for teachers, filtered by course on the server.
 
 ## Visibility and dependency direction
 
-- Only the types in the `Platform.Audit.Contracts` namespace and `AddAudit()` are public.
+- Types in `Platform.Audit.Contracts`, the composition extensions and the PostgreSQL
+  transactional writer are public integration entry points.
   Domain, application and infrastructure types of the module are `internal`.
 - `Platform.Access` does **not** reference `Platform.Audit`. The host (`Platform.Api`) connects
   them with an adapter that implements `IAccessAuditWriter` and calls this contract (story S-13).
@@ -94,7 +95,7 @@ A technical failure is never recorded as `Success`.
 
 ### `AuditResourceRef`
 
-`AuditResourceRef(string Type, string Id)`. `Type` is one of `Account`, `Course`, `Delegation`.
+`AuditResourceRef(string Type, string Id)`. `Type` is one of `Account`, `Course`, `Delegation`, `Revision`.
 `Id` has at most 64 characters: ASCII letters, digits, `-` and `_`.
 
 ### `AuditContext` and `AuditActor`
@@ -186,11 +187,11 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 
 | Key | Format |
 |-|-|
-| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `invalid_credentials`, `account_blocked`, `forbidden`, `not_found` |
+| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `invalid_credentials`, `account_blocked`, `account_locked` (IDN-05: `auth.login` Failure while the account is temporarily locked), `forbidden`, `not_found` |
 | `oldStatus`, `newStatus` | one of `active`, `blocked`, `archived` |
 | `oldRole`, `newRole` | one of `none`, `student`, `teacher`, `assistant` |
 | `action`, `filterType` | action or event type: `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$`, at most 64 characters (same rule as `ActionId` in `Platform.Access`) |
-| `denialReason` | one of `unauthenticated`, `account_not_active`, `unknown_action`, `no_policy`, `policy_error` |
+| `denialReason` | one of `unauthenticated`, `account_not_active`, `unknown_action`, `no_policy`, `policy_denied`, `policy_error` |
 | `policyId` | `^[a-z][a-z0-9_.-]{0,63}$` |
 | `policyVersion` | `^v[0-9]{1,4}(\.[0-9]{1,4}){0,2}$` |
 | `delegationId` | UUID |
@@ -286,3 +287,28 @@ Agreements with the consumers and producers listed above are tracked in
 | Version | Date | Change |
 |-|-|-|
 | 0.1 | 2026-11-03 | Initial draft for review (S-02) |
+
+## REV-05 integration (2026-11-06)
+
+`AddAuditPersistence(connectionString)` registers the actual PostgreSQL store,
+scoped `ITrustedAuditWriter` and `IAuditWriter`, and the singleton
+`ITransactionalAuditWriter`. The ordinary writer has no invented ambient actor:
+without a host-provided context it rejects that call. Trusted host producers use
+an explicitly confirmed AuditContext. AddAudit() continues to provide correlation.
+
+`ITransactionalAuditWriter.WriteAsync(draft, context, DbTransaction, ct)` validates
+and appends using the supplied PostgreSQL transaction. The caller must commit
+before reporting success. Audit schema and business mutation must share a database.
+No internal Audit domain/store type is exposed to the producer. Failure is returned
+as Rejected or Unavailable; RevisionReviews rolls its transaction back and returns 503.
+
+The new successful event types are `revision.submitted`, `revision.returned` and
+`revision.approved`. All require a User actor, a course, a Revision resource, and
+`authorId` (UUID), `operationId` (UUID), `contentHash` (64 lowercase hex characters).
+An approval/publication also requires `laboratoryId` (UUID) and `revisionNumber`
+(integer 1..2147483647). Required fields are declared in AuditEventSchema.RequiredDetails
+and enforced before insertion. EventId equals the committed review operation ID.
+Retries are idempotent. Comments, snapshots, expected answers and secrets are not
+accepted detail keys. Existing event schemas and historical schema-version-1 records
+remain valid. This is a concrete local integration change for review, not a claim of
+prior acceptance of the other proposals in this document.

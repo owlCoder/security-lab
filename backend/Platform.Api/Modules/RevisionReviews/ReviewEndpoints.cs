@@ -7,12 +7,13 @@ using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Policies;
 using Platform.Api.Interfaces.Identity;
+using Platform.Api.Security.RevisionAuthorization;
 
 namespace Platform.Api.Modules.RevisionReviews;
 
 public static class ReviewEndpoints
 {
-    private const string EntryAction = "revision.entry";
+    private const string EntryAction = RevisionActions.Entry;
 
     public static IServiceCollection AddRevisionReviews(this IServiceCollection services)
     {

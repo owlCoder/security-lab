@@ -81,7 +81,8 @@ public partial class PublicationDatabaseTests
     {
         var options = new DbContextOptionsBuilder<LaboratoriesDbContext>()
             .UseNpgsql(database.GetConnectionString()).Options;
-        return new ReviewService(new ReviewContextFactory(options), new AllowReviewAccess(), source, TimeProvider.System);
+        return new ReviewService(new ReviewContextFactory(options), new AllowReviewAccess(), source, TimeProvider.System,
+            new Platform.Audit.Composition.PostgresTransactionalAuditWriter(TimeProvider.System));
     }
 
     private static Task<IResult> Apply(ReviewService service, Guid id, Guid actor, ReviewCommand command) =>
