@@ -18,6 +18,7 @@
     <ProjectReference Include="..\Team21.Acc.Api\Team21.Acc.Api.csproj" />
     <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
+    <ProjectReference Include="..\Platform.Assignments\Platform.Assignments.csproj" />
   </ItemGroup>
 
   <ItemGroup>

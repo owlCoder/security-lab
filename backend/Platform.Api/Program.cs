@@ -6,6 +6,7 @@ using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
+using Platform.Api.Modules.Assignments.Composition;
 
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
@@ -86,6 +87,8 @@ else
 
 builder.Services.AddAudit();
 builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+// ASN-04/ASN-06 (tim 15, celina 5): audit adapter i kontroleri; posle AddAudit/AddAuditPersistence.
+builder.Services.AddAssignmentsApi();
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);

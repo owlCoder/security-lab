@@ -42,6 +42,12 @@ public class ApiEndpointCoverageTests
         // GetStudentLabView calls IAccessDecision before returning public content.
         // HTTP access boundaries are covered by StudentLabViewTests.
         "/api/labs/{id:guid}/student-view",
+        // ASN-04 (tim 15): StartAttemptService poziva IStartAttemptAuthorization pre limita i upisa;
+        // akter iz sesije (AssignmentCaller). HTTP granice: AssignmentsHttpTests.
+        "/api/assignments/{assignmentId:guid}/attempts",
+        // ASN-06 (tim 15): ExtendDeadlineService poziva IDeadlineExtensionAuthorization pre čitanja
+        // ili izmene roka; akter iz sesije, nikad iz tela. HTTP granice: AssignmentsHttpTests.
+        "/api/assignments/{assignmentId:guid}/students/{studentId}/deadline-extensions",
     };
 
     [Test]
