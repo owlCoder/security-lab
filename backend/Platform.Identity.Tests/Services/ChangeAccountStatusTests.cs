@@ -129,7 +129,8 @@ public class ChangeAccountStatusTests
         Assert.That(repo.Find(StudentId)!.Status, Is.EqualTo(AccountStatus.Active));
         Assert.That(revoker.Revoked, Is.Empty);
     }
-    
+
+    // --- tests for checking sessionstate after account status change ---
     [Test]
     public async Task ReactivatingAccount_DoesNotRestorePreviouslyRevokedSessions()
     {
@@ -150,8 +151,100 @@ public class ChangeAccountStatusTests
         Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Null);
     }
 
-    // --- negativni bezbednosni testovi ---
+    [Test]
+    public async Task BlockingAccount_InvalidatesAllSessionsOfThatUser()
+    {
+        var (sut, _, revoker, _) = Build(Admin);
 
+        var session1 = Guid.NewGuid();
+        var session2 = Guid.NewGuid();
+        revoker.AddSession(StudentId, session1);
+        revoker.AddSession(StudentId, session2);
+
+        Assert.That(await revoker.ValidateAsync(session1.ToString()), Is.Not.Null);
+        Assert.That(await revoker.ValidateAsync(session2.ToString()), Is.Not.Null);
+
+        sut.Execute(StudentId, "BLOCKED", null, "corr");
+
+        Assert.That(await revoker.ValidateAsync(session1.ToString()), Is.Null);
+        Assert.That(await revoker.ValidateAsync(session2.ToString()), Is.Null);
+    }
+
+    [Test]
+    public async Task ArchivingAccount_InvalidatesSessions()
+    {
+        var (sut, _, revoker, _) = Build(Admin);
+
+        var sessionId = Guid.NewGuid();
+        revoker.AddSession(StudentId, sessionId);
+
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Not.Null);
+
+        sut.Execute(StudentId, "ARCHIVED", null, "corr");
+
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Null);
+    }
+
+    [Test]
+    public async Task BlockingAccount_DoesNotAffectOtherUsersSessions()
+    {
+        var (sut, _, revoker, _) = Build(Admin);
+
+        var studentSession = Guid.NewGuid();
+        var adminSession = Guid.NewGuid();
+        revoker.AddSession(StudentId, studentSession);
+        revoker.AddSession(AdminId, adminSession);
+
+        sut.Execute(StudentId, "BLOCKED", null, "corr");
+
+        Assert.That(await revoker.ValidateAsync(studentSession.ToString()), Is.Null);
+
+        var adminResult = await revoker.ValidateAsync(adminSession.ToString());
+        Assert.That(adminResult, Is.Not.Null);
+        Assert.That(adminResult!.UserId, Is.EqualTo(AdminId));
+    }
+
+    [Test]
+    public async Task ActivatingBlockedAccount_DoesNotInvalidateExistingSessions()
+    {
+        var (sut, _, revoker, _) = Build(Admin, AccountStatus.Blocked);
+
+        var sessionId = Guid.NewGuid();
+        revoker.AddSession(StudentId, sessionId);
+
+        sut.Execute(StudentId, "ACTIVE", null, "corr");
+
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Not.Null);
+    }
+
+    [Test]
+    public async Task NonAdmin_CannotBlock_SessionsRemainValid()
+    {
+        var (sut, _, revoker, _) = Build(new CallerIdentity(true, new Guid(), AuthenticationLevel.None, new Guid()));
+
+        var sessionId = Guid.NewGuid();
+        revoker.AddSession(StudentId, sessionId);
+
+        var result = sut.Execute(StudentId, "BLOCKED", "x", "corr");
+
+        Assert.That(result.Outcome, Is.EqualTo(ChangeStatusOutcome.Forbidden));
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Not.Null);
+    }
+    
+    [Test]
+    public async Task InvalidStatusValue_SessionsRemainValid()
+    {
+        var (sut, _, revoker, _) = Build(Admin);
+
+        var sessionId = Guid.NewGuid();
+        revoker.AddSession(StudentId, sessionId);
+
+        var result = sut.Execute(StudentId, "SUPERUSER", null, "corr");
+
+        Assert.That(result.Outcome, Is.EqualTo(ChangeStatusOutcome.InvalidStatus));
+        Assert.That(await revoker.ValidateAsync(sessionId.ToString()), Is.Not.Null);
+    }
+    // --- negativni bezbednosni testovi ---
     [Test]
     public void NonAdmin_IsForbidden_StatusUnchanged_DenialAudited()
     {
