@@ -5,6 +5,9 @@ dozvole i sve pomocne politike, uskladjuje samoodobravanje sa politikom kursa i
 cuva audit stvarnog HTTP toka. Odluke su opisane u [ADR-001](ADR-001.md), a
 rezultati i scenariji u [TEST-EVIDENCE](TEST-EVIDENCE.md).
 
+Dijagram tokova podataka, granice povjerenja i negativni tokovi prikazani su u
+[DATA-FLOW](DATA-FLOW.md).
+
 ## Akcije i provjere
 
 | Akcija | Resurs za IAccessDecision | Dodatni uslov |

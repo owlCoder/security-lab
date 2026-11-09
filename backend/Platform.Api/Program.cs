@@ -115,6 +115,8 @@ builder.Services.AddScoped<IdentityAuditProducer>();
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
 
+builder.Services.AddScoped<LabCaller>();
+
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
