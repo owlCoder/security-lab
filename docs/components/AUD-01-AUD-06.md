@@ -40,14 +40,16 @@ Detailed documents: [contract](audit/CONTRACTS.md), [decisions and KT1 scope](au
 | `IAuditWriter` | producers → Audit | **partial**: registered, but no ambient context provider exists yet (D10), so a call without explicit context is rejected with `InvalidContext` | nobody yet |
 | `ITrustedAuditWriter` | server adapters → Audit | **implemented** | REV-05 revision audit (`RevisionAccessAuditWriter`, `RevisionAuditForwarding`) |
 | `ITransactionalAuditWriter` | producers → Audit, inside the caller's PostgreSQL transaction | **implemented** (added with REV-05, PR #85) | IDN-03 `ChangeAccountStatus` (PR #148), REV-05 `ReviewService` |
-| `AuditEventCatalog`, `AuditEventTypes` | Audit → producers | **implemented**: 10 event types, schema version 1 | all producers |
+| `AuditEventCatalog`, `AuditEventTypes` | Audit → producers | **implemented**: 13 event types (including `revision.submitted`, `revision.approved`, `revision.returned`), schema version 1 | all producers |
 | `ICorrelationContext` + `UseCorrelationContext()` | host → Audit | **implemented**: first middleware in `Program.cs` | any module |
 | Access policy for `audit.events.read` | Audit → Access | **implemented**: registered through `AddAccessPolicy` | Access decision |
 | `ICourseAuditQueryService` | API → Audit | **partial**: implemented and tested, not registered in DI and not exposed | planned S-14 endpoint |
-| `IAccessAuditWriter` forwarder | Access → Audit | **planned**: PR #151 open; `NullAccessAuditWriter` still active | |
+| `IAccessAuditWriter` forwarder | Access → Audit | **partial**: Access registers `ResilientAccessAuditWriter` (wrapping `FilteringAccessAuditWriter`); the host wraps it with `RevisionAuditForwarder` (REV-05, Team 4), which forwards denials of revision actions to Audit through `ITrustedAuditWriter`. A general forwarder for all decisions is planned in S-13 (PR #151). | REV-05 |
 
 Dependency rules: `Platform.Audit` references `Platform.Access` only for its policy hook. Access does
-not reference Audit. Producers use only `Platform.Audit.Contracts`; everything else in the module is
+not reference Audit. Producers use only `Platform.Audit.Contracts`. Outside `Contracts`, only the
+composition entry points (`AddAudit`, `AddAuditPersistence`, `MigrateAuditDatabaseAsync`,
+`UseCorrelationContext`) and `PostgresTransactionalAuditWriter` are public; everything else is
 `internal`.
 
 ### Implementation status
@@ -58,7 +60,7 @@ not reference Audit. Producers use only `Platform.Audit.Contracts`; everything e
 | Contract, event catalog, draft validation | S-02 | implemented |
 | Immutable domain record `AuditEvent` | S-03 | implemented |
 | Threat model, security matrix, DFD | S-04 | implemented as of PR #76; the DFD predates later merges (see below) |
-| PostgreSQL storage, migration, restricted runtime role | S-05 | implemented |
+| PostgreSQL storage, migration, restricted runtime role | S-05 | implemented; the role is created by `bootstrap-runtime.sql` and tested, but the API host does not connect with it yet |
 | Writer on the contract with trusted context | S-06 | implemented |
 | Course query, filter normalization, page reader | S-07 | implemented, not registered or exposed |
 | Course read policy | S-08 | implemented |
@@ -66,8 +68,9 @@ not reference Audit. Producers use only `Platform.Audit.Contracts`; everything e
 | Request correlation context | S-10 | implemented |
 | Agreements with other teams | S-11 | proposals written; none accepted with a link yet |
 | Identity producers through the Audit contract | S-12 | partial: IDN-03 status change already writes through `ITransactionalAuditWriter`; PR #113 open for the rest |
-| Access forwarder | S-13 | planned: PR #151 open |
+| Access forwarder | S-13 | planned: PR #151 open; REV-05 already forwards revision denials |
 | Course endpoint, `audit.events.viewed` | S-14, S-15 | planned |
+| Append-only rights for all write paths, SQL tests | S-16 | planned |
 
 ## Component architecture
 
@@ -76,7 +79,8 @@ flowchart LR
   subgraph Producers["Producer modules (other teams)"]
     IDN3["IDN-03 ChangeAccountStatus"]
     REV["REV-05 review and revision access"]
-    ACC["Platform.Access decision"]
+    ACC["Platform.Access decision\nResilientAccessAuditWriter"]
+    REVFWD["RevisionAuditForwarder\n(REV-05, Team 4)"]
   end
 
   subgraph Host["Platform.Api host"]
@@ -96,11 +100,13 @@ flowchart LR
     POLICY["CourseAuditReadPolicy (S-08)"]
   end
 
-  DB[("PostgreSQL\naudit.audit_events\nruntime role: SELECT, INSERT")]
+  DB[("PostgreSQL\naudit.audit_events")]
 
   IDN3 -->|"ITransactionalAuditWriter\nsame DB transaction"| TXWRITER
   REV -->|"ITrustedAuditWriter / ITransactionalAuditWriter"| CONTRACTS
-  ACC -.->|"IAccessAuditWriter forwarder\nplanned, PR #151"| CONTRACTS
+  ACC -->|"IAccessAuditWriter"| REVFWD
+  REVFWD -->|"ITrustedAuditWriter\nrevision denials"| CONTRACTS
+  ACC -.->|"general forwarder\nplanned S-13, PR #151"| CONTRACTS
   CONTRACTS --> WRITER
   TXWRITER --> WRITER
   WRITER --> VALIDATOR
@@ -156,8 +162,14 @@ Trust boundaries:
 - **TB2 (between modules):** a logical boundary. Producers can only describe an event through the
   contract; the catalog decides what is allowed. It does not protect against fully compromised code
   in the same process.
-- **TB2 → TB3:** the runtime database role can only `SELECT` and `INSERT` audit rows; migrations
-  run with a separate role ([PERSISTENCE.md](audit/PERSISTENCE.md)).
+- **TB2 → TB3:** the restricted role `securitylab_audit_runtime` can only `SELECT` and `INSERT`
+  audit rows, and `AuditRuntimePermissionsTests` prove that `UPDATE`, `DELETE` and `TRUNCATE` fail
+  ([PERSISTENCE.md](audit/PERSISTENCE.md)). The API host does not use it yet: `AddAuditPersistence`
+  connects with the `Laboratories` connection string, and `PostgresTransactionalAuditWriter` joins the
+  caller's transaction and writes with the caller's connection and rights (the local IDN-03 example
+  uses the bootstrap account from `ConnectionStrings__Identity`). Append-only rights for every write
+  path are a residual risk, planned in S-16; until then append-only is enforced only by the
+  application, which has no update or delete path.
 
 The detailed S-04 diagram [diagrams/audit-dfd.mmd](audit/diagrams/audit-dfd.mmd) shows the state of
 PR #76 (2026-11-05). Since then `AddAudit`, the writer registration, correlation and the course
@@ -240,6 +252,7 @@ All 118 failures are other teams' Testcontainers tests that need Docker
 | Merge S-13 Access forwarder (PR #151) | 9 | D2, D13, Team 3 review |
 | Register the course query and build the endpoint (S-14) | 4 | S-07, S-08 |
 | Authorization in the query path and `audit.events.viewed` (S-15) | 5 | S-14, D5 |
+| Runtime rights or trigger for all audit writes, SQL tests, transaction or outbox evidence (S-16) | 2 | S-05, S-09, S-11 |
 | Ambient context provider so `IAuditWriter` works without explicit context | 3, 9 | D10 |
 | Update the S-04 DFD to the current state (S-18) | 7 | — |
 | Test matrix T01–T13 with CI evidence (S-17) | 6 | S-12 to S-16 |
@@ -252,3 +265,4 @@ All 118 failures are other teams' Testcontainers tests that need Docker
 | Date | Change |
 |-|-|
 | 2026-11-09 | Initial component document and individual evidence (S-20) |
+| 2026-11-09 | Review: REV-05 Access audit path, 13 event types, database rights per write path, public API of the module, S-16 |
