@@ -9,9 +9,9 @@ using Platform.Identity.Services;
 
 namespace Platform.Identity.Tests.Services;
 
-/// US-06: ValidateAsync runs on every protected request and reads the saved state of the session.
+/// IDN-07: ValidateAsync runs on every protected request and reads the saved state of the session.
 [TestFixture]
-[Category("US-06")]
+[Category("IDN-07")]
 public class SessionManagerValidationTests
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);

@@ -72,7 +72,7 @@ public class SessionCheckMiddleware
         await _next(context);
     }
 
-    // US-06: the client gets a stable code to send the user to the login page,
+    // IDN-07: the client gets a stable code to send the user to the login page,
     // and the rejected cookie is removed so no tab sends it again.
     private static async Task WriteInvalidSessionResponse(HttpContext context, bool clearCookie)
     {
