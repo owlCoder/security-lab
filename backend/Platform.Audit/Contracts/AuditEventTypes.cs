@@ -17,5 +17,8 @@ public static class AuditEventTypes
     public const string CourseDelegationRevoked = "course.delegation.revoked";
     public const string CourseDelegationExpired = "course.delegation.expired";
     public const string AccessDenied = "access.denied";
+    public const string RevisionSubmitted = "revision.submitted";
+    public const string RevisionApproved = "revision.approved";
+    public const string RevisionReturned = "revision.returned";
     public const string AuditEventsViewed = "audit.events.viewed";
 }

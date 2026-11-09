@@ -120,6 +120,9 @@ public class LogoutTests
         public Task<(string RawToken, Session Session)> CreateAsync(
             Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct) => throw new NotSupportedException();
 
+        public Task<(string RawToken, Session Session)?> CreateForActiveAccountAsync(
+            Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct) => throw new NotSupportedException();
+
         public Task<Session?> FindByTokenAsync(string rawToken, CancellationToken ct) =>
             throw new NotSupportedException();
 

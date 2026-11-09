@@ -1,3 +1,5 @@
+using Team21.Acc.Api;
+using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
@@ -25,6 +27,7 @@ using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.LabVisibility.Infrastructure.Persistence;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
@@ -32,6 +35,12 @@ using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.AddTeam21Acc();
+builder.Host.UseDefaultServiceProvider(options =>
+{
+    options.ValidateScopes = true;
+    options.ValidateOnBuild = true;
+});
 
 if (builder.Environment.IsDevelopment())
 {
@@ -40,8 +49,10 @@ if (builder.Environment.IsDevelopment())
 }
 
 // Access module
+
 builder.Services.AddAccessControl();
 builder.Services.AddAccessAspNet();
+builder.Services.AddRevisionAuthorization();
 
 if (builder.Environment.IsDevelopment())
 {
@@ -74,6 +85,7 @@ else
 }
 
 builder.Services.AddAudit();
+builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -84,9 +96,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddLaboratoriesPersistence(
     builder.Configuration.GetConnectionString("Laboratories"));
 builder.Services.AddRevisionReviews();
+builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
-builder.Services.AddSingleton<IAccountRepository, InMemoryAccountRepository>(); // TODO: zameniti trajnim repozitorijumom (PostgreSQL)
-builder.Services.AddScoped<ISessionManager, StoreSessionManager>();   // zameniti kad IDN-02 bude gotov
+// IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
+builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
 builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
@@ -98,6 +111,8 @@ builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
+
+builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
@@ -118,13 +133,16 @@ else
 }
 
 // Kreiranje aplikacije
+builder.Services.AddRevisionRequestIdentity();
 var app = builder.Build();
+app.UseRouting();
+
+app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
-
-app.UseRouting();
 app.UseAccessControl();
+
 
 // Identity Rate Limiting
 app.UseIdentityRateLimiting();
@@ -149,20 +167,36 @@ app.Services.RegisterLabVisibilityAccess();
 // Probni nalozi samo za lokalni razvoj
 if (app.Environment.IsDevelopment())
 {
-    var repo = app.Services.GetRequiredService<IAccountRepository>();
-    repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
-
     // AUT-04/AUT-07 demo kurs: 1111 je nastavnik, 2222 student, 3333 nije na kursu.
     var demoCourse = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     var membership = app.Services.GetRequiredService<InMemoryCourseMembership>();
     membership.Set(demoCourse, Guid.Parse("11111111-1111-1111-1111-111111111111"), LabVisibilityCourseRole.Teacher);
     membership.Set(demoCourse, Guid.Parse("22222222-2222-2222-2222-222222222222"), LabVisibilityCourseRole.Student);
 
+    // AUT-04: demo laboratorije 4444 (objavljena) i 5555 (nacrt); sa ConnectionStrings:LabVisibility idu u PostgreSQL.
+    await app.Services.SeedLabVisibilityDemoAsync();
+
     // US-02 and US-09: migrate and seed the identity database (skipped without a connection string).
     if (await app.ApplyIdentityMigrationsAsync())
+    {
+        // IDN-03: the Audit record of a status change is written in the identity transaction,
+        // so the audit schema must exist in the same database.
+        try
+        {
+            await AuditPersistenceExtensions.MigrateAuditDatabaseAsync(
+                builder.Configuration.GetConnectionString(IdentityModule.ConnectionStringName)!);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning("The audit schema was not migrated: {Message}", ex.Message);
+        }
+
         await app.SeedDevelopmentAccountsAsync();
+    }
+    // LAB-03 drugi demo kurs: 3333 je student samo ovde, ne na prvom kursu.
+    // Primer: X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher pravi laboratoriju na prvom kursu.
+    var secondDemoCourse = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    membership.Set(secondDemoCourse, Guid.Parse("33333333-3333-3333-3333-333333333333"), LabVisibilityCourseRole.Student);
 }
 
 // Health endpoint
@@ -179,6 +213,7 @@ app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
 app.MapLaboratories();
+app.MapTeam21Acc();
 app.MapRevisionReviews();
 
 if (app.Environment.IsDevelopment())

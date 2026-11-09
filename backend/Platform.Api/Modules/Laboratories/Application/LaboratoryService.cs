@@ -1,4 +1,5 @@
 using Platform.Api.Modules.Laboratories.Domain;
+using Platform.LabVisibility.Contracts;
 
 namespace Platform.Api.Modules.Laboratories.Application;
 
@@ -6,6 +7,8 @@ public enum LabResultStatus
 {
     Ok,
     InvalidTitle,
+    InvalidCourse,
+    Forbidden,
     NotFound,
     Unauthenticated
 }
@@ -14,6 +17,8 @@ public sealed record LabResult(LabResultStatus Status, Laboratory? Laboratory = 
 {
     public static LabResult Ok(Laboratory laboratory) => new(LabResultStatus.Ok, laboratory);
     public static readonly LabResult InvalidTitle = new(LabResultStatus.InvalidTitle);
+    public static readonly LabResult InvalidCourse = new(LabResultStatus.InvalidCourse);
+    public static readonly LabResult Forbidden = new(LabResultStatus.Forbidden);
     public static readonly LabResult NotFound = new(LabResultStatus.NotFound);
     public static readonly LabResult Unauthenticated = new(LabResultStatus.Unauthenticated);
 }
@@ -24,19 +29,41 @@ public sealed record LabResult(LabResultStatus Status, Laboratory? Laboratory = 
 // vlasnistvo nad konkretnom laboratorijom: nastavnik vidi i menja samo laboratorije koje je
 // sam kreirao. Tudja laboratorija se prikazuje kao nepostojeca (404), da odgovor ne otkrije
 // da postoji. Siri pristup (kurs, saradnici) dolazi sa LAB-03 / ACC integracijom.
+//
+// LAB-03: laboratorija se pravi samo na kursu na kome je pozivalac nastavnik (ICourseMembership).
 public sealed class LaboratoryService(
     ILaboratoryRepository repository,
+    ICourseMembership courseMembership,
     TimeProvider timeProvider,
     ILogger<LaboratoryService> logger)
 {
     public async Task<LabResult> CreateAsync(
-        string? title, IIdentityContext caller, CancellationToken cancellationToken)
+        Guid? courseId, string? title, IIdentityContext caller, CancellationToken cancellationToken)
     {
         // Autor dolazi iskljucivo iz serverskog identiteta, nikad iz tela zahteva.
         Guid? creatorId = CallerId.From(caller);
         if (creatorId is null)
         {
             return LabResult.Unauthenticated;
+        }
+
+        // Laboratorija ne postoji van kursa.
+        if (courseId is null || courseId == Guid.Empty)
+        {
+            return LabResult.InvalidCourse;
+        }
+
+        // Kurs bira klijent, zato server proverava ulogu bas na tom kursu.
+        // Provera je pre provere naslova: ko nije nastavnik ne dobija ni povratnu informaciju o naslovu.
+        CourseRole role = await courseMembership.GetRoleAsync(courseId.Value, creatorId.Value, cancellationToken);
+        LabCourseDecision decision = LabCoursePolicy.DecideCreate(role);
+        if (!decision.Allowed)
+        {
+            // Razlog ide samo u serverski log; klijent dobija isti odgovor za nepostojeci i tudji kurs.
+            logger.LogWarning(
+                "Laboratory create denied: action={Action} courseId={CourseId} by={CallerId} reason={Reason}",
+                LabActions.Create, courseId.Value, creatorId.Value, decision.Code);
+            return LabResult.Forbidden;
         }
 
         if (!IsAcceptableTitle(title))
@@ -48,7 +75,7 @@ public sealed class LaboratoryService(
         try
         {
             // Domen generise novi Id i vreme kreiranja na serveru.
-            laboratory = new Laboratory(title!, creatorId.Value, timeProvider);
+            laboratory = new Laboratory(courseId.Value, title!, creatorId.Value, timeProvider);
         }
         catch (ArgumentException)
         {
@@ -58,8 +85,8 @@ public sealed class LaboratoryService(
         await repository.AddAsync(laboratory, cancellationToken);
 
         logger.LogInformation(
-            "Laboratory created: laboratoryId={LaboratoryId} createdBy={CreatedBy}",
-            laboratory.Id, laboratory.CreatedBy);
+            "Laboratory created: action={Action} laboratoryId={LaboratoryId} courseId={CourseId} createdBy={CreatedBy} reason={Reason}",
+            LabActions.Create, laboratory.Id, laboratory.CourseId, laboratory.CreatedBy, decision.Code);
 
         return LabResult.Ok(laboratory);
     }
@@ -74,9 +101,28 @@ public sealed class LaboratoryService(
         }
 
         Laboratory? laboratory = await repository.GetByIdAsync(id, cancellationToken);
-        return IsVisibleTo(laboratory, callerId.Value)
-            ? LabResult.Ok(laboratory!)
-            : LabResult.NotFound;
+        if (laboratory is null)
+        {
+            return LabResult.NotFound;
+        }
+
+        // LAB-03: kurs se uzima iz sacuvane laboratorije; za laboratoriju bez kursa clanstvo se ne pita.
+        CourseRole role = laboratory.CourseId == Guid.Empty
+            ? CourseRole.None
+            : await courseMembership.GetRoleAsync(laboratory.CourseId, callerId.Value, cancellationToken);
+
+        LabOpenDecision decision = LabOpenPolicy.DecideOpen(
+            laboratory.CourseId, role, isCreator: laboratory.CreatedBy == callerId.Value);
+        if (!decision.Allowed)
+        {
+            // Isti NotFound kao za nepostojecu laboratoriju; razlog ide samo u serverski log.
+            logger.LogWarning(
+                "Laboratory open denied: action={Action} laboratoryId={LaboratoryId} courseId={CourseId} by={CallerId} reason={Reason}",
+                LabActions.Read, laboratory.Id, laboratory.CourseId, callerId.Value, decision.Code);
+            return LabResult.NotFound;
+        }
+
+        return LabResult.Ok(laboratory);
     }
 
     public async Task<LabResult> RenameAsync(

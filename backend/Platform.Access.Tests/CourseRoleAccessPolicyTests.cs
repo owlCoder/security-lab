@@ -30,6 +30,7 @@ public sealed class CourseRoleAccessPolicyTests
         resources.SetCourse(laboratory, courseId);
         resources.SetCourse(assignment, courseId);
         resources.SetCourse(attempt, courseId);
+        resources.SetOwner(assignment, accountId);
         resources.SetOwner(attempt, accountId);
     }
 
@@ -38,6 +39,7 @@ public sealed class CourseRoleAccessPolicyTests
     [TestCase(CourseRole.Student, "lab.revision.publish", false)]
     [TestCase(CourseRole.Student, "lab.criteria.hidden.read", false)]
     [TestCase(CourseRole.Student, "assignment.manage", false)]
+    [TestCase(CourseRole.Student, "assignment.read.own", true)]
     [TestCase(CourseRole.Student, "attempt.create", true)]
     [TestCase(CourseRole.Student, "attempt.read", true)]
     [TestCase(CourseRole.Student, "attempt.submit", true)]
@@ -48,6 +50,7 @@ public sealed class CourseRoleAccessPolicyTests
     [TestCase(CourseRole.Teacher, "lab.revision.publish", true)]
     [TestCase(CourseRole.Teacher, "lab.criteria.hidden.read", true)]
     [TestCase(CourseRole.Teacher, "assignment.manage", true)]
+    [TestCase(CourseRole.Teacher, "assignment.read.own", false)]
     [TestCase(CourseRole.Teacher, "attempt.create", false)]
     [TestCase(CourseRole.Teacher, "attempt.read", false)]
     [TestCase(CourseRole.Teacher, "attempt.submit", false)]
@@ -79,6 +82,7 @@ public sealed class CourseRoleAccessPolicyTests
     [TestCase("lab.revision.publish")]
     [TestCase("lab.criteria.hidden.read")]
     [TestCase("assignment.manage")]
+    [TestCase("assignment.read.own")]
     [TestCase("attempt.create")]
     [TestCase("attempt.read")]
     [TestCase("attempt.submit")]
@@ -131,6 +135,16 @@ public sealed class CourseRoleAccessPolicyTests
         resources.SetOwner(attempt, Guid.NewGuid());
         Assert.That(await Evaluate("attempt.read"), Is.False);
         Assert.That(await Evaluate("attempt.submit"), Is.False);
+    }
+
+    [Test]
+    public async Task AssignmentOwnership_IsRequiredForStudentRead()
+    {
+        AddMembership(CourseRole.Student);
+        Assert.That(await Evaluate("assignment.read.own"), Is.True);
+
+        resources.SetOwner(assignment, Guid.NewGuid());
+        Assert.That(await Evaluate("assignment.read.own"), Is.False);
     }
 
     [Test]

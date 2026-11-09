@@ -7,9 +7,17 @@ public enum SessionRotationStoreStatus
     /// <summary>The old session was revoked and the replacement stored, in one step.</summary>
     Rotated = 0,
 
-    /// <summary>No session has the given token hash.</summary>
+    /// <summary>No session has the given token hash. Nothing was changed.</summary>
     NotFound = 1,
 
-    /// <summary>The old session was already revoked, also by a concurrent rotation.</summary>
-    AlreadyRevoked = 2
+    /// <summary>
+    /// The old session was already revoked, also by a concurrent rotation. Nothing was changed.
+    /// </summary>
+    AlreadyRevoked = 2,
+
+    /// <summary>
+    /// The old session reached its absolute expiry. Nothing was changed: no replacement was
+    /// stored and the old session was left as it was.
+    /// </summary>
+    Expired = 3
 }
