@@ -187,7 +187,7 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 
 | Key | Format |
 |-|-|
-| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `invalid_credentials`, `account_blocked`, `forbidden`, `not_found` |
+| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `invalid_credentials`, `account_blocked`, `account_locked` (IDN-05: `auth.login` Failure while the account is temporarily locked), `forbidden`, `not_found` |
 | `oldStatus`, `newStatus` | one of `active`, `blocked`, `archived` |
 | `oldRole`, `newRole` | one of `none`, `student`, `teacher`, `assistant` |
 | `action`, `filterType` | action or event type: `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$`, at most 64 characters (same rule as `ActionId` in `Platform.Access`) |

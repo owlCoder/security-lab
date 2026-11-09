@@ -8,6 +8,7 @@ namespace Laboratories.Tests;
 public sealed class LaboratoryRepositoryTests
 {
     private static readonly Guid TeacherId = Guid.NewGuid();
+    private static readonly Guid CourseId = Guid.NewGuid();
 
     private InMemoryLaboratoryRepository _repository = null!;
 
@@ -19,7 +20,7 @@ public sealed class LaboratoryRepositoryTests
 
     private async Task<Laboratory> AddLabAsync(string title = "SQL injection")
     {
-        var lab = new Laboratory(title, TeacherId);
+        var lab = new Laboratory(CourseId, title, TeacherId);
         await _repository.AddAsync(lab);
         return lab;
     }
@@ -33,6 +34,7 @@ public sealed class LaboratoryRepositoryTests
 
         Assert.That(stored, Is.Not.Null);
         Assert.That(stored!.Id, Is.EqualTo(lab.Id));
+        Assert.That(stored.CourseId, Is.EqualTo(CourseId));
         Assert.That(stored.Title, Is.EqualTo("SQL injection"));
         Assert.That(stored.Status, Is.EqualTo(LabStatus.Draft));
         Assert.That(stored.CreatedBy, Is.EqualTo(TeacherId));
@@ -74,7 +76,7 @@ public sealed class LaboratoryRepositoryTests
     {
         Laboratory original = await AddLabAsync("Original");
         Laboratory sameId = Laboratory.Rehydrate(
-            original.Id, "Pokusaj prepisivanja", LabStatus.Draft, Guid.NewGuid(), DateTimeOffset.UtcNow);
+            original.Id, CourseId, "Pokusaj prepisivanja", LabStatus.Draft, Guid.NewGuid(), DateTimeOffset.UtcNow);
 
         Assert.ThrowsAsync<DuplicateLaboratoryException>(() => _repository.AddAsync(sameId));
 
@@ -166,6 +168,7 @@ public sealed class LaboratoryRepositoryTests
         IReadOnlyList<LabRevision> revisions = await _repository.GetRevisionsAsync(lab.Id);
         Assert.That(stored!.Id, Is.EqualTo(lab.Id));
         Assert.That(stored.Title, Is.EqualTo("SQL injection - napredno"));
+        Assert.That(stored.CourseId, Is.EqualTo(CourseId));
         Assert.That(stored.CreatedBy, Is.EqualTo(TeacherId));
         Assert.That(stored.CreatedAt, Is.EqualTo(lab.CreatedAt));
         Assert.That(revisions, Has.Count.EqualTo(1));
@@ -174,7 +177,7 @@ public sealed class LaboratoryRepositoryTests
     [Test]
     public void Update_ForNonExistingLaboratory_Throws()
     {
-        var unknown = new Laboratory("Nije sacuvana", TeacherId);
+        var unknown = new Laboratory(CourseId, "Nije sacuvana", TeacherId);
 
         Assert.ThrowsAsync<LaboratoryNotFoundException>(() => _repository.UpdateAsync(unknown));
     }

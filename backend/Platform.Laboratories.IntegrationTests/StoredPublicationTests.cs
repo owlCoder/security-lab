@@ -20,7 +20,8 @@ public partial class PublicationDatabaseTests
     {
         var author = Guid.NewGuid();
         var course = Guid.NewGuid();
-        var laboratory = new Laboratory("Log exercise", author);
+        // LAB-03: laboratorija sada zahteva kurs
+        var laboratory = new Laboratory(course, "Log exercise", author);
         var repository = new InMemoryLaboratoryRepository();
         await repository.AddAsync(laboratory);
         await using var db = CreateContext();

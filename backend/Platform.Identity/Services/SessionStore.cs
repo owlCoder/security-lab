@@ -11,6 +11,42 @@ internal sealed class SessionStore(PlatformIdentityDbContext db, TimeProvider ti
     public async Task<(string RawToken, Session Session)> CreateAsync(
         Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct)
     {
+        var created = NewSession(userId, level, lifetime);
+
+        db.Sessions.Add(created.Session);
+        await db.SaveChangesAsync(ct);
+
+        return created;
+    }
+
+    public async Task<(string RawToken, Session Session)?> CreateForActiveAccountAsync(
+        Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        // FOR SHARE pairs with the FOR UPDATE of ChangeAccountStatus (IDN-03): a status change that is already
+        // running makes this wait and then read the new status; one that starts later waits for this commit
+        // and revokes the session we are about to store. Either way no session outlives a block (SEC-03).
+        var account = await db.Accounts
+            .FromSqlInterpolated($"""
+                SELECT * FROM identity.accounts WHERE id = {userId} FOR SHARE
+                """)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(ct);
+
+        if (account is null || account.Status != AccountStatus.Active)
+            return null;
+
+        var created = NewSession(userId, level, lifetime);
+        db.Sessions.Add(created.Session);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        return created;
+    }
+
+    private (string RawToken, Session Session) NewSession(Guid userId, AuthLevel level, TimeSpan lifetime)
+    {
         var rawToken = SessionTokenGenerator.NewToken();
         var now = time.GetUtcNow();
 
@@ -22,9 +58,6 @@ internal sealed class SessionStore(PlatformIdentityDbContext db, TimeProvider ti
             authLevel: level,
             createdAt: now,
             expiresAt: now.Add(lifetime));
-
-        db.Sessions.Add(session);
-        await db.SaveChangesAsync(ct);
 
         return (rawToken, session);
     }

@@ -27,7 +27,8 @@ public class LaboratoryPersistenceIntegrationTests
         return new LaboratoryDbContext(options);
     }
 
-    private static Laboratory NewLab(string title) => new(title, Guid.NewGuid());
+    // LAB-03: konstruktor sada trazi kurs; minimalna izmena da build prodje (vidi docs/components/LAB-03.md).
+    private static Laboratory NewLab(string title) => new(Guid.NewGuid(), title, Guid.NewGuid());
 
     private static async Task DeleteLabs(params Guid[] ids)
     {

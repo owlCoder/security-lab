@@ -12,9 +12,9 @@ using Platform.Access.AspNet;
  {
      [DelegatedAuthorization]
      [HttpPut("{id:guid}/status")]
-     public IActionResult ChangeStatus(Guid id, [FromBody] ChangeStatusRequest body)
+     public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeStatusRequest body, CancellationToken ct)
      {
-         var result = changeStatus.Execute(id, body.Status, body.Reason, HttpContext.TraceIdentifier);
+         var result = await changeStatus.ExecuteAsync(id, body.Status, ct);
 
          return result.Outcome switch
          {
@@ -25,6 +25,7 @@ using Platform.Access.AspNet;
             ChangeStatusOutcome.InvalidStatus => BadRequest(new { code = "invalid_status" }),
              ChangeStatusOutcome.InvalidTransition => Conflict(new { code = "invalid_transition" }),
              ChangeStatusOutcome.SelfChangeNotAllowed => Conflict(new { code = "self_change_not_allowed" }),
+             ChangeStatusOutcome.Unavailable => StatusCode(503, new { code = "unavailable" }),
              _ => StatusCode(500)
          };
      }

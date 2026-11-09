@@ -89,7 +89,7 @@ public sealed class RevisionHttpWorkflowTests
         await identity.SaveChangesAsync();
         authorClient = Client(authorToken); reviewerClient = Client(reviewerToken);
 
-        var laboratory = new Laboratory("HTTP revision", author);
+        var laboratory = new Laboratory(course, "HTTP revision", author);
         await scope.ServiceProvider.GetRequiredService<ILaboratoryRepository>().AddAsync(laboratory);
         lab = laboratory.Id;
         var revisions = scope.ServiceProvider.GetRequiredService<LaboratoriesDbContext>();

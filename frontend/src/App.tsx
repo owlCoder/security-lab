@@ -14,6 +14,8 @@ import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
 import TeacherMetadataPage from './pages/TeacherMetadataPage'
+import LabVisibilitySection from './labs/LabVisibilitySection'
+
 function LoginRoute() {
   const navigate = useNavigate()
   const { refreshUser } = useAuth()
@@ -91,9 +93,10 @@ export default function App() {
           <CourseworkKt1 />
           <LabsSection />
           <CoursesPage />
-              </>} />
-              <Route path="teacher/labs/new" element={<TeacherMetadataPage />} />
-              <Route path="teacher/labs/:labId/edit" element={<TeacherMetadataPage />} />
+          <LabVisibilitySection />
+        </>} />
+        <Route path="teacher/labs/new" element={<TeacherMetadataPage />} />
+        <Route path="teacher/labs/:labId/edit" element={<TeacherMetadataPage />} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
