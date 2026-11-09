@@ -81,14 +81,14 @@ demonstration and a plan for the remaining work. Documentation alone is not enou
 
 ### Minimum for KT1
 
-| Item | Stories | State on 03.11 |
+| Item | Stories | State on 09.11 |
 |-|-|-|
 | Audit module skeleton, solution and CI that fails on zero tests | S-01 | Done (PR #35) |
 | Audit contract, event catalog, draft validation and T03 tests | S-02 | Done (PR #42) |
-| Domain record, decisions and KT1 scope | S-03 | This pull request |
-| Threat model, security matrix and DFD of the Audit component | S-04, S-18 | Not started |
-| A verifiable write of an event, at least in memory and clearly marked as such | S-06, S-12 | Not started |
-| Individual evidence for each of the 10 members | S-20, S-21 | Not started |
+| Domain record, decisions and KT1 scope | S-03 | Done (PR #51) |
+| Threat model, security matrix and DFD of the Audit component | S-04, S-18 | Done for S-04 (PR #76); the DFD predates later merges and is updated in S-18 |
+| A verifiable write of an event, at least in memory and clearly marked as such | S-06, S-12 | Writer done (PR #72), PostgreSQL storage (PR #73); IDN-03 status change writes through `ITransactionalAuditWriter` (PR #148); S-12 PR #113 open |
+| Individual evidence for each of the 10 members | S-20, S-21 | S-20 in [AUD-01-AUD-06.md](../AUD-01-AUD-06.md); S-21 not started |
 
 If the AUD-06 endpoint is shown as working, server-side authorization and course isolation are
 mandatory. An unfinished endpoint stays unreachable, and every stub is labelled as a stub.
@@ -136,3 +136,4 @@ their own stories at the team sync; the new value is entered in Tapiz and here.
 | 2026-11-03 | Initial register, KT1 scope and estimate table (S-03) |
 | 2026-11-03 | Links to the S-11 proposals; new questions D13 to D15 (S-11) |
 | 2026-11-05 | D5 query limits proposal and S-07 course query (S-07) |
+| 2026-11-09 | KT1 minimum state updated; link to the component document (S-20) |
