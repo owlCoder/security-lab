@@ -20,6 +20,7 @@ function Assert-AuditPostgresResults($resultsDirectory) {
         'Platform.Audit.Tests.PostgresAuditEventStoreTests'
         'Platform.Audit.Tests.AuditRuntimePermissionsTests'
         'Platform.Audit.Tests.AuditHostPostgresTests'
+        'Platform.Audit.Tests.PostgresCourseAuditQueryTests'
     )
     $required = $remaining
     foreach ($file in Get-ChildItem -LiteralPath $resultsDirectory -Filter '*.trx' -Recurse) {
