@@ -72,5 +72,6 @@ public sealed class AssignmentIndividualDeadlineTests
         "revision-1",
         Start,
         Due,
-        maxAttempts: 2);
+        maxAttempts: 2,
+        scope: AssignmentScope.Course);
 }
