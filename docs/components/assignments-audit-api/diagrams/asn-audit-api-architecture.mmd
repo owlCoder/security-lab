@@ -1,0 +1,71 @@
+%% ASN-04 / ASN-06, tim 15, celina 5 (Audit i API) - dijagram arhitekture
+flowchart TB
+  classDef mine fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#0f172a
+  classDef team fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef other fill:#fef3c7,stroke:#b45309,color:#0f172a
+  classDef store fill:#ffffff,stroke:#334155,color:#0f172a
+
+  CLIENT["Klijent<br/>(student / nastavnik)"]
+
+  subgraph HOST["Platform.Api (host)"]
+    subgraph PIPE["Postojeći middleware"]
+      CORR["CorrelationMiddleware<br/>AUD-04, tim 12"]:::other
+      ACM["AccessControlMiddleware<br/>ACC-05, [DelegatedAuthorization]"]:::other
+      SESS["SessionCheckMiddleware<br/>IDN-02 (401 bez sesije)"]:::other
+      CORR --> ACM --> SESS
+    end
+
+    subgraph MINE["Celina 5: Modules/Assignments (moj deo)"]
+      CTRL["AssignmentsController<br/>POST /attempts (ASN-04)<br/>POST /deadline-extensions (ASN-06)"]:::mine
+      CALLER["AssignmentCaller<br/>akter = korisnik iz sesije + aktivan nalog"]:::mine
+      SAH["StartAttemptApiHandler<br/>mapiranje ishoda + audit ASN-04"]:::mine
+      EAH["ExtendDeadlineApiHandler<br/>validacija roka + mapiranje ishoda"]:::mine
+      ADAPT["DeadlineExtensionAuditAdapter<br/>implementira IDeadlineExtensionAuditWriter"]:::mine
+      WRITER["AssignmentAuditWriter<br/>IAssignmentAuditWriter"]:::mine
+      CTX["SessionAssignmentAuditContextProvider<br/>akter + korelacioni ID"]:::mine
+      MAP["AssignmentAuditDraftMapper<br/>allowlist, bez tajni"]:::mine
+      COMP["AddAssignmentsApi()<br/>DI + fail-closed podrazumevani portovi"]:::mine
+      CHECK["AssignmentsCompositionCheck<br/>log nepovezanih portova pri startu"]:::mine
+      COMP --> CHECK
+      CTRL --> CALLER
+      CTRL --> SAH
+      CTRL --> EAH
+      SAH -.->|"posle odluke, best-effort"| WRITER
+      ADAPT -->|"AssignmentAuditDraft"| WRITER
+      WRITER --> CTX
+      WRITER --> MAP
+    end
+  end
+
+  subgraph ASN["Platform.Assignments (ostali članovi tima 15)"]
+    SAS["StartAttemptService<br/>član 2, ASN-04"]:::team
+    EDS["ExtendDeadlineService<br/>član 3, ASN-06"]:::team
+    PORTS1["IAssignmentRepository, IAttemptStore,<br/>IDeadlineExtensionStore<br/>član 1 (baza)"]:::team
+    PORTS4["IStartAttemptAuthorization,<br/>IDeadlineExtensionAuthorization,<br/>ICourseEnrollmentCheck<br/>član 4 (autorizacija)"]:::team
+    SAS --> PORTS1
+    SAS --> PORTS4
+    EDS --> PORTS1
+    EDS --> PORTS4
+  end
+
+  subgraph AUD["Platform.Audit (tim 12, AUD-01/AUD-06)"]
+    TAW["ITrustedAuditWriter<br/>katalog + validacija"]:::other
+    AUDDB[("audit.events<br/>append-only")]:::store
+    TAW --> AUDDB
+  end
+
+  IDN["IIdentityContext + IAccountStatusReader<br/>Identity (IDN-02/IDN-03)"]:::other
+  LOG[("Tehnički log<br/>ILogger, bez tajni")]:::store
+
+  CLIENT -->|HTTPS| CORR
+  SESS --> CTRL
+  CALLER --> IDN
+  CTX --> IDN
+  CTX -->|"ICorrelationContext"| CORR
+  SAH -->|"StartAttemptAsync(actorId, ...)"| SAS
+  EAH -->|"ExtendDeadlineAsync(actorId, ...)"| EDS
+  EDS -.->|"Denied / Failure"| ADAPT
+  WRITER -->|"AuditEventDraft + AuditContext"| TAW
+  WRITER -->|"zapis + alarm"| LOG
+  COMP -.->|"TryAdd"| PORTS1
+  COMP -.->|"TryAdd"| PORTS4
