@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Platform.Api.Enums.Identity;
+using Platform.Api.Interfaces.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
@@ -60,21 +61,35 @@ public class StoreSessionCreatorTests
         Assert.That(await _creator.CreateAsync(Guid.NewGuid(), AuthenticationLevel.Active), Is.Null);
     }
 
+    [Test]
+    public async Task Create_AccountNoLongerActive_Throws_AndStoresNoSession()
+    {
+        _store.AccountIsActive = false;
+
+        await Assert.ThrowsAsync<AccountNotActiveException>(() => _creator.CreateAsync(Guid.NewGuid(), AuthenticationLevel.Active));
+        Assert.That(_store.Created, Is.Null);
+    }
+
     private sealed class FakeStore : ISessionStore
     {
         public Exception? Failure { get; set; }
+        public bool AccountIsActive { get; set; } = true;
         public Session? Created { get; private set; }
         public TimeSpan? LastLifetime { get; private set; }
 
         public Task<(string RawToken, Session Session)> CreateAsync(
+            Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct) => throw new NotSupportedException();
+
+        public Task<(string RawToken, Session Session)?> CreateForActiveAccountAsync(
             Guid userId, AuthLevel level, TimeSpan lifetime, CancellationToken ct)
         {
             if (Failure is not null) throw Failure;
+            if (!AccountIsActive) return Task.FromResult<(string RawToken, Session Session)?>(null);
 
             var now = DateTimeOffset.UtcNow;
             LastLifetime = lifetime;
             Created = new Session(Guid.NewGuid(), userId, new byte[32], Guid.NewGuid(), level, now, now + lifetime);
-            return Task.FromResult((Token, Created));
+            return Task.FromResult<(string RawToken, Session Session)?>((Token, Created));
         }
 
         public Task<Session?> FindByTokenAsync(string rawToken, CancellationToken ct) => throw new NotSupportedException();
