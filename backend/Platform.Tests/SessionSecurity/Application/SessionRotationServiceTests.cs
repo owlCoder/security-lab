@@ -124,6 +124,28 @@ public sealed class SessionRotationServiceTests
     }
 
     [Test]
+    public async Task RotateAsync_WhenSessionExpiresBeforeStoreRotation_ReturnsSessionExpired()
+    {
+        var store = new InMemorySessionRotationStore();
+        var tokens = new RecordingTokenGenerator();
+        var audit = new RecordingAuditWriter();
+        store.Add(new RotatableSession(
+            ChainId, null, tokens.ComputeHash(PreLoginToken), SessionPrivilegeLevel.PreAuthentication,
+            Now.AddMinutes(-5), AbsoluteExpiry));
+        var service = new SessionRotationService(
+            new ExpiresBeforeRotationStore(store), tokens, audit, new FixedTimeProvider(Now));
+
+        var result = await service.RotateAsync(LoginRequest(PreLoginToken));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.SessionExpired));
+            Assert.That(result.NewToken, Is.Null);
+            Assert.That(audit.Entries.Single().Outcome, Is.EqualTo(SessionRotationCodes.SessionExpired));
+        });
+    }
+
+    [Test]
     public async Task RotateAsync_AfterChainIsRevoked_RejectsEveryTokenOfChain()
     {
         var fixture = new Fixture();
@@ -334,6 +356,30 @@ public sealed class SessionRotationServiceTests
 
     private static RotateSessionRequest LoginRequest(string? token) =>
         new(token, UserA, RotationTrigger.Login, SessionPrivilegeLevel.Authenticated, CorrelationId);
+
+    /// <summary>
+    /// Simulates a session that reaches its absolute expiry between FindAsync and RotateAsync:
+    /// the store reports Expired from its atomic check.
+    /// </summary>
+    private sealed class ExpiresBeforeRotationStore(InMemorySessionRotationStore inner) : ISessionRotationStore
+    {
+        public ValueTask<RotatableSession?> FindAsync(
+            string tokenHash, CancellationToken cancellationToken = default)
+            => inner.FindAsync(tokenHash, cancellationToken);
+
+        public ValueTask<SessionRotationStoreStatus> RotateAsync(
+            string oldTokenHash, RotatableSession replacement, DateTimeOffset now,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(SessionRotationStoreStatus.Expired);
+
+        public ValueTask<int> RevokeChainAsync(
+            Guid chainId, DateTimeOffset now, CancellationToken cancellationToken = default)
+            => inner.RevokeChainAsync(chainId, now, cancellationToken);
+
+        public ValueTask<int> RevokeAllForSubjectAsync(
+            string subjectId, DateTimeOffset now, CancellationToken cancellationToken = default)
+            => inner.RevokeAllForSubjectAsync(subjectId, now, cancellationToken);
+    }
 
     private sealed class Fixture
     {

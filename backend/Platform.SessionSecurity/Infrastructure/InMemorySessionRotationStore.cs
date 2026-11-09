@@ -6,7 +6,7 @@ namespace Platform.SessionSecurity.Infrastructure;
 /// <summary>
 /// IDN-11: in-memory session store for tests and the KT1 demo. Every operation runs under one
 /// lock, so a rotation is atomic: of several rotations with the same old token hash exactly one
-/// succeeds. A database adapter replaces this class without changes to the application layer.
+/// succeeds, and the revocation and expiry of the old session are checked inside the same lock. A database adapter replaces this class without changes to the application layer.
 /// </summary>
 public sealed class InMemorySessionRotationStore : ISessionRotationStore
 {
@@ -65,6 +65,19 @@ public sealed class InMemorySessionRotationStore : ISessionRotationStore
             if (current.IsRevoked)
             {
                 return ValueTask.FromResult(SessionRotationStoreStatus.AlreadyRevoked);
+            }
+
+            if (current.IsExpiredAt(now))
+            {
+                return ValueTask.FromResult(SessionRotationStoreStatus.Expired);
+            }
+
+            if (replacement.ChainId != current.ChainId
+                || replacement.AbsoluteExpiresAt != current.AbsoluteExpiresAt)
+            {
+                throw new ArgumentException(
+                    "The replacement must keep the chain and the absolute expiry of the old session.",
+                    nameof(replacement));
             }
 
             if (sessionsByTokenHash.ContainsKey(replacement.TokenHash))

@@ -82,6 +82,61 @@ public sealed class InMemorySessionRotationStoreTests
     }
 
     [Test]
+    public async Task RotateAsync_WhenOldSessionReachedAbsoluteExpiry_ReturnsExpiredAndChangesNothing()
+    {
+        var store = new InMemorySessionRotationStore();
+        var old = Session(ChainA, OldHash);
+        store.Add(old);
+
+        var status = await store.RotateAsync(OldHash, Session(ChainA, "NEW"), old.AbsoluteExpiresAt);
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(status, Is.EqualTo(SessionRotationStoreStatus.Expired));
+            Assert.That(await store.FindAsync("NEW"), Is.Null);
+            Assert.That((await store.FindAsync(OldHash))?.IsRevoked, Is.False);
+        });
+    }
+
+    [TestCase(true, false)]
+    [TestCase(false, true)]
+    public async Task RotateAsync_WhenReplacementChangesChainOrAbsoluteExpiry_ThrowsAndChangesNothing(
+        bool changeChain, bool extendExpiry)
+    {
+        var store = new InMemorySessionRotationStore();
+        var old = Session(ChainA, OldHash);
+        store.Add(old);
+        var replacement = Session(changeChain ? ChainB : ChainA, "NEW") with
+        {
+            AbsoluteExpiresAt = extendExpiry ? old.AbsoluteExpiresAt.AddHours(1) : old.AbsoluteExpiresAt,
+        };
+
+        Assert.ThrowsAsync<ArgumentException>(async () => await store.RotateAsync(OldHash, replacement, Now));
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(await store.FindAsync("NEW"), Is.Null);
+            Assert.That((await store.FindAsync(OldHash))?.IsRevoked, Is.False);
+        });
+    }
+
+    [Test]
+    public async Task RevokeChainAsync_WhenCalledAgain_RevokesNothingAndKeepsFirstRevocationTime()
+    {
+        var store = new InMemorySessionRotationStore();
+        store.Add(Session(ChainA, OldHash));
+        await store.RevokeChainAsync(ChainA, Now);
+
+        var revokedAgain = await store.RevokeChainAsync(ChainA, Now.AddMinutes(5));
+
+        Assert.Multiple(async () =>
+        {
+            Assert.That(revokedAgain, Is.Zero);
+            Assert.That((await store.FindAsync(OldHash))?.RevokedAt, Is.EqualTo(Now));
+        });
+    }
+
+    [Test]
     public async Task RevokeChainAsync_RevokesOnlyActiveSessionsOfThatChain()
     {
         var store = new InMemorySessionRotationStore();

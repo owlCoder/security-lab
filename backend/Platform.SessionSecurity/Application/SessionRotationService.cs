@@ -55,10 +55,7 @@ public sealed class SessionRotationService(
         var status = await store.RotateAsync(current.TokenHash, replacement, now, cancellationToken);
         if (status != SessionRotationStoreStatus.Rotated)
         {
-            var code = status == SessionRotationStoreStatus.NotFound
-                ? SessionRotationCodes.SessionNotFound
-                : SessionRotationCodes.RotationConflict;
-            return await RejectAsync(valid, code, now, cancellationToken);
+            return await RejectAsync(valid, ToRejectionCode(status), now, cancellationToken);
         }
 
         if (!await WriteAuditAsync(valid, SessionRotationCodes.Rotated, now, cancellationToken))
@@ -71,6 +68,15 @@ public sealed class SessionRotationService(
 
         return SessionRotationResult.Rotated(issued.Value);
     }
+
+    // The store checks the old session again inside its atomic operation, because it can be
+    // rotated by a concurrent request or reach its absolute expiry after FindAsync.
+    private static string ToRejectionCode(SessionRotationStoreStatus status) => status switch
+    {
+        SessionRotationStoreStatus.NotFound => SessionRotationCodes.SessionNotFound,
+        SessionRotationStoreStatus.Expired => SessionRotationCodes.SessionExpired,
+        _ => SessionRotationCodes.RotationConflict,
+    };
 
     private static bool TryValidate(
         RotateSessionRequest? request,
