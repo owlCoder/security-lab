@@ -10,8 +10,10 @@ namespace Platform.SessionSecurity.Application;
 /// revokes the old one, so the previous session token is rejected (session fixation protection).
 /// The new session keeps the chain and the absolute expiry of the old one, so a rotation never
 /// extends the session lifetime. Every rotation attempt with a valid request is audited without
-/// any token, hash or chain ID (AUD-01, AUD-03). When the audit of a successful rotation fails,
-/// the whole chain is revoked and the rotation is reported as failed (AUD-10, fail-closed).
+/// any token, hash or chain ID (AUD-01, AUD-03). The replacement is stored as pending activation
+/// and activated only after the rotation was audited, so no failure, exception or cancellation
+/// can leave an unaudited active session (AUD-10, fail-closed; see
+/// <see cref="IRotateSessionUseCase"/>).
 /// </summary>
 public sealed class SessionRotationService(
     ISessionRotationStore store,
@@ -50,7 +52,8 @@ public sealed class SessionRotationService(
             issued.Hash,
             valid.NewPrivilegeLevel,
             now,
-            current.AbsoluteExpiresAt);
+            current.AbsoluteExpiresAt,
+            IsPendingActivation: true);
 
         var status = await store.RotateAsync(current.TokenHash, replacement, now, cancellationToken);
         if (status != SessionRotationStoreStatus.Rotated)
@@ -58,15 +61,63 @@ public sealed class SessionRotationService(
             return await RejectAsync(valid, ToRejectionCode(status), now, cancellationToken);
         }
 
-        if (!await WriteAuditAsync(valid, SessionRotationCodes.Rotated, now, cancellationToken))
+        return await AuditAndActivateAsync(valid, replacement, issued, now, cancellationToken);
+    }
+
+    // From here on the old session is revoked and the replacement is pending. Until ActivateAsync
+    // succeeds no session of the chain is active, so every early exit is fail-closed by itself;
+    // the chain revocation after a failure is cleanup only.
+    private async ValueTask<SessionRotationResult> AuditAndActivateAsync(
+        ValidatedRequest request,
+        RotatableSession replacement,
+        IssuedSessionToken issued,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        string failureCode;
+        try
         {
-            // AUD-10: the new token never reaches the client and the old one stays revoked.
-            // The compensation must finish even when the request is cancelled.
-            await store.RevokeChainAsync(current.ChainId, now, CancellationToken.None);
-            return SessionRotationResult.Rejected(SessionRotationCodes.AuditFailed);
+            if (!await TryWriteAuditAsync(request, SessionRotationCodes.Rotated, now, cancellationToken))
+            {
+                failureCode = SessionRotationCodes.AuditFailed;
+            }
+            else if (await store.ActivateAsync(replacement.TokenHash, now, cancellationToken))
+            {
+                return SessionRotationResult.Rotated(issued.Value);
+            }
+            else
+            {
+                // The chain was revoked or expired after the rotation: record that the rotation
+                // did not complete, so the trail does not end with a success.
+                failureCode = SessionRotationCodes.RotationConflict;
+                await TryWriteAuditAsync(request, failureCode, now, cancellationToken);
+            }
+        }
+        catch
+        {
+            // Cancellation or a store failure: the replacement was never activated. Clean up and
+            // let the caller see the original exception.
+            await TryRevokeChainAsync(replacement.ChainId, now);
+            throw;
         }
 
-        return SessionRotationResult.Rotated(issued.Value);
+        await TryRevokeChainAsync(replacement.ChainId, now);
+        return SessionRotationResult.Rejected(failureCode);
+    }
+
+    // Cleanup only, independent of the caller's cancellation. Safety does not depend on it: the
+    // replacement is still pending, so a failed revocation leaves no active session in the chain,
+    // and the pending session ends at the absolute expiry.
+    private async ValueTask TryRevokeChainAsync(Guid chainId, DateTimeOffset now)
+    {
+        try
+        {
+            await store.RevokeChainAsync(chainId, now, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Intentionally ignored, see the comment above. The rotation already reports a failure.
+        }
     }
 
     // The store checks the old session again inside its atomic operation, because it can be
@@ -108,6 +159,12 @@ public sealed class SessionRotationService(
         ValidatedRequest request,
         DateTimeOffset now)
     {
+        // A pending replacement was never handed out, so it is treated as unknown.
+        if (current.IsPendingActivation)
+        {
+            return SessionRotationCodes.SessionNotFound;
+        }
+
         if (current.IsRevoked)
         {
             return SessionRotationCodes.SessionRevoked;
@@ -140,11 +197,13 @@ public sealed class SessionRotationService(
         CancellationToken cancellationToken)
     {
         // The result is a rejection whether or not this audit write succeeds.
-        await WriteAuditAsync(request, code, now, cancellationToken);
+        await TryWriteAuditAsync(request, code, now, cancellationToken);
         return SessionRotationResult.Rejected(code);
     }
 
-    private ValueTask<bool> WriteAuditAsync(
+    // An audit adapter may report a failure by returning false or by throwing; both are treated
+    // as a failed write. Cancellation is not a write failure and is propagated.
+    private async ValueTask<bool> TryWriteAuditAsync(
         ValidatedRequest request,
         string outcome,
         DateTimeOffset now,
@@ -158,7 +217,14 @@ public sealed class SessionRotationService(
             now,
             request.CorrelationId);
 
-        return auditWriter.TryWriteAsync(entry, cancellationToken);
+        try
+        {
+            return await auditWriter.TryWriteAsync(entry, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     private sealed record ValidatedRequest(

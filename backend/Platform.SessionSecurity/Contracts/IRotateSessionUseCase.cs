@@ -7,22 +7,25 @@ namespace Platform.SessionSecurity.Contracts;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Order: the rotation is committed in the store first and audited after that, because only then
-/// is the real outcome known. A successful rotation is reported only when the audit record was
-/// written (AUD-10, fail-closed).
+/// Order (AUD-10, fail-closed): the store first revokes the old session and stores the replacement
+/// as pending activation (<see cref="ISessionRotationStore.RotateAsync"/>); then the rotation is
+/// audited; only after a successful audit is the replacement activated
+/// (<see cref="ISessionRotationStore.ActivateAsync"/>) and the new token returned.
 /// </para>
 /// <para>
-/// When the audit write fails after a committed rotation, the implementation revokes the whole
-/// chain with <see cref="ISessionRotationStore.RevokeChainAsync"/> before it returns
-/// <c>AuditFailed</c>. This compensation is not cancelled by the caller's cancellation token.
-/// The resulting state is consistent: the old session and its replacement are both revoked, no
-/// session of the chain is active, and the client has to authenticate again. The old token never
-/// becomes valid again, and the new token never leaves the server.
+/// Any failure before the activation leaves no active session in the chain, whatever its form:
+/// the audit writer returns false or throws, the request is cancelled, or the activation is
+/// refused or throws. The old session is already revoked and the replacement was never
+/// activated, so the client has to authenticate again; the old token never becomes valid again
+/// and the new token never leaves the server. An audit failure gives <c>AuditFailed</c>, an
+/// activation refused by the store gives <c>RotationConflict</c>, and cancellation and store
+/// exceptions are propagated to the caller.
 /// </para>
 /// <para>
-/// If the compensation itself fails (the store throws), the exception is propagated and no token
-/// is returned. The replacement then stays active, but nobody holds its token, and it ends at the
-/// absolute expiry of the chain at the latest. The host treats this as a failed rotation.
+/// After such a failure the implementation also tries to revoke the whole chain with
+/// <see cref="ISessionRotationStore.RevokeChainAsync"/>, independent of the caller's cancellation.
+/// This is cleanup only: if the revocation fails too, the pending replacement still cannot be
+/// used and ends at the absolute expiry of the chain.
 /// </para>
 /// </remarks>
 public interface IRotateSessionUseCase

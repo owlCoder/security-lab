@@ -126,22 +126,17 @@ public sealed class SessionRotationServiceTests
     [Test]
     public async Task RotateAsync_WhenSessionExpiresBeforeStoreRotation_ReturnsSessionExpired()
     {
-        var store = new InMemorySessionRotationStore();
-        var tokens = new RecordingTokenGenerator();
-        var audit = new RecordingAuditWriter();
-        store.Add(new RotatableSession(
-            ChainId, null, tokens.ComputeHash(PreLoginToken), SessionPrivilegeLevel.PreAuthentication,
-            Now.AddMinutes(-5), AbsoluteExpiry));
-        var service = new SessionRotationService(
-            new ExpiresBeforeRotationStore(store), tokens, audit, new FixedTimeProvider(Now));
+        var fixture = new Fixture();
+        fixture.Seed(PreLoginToken, subjectId: null, SessionPrivilegeLevel.PreAuthentication);
+        fixture.Faults.ReportExpiredOnRotate = true;
 
-        var result = await service.RotateAsync(LoginRequest(PreLoginToken));
+        var result = await fixture.Service.RotateAsync(LoginRequest(PreLoginToken));
 
         Assert.Multiple(() =>
         {
             Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.SessionExpired));
             Assert.That(result.NewToken, Is.Null);
-            Assert.That(audit.Entries.Single().Outcome, Is.EqualTo(SessionRotationCodes.SessionExpired));
+            Assert.That(fixture.Audit.Entries.Single().Outcome, Is.EqualTo(SessionRotationCodes.SessionExpired));
         });
     }
 
@@ -211,9 +206,120 @@ public sealed class SessionRotationServiceTests
             Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.AuditFailed));
             Assert.That(result.NewToken, Is.Null);
             Assert.That(failingAudit.Attempts, Is.EqualTo(1));
-            Assert.That(await fixture.IsActiveAsync(PreLoginToken), Is.False);
-            Assert.That(await fixture.IsActiveAsync(issuedToken), Is.False);
+            Assert.That(await fixture.ActiveTokensOfChainAsync(), Is.Empty);
+            Assert.That((await fixture.FindAsync(issuedToken))?.IsRevoked, Is.True);
         });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenAuditWriterThrows_ReturnsAuditFailedAndNoSessionOfChainIsActive()
+    {
+        var throwingAudit = new ThrowingAuditWriter(new InvalidOperationException("Simulated audit outage."));
+        var fixture = new Fixture(throwingAudit);
+        fixture.Seed(PreLoginToken, subjectId: null, SessionPrivilegeLevel.PreAuthentication);
+
+        var result = await fixture.Service.RotateAsync(LoginRequest(PreLoginToken));
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.AuditFailed));
+            Assert.That(result.NewToken, Is.Null);
+            Assert.That(throwingAudit.Attempts, Is.EqualTo(1));
+            Assert.That(await fixture.ActiveTokensOfChainAsync(), Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenCancelledDuringAudit_ThrowsAndNoSessionOfChainIsActive()
+    {
+        var fixture = new Fixture(new ThrowingAuditWriter(new OperationCanceledException()));
+        fixture.Seed(PreLoginToken, subjectId: null, SessionPrivilegeLevel.PreAuthentication);
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await fixture.Service.RotateAsync(LoginRequest(PreLoginToken)));
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(await fixture.ActiveTokensOfChainAsync(), Is.Empty);
+            Assert.That(fixture.Faults.RevokeChainCalls, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenChainRevocationAlsoFails_ReturnsAuditFailedAndNoSessionOfChainIsActive()
+    {
+        var fixture = new Fixture(new FailingAuditWriter());
+        fixture.Seed(PreLoginToken, subjectId: null, SessionPrivilegeLevel.PreAuthentication);
+        fixture.Faults.ThrowOnRevokeChain = true;
+
+        var result = await fixture.Service.RotateAsync(LoginRequest(PreLoginToken));
+
+        var replacement = await fixture.FindAsync(fixture.Tokens.Issued.Single().Value);
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.AuditFailed));
+            Assert.That(fixture.Faults.RevokeChainCalls, Is.EqualTo(1));
+            Assert.That(replacement?.IsPendingActivation, Is.True);
+            Assert.That(await fixture.ActiveTokensOfChainAsync(), Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenActivationThrows_ThrowsAndNoSessionOfChainIsActive()
+    {
+        var fixture = new Fixture();
+        fixture.Seed(PreLoginToken, subjectId: null, SessionPrivilegeLevel.PreAuthentication);
+        fixture.Faults.ThrowOnActivate = true;
+
+        Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await fixture.Service.RotateAsync(LoginRequest(PreLoginToken)));
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(await fixture.ActiveTokensOfChainAsync(), Is.Empty);
+            Assert.That(fixture.Faults.RevokeChainCalls, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenChainIsRevokedBeforeActivation_ReturnsRotationConflictAndAuditsIt()
+    {
+        var fixture = new Fixture();
+        fixture.Seed(PreLoginToken, subjectId: null, SessionPrivilegeLevel.PreAuthentication);
+        fixture.Faults.RevokeChainBeforeActivate = true;
+
+        var result = await fixture.Service.RotateAsync(LoginRequest(PreLoginToken));
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.RotationConflict));
+            Assert.That(result.NewToken, Is.Null);
+            Assert.That(
+                fixture.Audit.Entries.Select(entry => entry.Outcome),
+                Is.EqualTo(new[] { SessionRotationCodes.Rotated, SessionRotationCodes.RotationConflict }));
+            Assert.That(await fixture.ActiveTokensOfChainAsync(), Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenAuditWriterThrowsOnRejection_StillReturnsRejection()
+    {
+        var fixture = new Fixture(new ThrowingAuditWriter(new InvalidOperationException("Simulated audit outage.")));
+
+        var result = await fixture.Service.RotateAsync(LoginRequest("unknown-token"));
+
+        Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.SessionNotFound));
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenTokenBelongsToPendingReplacement_ReturnsSessionNotFound()
+    {
+        var fixture = new Fixture();
+        fixture.Seed(PreLoginToken, UserA, SessionPrivilegeLevel.Authenticated, isPendingActivation: true);
+
+        var result = await fixture.Service.RotateAsync(LoginRequest(PreLoginToken));
+
+        Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.SessionNotFound));
     }
 
     [Test]
@@ -357,39 +463,18 @@ public sealed class SessionRotationServiceTests
     private static RotateSessionRequest LoginRequest(string? token) =>
         new(token, UserA, RotationTrigger.Login, SessionPrivilegeLevel.Authenticated, CorrelationId);
 
-    /// <summary>
-    /// Simulates a session that reaches its absolute expiry between FindAsync and RotateAsync:
-    /// the store reports Expired from its atomic check.
-    /// </summary>
-    private sealed class ExpiresBeforeRotationStore(InMemorySessionRotationStore inner) : ISessionRotationStore
-    {
-        public ValueTask<RotatableSession?> FindAsync(
-            string tokenHash, CancellationToken cancellationToken = default)
-            => inner.FindAsync(tokenHash, cancellationToken);
-
-        public ValueTask<SessionRotationStoreStatus> RotateAsync(
-            string oldTokenHash, RotatableSession replacement, DateTimeOffset now,
-            CancellationToken cancellationToken = default)
-            => ValueTask.FromResult(SessionRotationStoreStatus.Expired);
-
-        public ValueTask<int> RevokeChainAsync(
-            Guid chainId, DateTimeOffset now, CancellationToken cancellationToken = default)
-            => inner.RevokeChainAsync(chainId, now, cancellationToken);
-
-        public ValueTask<int> RevokeAllForSubjectAsync(
-            string subjectId, DateTimeOffset now, CancellationToken cancellationToken = default)
-            => inner.RevokeAllForSubjectAsync(subjectId, now, cancellationToken);
-    }
-
     private sealed class Fixture
     {
         public Fixture(ISessionSecurityAuditWriter? auditWriter = null, DateTimeOffset? now = null)
         {
+            Faults = new FaultInjectingSessionRotationStore(Store);
             Service = new SessionRotationService(
-                Store, Tokens, auditWriter ?? Audit, new FixedTimeProvider(now ?? Now));
+                Faults, Tokens, auditWriter ?? Audit, new FixedTimeProvider(now ?? Now));
         }
 
         public InMemorySessionRotationStore Store { get; } = new();
+
+        public FaultInjectingSessionRotationStore Faults { get; }
 
         public RecordingTokenGenerator Tokens { get; } = new();
 
@@ -397,11 +482,16 @@ public sealed class SessionRotationServiceTests
 
         public SessionRotationService Service { get; }
 
-        public RotatableSession Seed(string token, string? subjectId, SessionPrivilegeLevel level)
+        private List<string> SeededTokens { get; } = [];
+
+        public RotatableSession Seed(
+            string token, string? subjectId, SessionPrivilegeLevel level, bool isPendingActivation = false)
         {
             var session = new RotatableSession(
-                ChainId, subjectId, Tokens.ComputeHash(token), level, Now.AddMinutes(-5), AbsoluteExpiry);
+                ChainId, subjectId, Tokens.ComputeHash(token), level, Now.AddMinutes(-5), AbsoluteExpiry,
+                IsPendingActivation: isPendingActivation);
             Store.Add(session);
+            SeededTokens.Add(token);
             return session;
         }
 
@@ -409,6 +499,21 @@ public sealed class SessionRotationServiceTests
             string.IsNullOrEmpty(token) ? null : await Store.FindAsync(Tokens.ComputeHash(token));
 
         public async Task<bool> IsActiveAsync(string? token) =>
-            await FindAsync(token) is { IsRevoked: false };
+            await FindAsync(token) is { } session && session.IsActiveAt(Now);
+
+        /// <summary>Every seeded or issued token of the chain that a session check would accept.</summary>
+        public async Task<IReadOnlyList<string>> ActiveTokensOfChainAsync()
+        {
+            var active = new List<string>();
+            foreach (var token in SeededTokens.Concat(Tokens.Issued.Select(issued => issued.Value)))
+            {
+                if (await IsActiveAsync(token))
+                {
+                    active.Add(token);
+                }
+            }
+
+            return active;
+        }
     }
 }

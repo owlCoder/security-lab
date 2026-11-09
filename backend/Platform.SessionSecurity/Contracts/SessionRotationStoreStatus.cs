@@ -4,10 +4,15 @@ namespace Platform.SessionSecurity.Contracts;
 /// <summary>IDN-11: result of one atomic <see cref="ISessionRotationStore.RotateAsync"/> call.</summary>
 public enum SessionRotationStoreStatus
 {
-    /// <summary>The old session was revoked and the replacement stored, in one step.</summary>
+    /// <summary>
+    /// The old session was revoked and the replacement stored as pending activation, in one step.
+    /// </summary>
     Rotated = 0,
 
-    /// <summary>No session has the given token hash. Nothing was changed.</summary>
+    /// <summary>
+    /// No session has the given token hash, or the session is still pending activation. Nothing
+    /// was changed.
+    /// </summary>
     NotFound = 1,
 
     /// <summary>

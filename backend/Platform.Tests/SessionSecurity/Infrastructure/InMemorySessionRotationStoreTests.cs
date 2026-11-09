@@ -9,6 +9,7 @@ namespace Platform.Tests.SessionSecurity.Infrastructure;
 public sealed class InMemorySessionRotationStoreTests
 {
     private const string OldHash = "OLD-HASH";
+    private const string NewHash = "NEW-HASH";
     private const string UserA = "user-a";
     private const int ConcurrentCalls = 50;
 
@@ -23,7 +24,7 @@ public sealed class InMemorySessionRotationStoreTests
         store.Add(Session(ChainA, OldHash));
 
         var statuses = await Task.WhenAll(Enumerable.Range(0, ConcurrentCalls).Select(index =>
-            Task.Run(async () => await store.RotateAsync(OldHash, Session(ChainA, $"NEW-{index}"), Now))));
+            Task.Run(async () => await store.RotateAsync(OldHash, Replacement(ChainA, $"NEW-{index}"), Now))));
 
         Assert.Multiple(() =>
         {
@@ -35,20 +36,21 @@ public sealed class InMemorySessionRotationStoreTests
     }
 
     [Test]
-    public async Task RotateAsync_WhenRotated_RevokesOldAndStoresReplacement()
+    public async Task RotateAsync_WhenRotated_RevokesOldAndStoresReplacementAsPending()
     {
         var store = new InMemorySessionRotationStore();
         store.Add(Session(ChainA, OldHash));
 
-        var status = await store.RotateAsync(OldHash, Session(ChainA, "NEW"), Now);
+        var status = await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
 
         var old = await store.FindAsync(OldHash);
-        var replacement = await store.FindAsync("NEW");
+        var replacement = await store.FindAsync(NewHash);
         Assert.Multiple(() =>
         {
             Assert.That(status, Is.EqualTo(SessionRotationStoreStatus.Rotated));
             Assert.That(old?.RevokedAt, Is.EqualTo(Now));
-            Assert.That(replacement?.IsRevoked, Is.False);
+            Assert.That(replacement?.IsPendingActivation, Is.True);
+            Assert.That(replacement?.IsActiveAt(Now), Is.False);
         });
     }
 
@@ -57,12 +59,28 @@ public sealed class InMemorySessionRotationStoreTests
     {
         var store = new InMemorySessionRotationStore();
 
-        var status = await store.RotateAsync(OldHash, Session(ChainA, "NEW"), Now);
+        var status = await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
 
         await Assert.MultipleAsync(async () =>
         {
             Assert.That(status, Is.EqualTo(SessionRotationStoreStatus.NotFound));
-            Assert.That(await store.FindAsync("NEW"), Is.Null);
+            Assert.That(await store.FindAsync(NewHash), Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenOldSessionIsPendingActivation_ReturnsNotFoundAndChangesNothing()
+    {
+        var store = new InMemorySessionRotationStore();
+        store.Add(Replacement(ChainA, OldHash));
+
+        var status = await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(status, Is.EqualTo(SessionRotationStoreStatus.NotFound));
+            Assert.That(await store.FindAsync(NewHash), Is.Null);
+            Assert.That((await store.FindAsync(OldHash))?.IsRevoked, Is.False);
         });
     }
 
@@ -72,12 +90,12 @@ public sealed class InMemorySessionRotationStoreTests
         var store = new InMemorySessionRotationStore();
         store.Add(Session(ChainA, OldHash) with { RevokedAt = Now.AddMinutes(-1) });
 
-        var status = await store.RotateAsync(OldHash, Session(ChainA, "NEW"), Now);
+        var status = await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
 
         await Assert.MultipleAsync(async () =>
         {
             Assert.That(status, Is.EqualTo(SessionRotationStoreStatus.AlreadyRevoked));
-            Assert.That(await store.FindAsync("NEW"), Is.Null);
+            Assert.That(await store.FindAsync(NewHash), Is.Null);
         });
     }
 
@@ -88,12 +106,12 @@ public sealed class InMemorySessionRotationStoreTests
         var old = Session(ChainA, OldHash);
         store.Add(old);
 
-        var status = await store.RotateAsync(OldHash, Session(ChainA, "NEW"), old.AbsoluteExpiresAt);
+        var status = await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), old.AbsoluteExpiresAt);
 
-        Assert.Multiple(async () =>
+        await Assert.MultipleAsync(async () =>
         {
             Assert.That(status, Is.EqualTo(SessionRotationStoreStatus.Expired));
-            Assert.That(await store.FindAsync("NEW"), Is.Null);
+            Assert.That(await store.FindAsync(NewHash), Is.Null);
             Assert.That((await store.FindAsync(OldHash))?.IsRevoked, Is.False);
         });
     }
@@ -106,17 +124,88 @@ public sealed class InMemorySessionRotationStoreTests
         var store = new InMemorySessionRotationStore();
         var old = Session(ChainA, OldHash);
         store.Add(old);
-        var replacement = Session(changeChain ? ChainB : ChainA, "NEW") with
+        var replacement = Replacement(changeChain ? ChainB : ChainA, NewHash) with
         {
             AbsoluteExpiresAt = extendExpiry ? old.AbsoluteExpiresAt.AddHours(1) : old.AbsoluteExpiresAt,
         };
 
         Assert.ThrowsAsync<ArgumentException>(async () => await store.RotateAsync(OldHash, replacement, Now));
 
-        Assert.Multiple(async () =>
+        await AssertUnchangedAsync(store);
+    }
+
+    [Test]
+    public async Task RotateAsync_WhenReplacementIsNotPendingActivation_ThrowsAndChangesNothing()
+    {
+        var store = new InMemorySessionRotationStore();
+        store.Add(Session(ChainA, OldHash));
+
+        Assert.ThrowsAsync<ArgumentException>(
+            async () => await store.RotateAsync(OldHash, Session(ChainA, NewHash), Now));
+
+        await AssertUnchangedAsync(store);
+    }
+
+    [Test]
+    public async Task ActivateAsync_WhenReplacementIsPending_MakesItActive()
+    {
+        var store = new InMemorySessionRotationStore();
+        store.Add(Session(ChainA, OldHash));
+        await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
+
+        var activated = await store.ActivateAsync(NewHash, Now);
+
+        var replacement = await store.FindAsync(NewHash);
+        Assert.Multiple(() =>
         {
-            Assert.That(await store.FindAsync("NEW"), Is.Null);
-            Assert.That((await store.FindAsync(OldHash))?.IsRevoked, Is.False);
+            Assert.That(activated, Is.True);
+            Assert.That(replacement?.IsActiveAt(Now), Is.True);
+        });
+    }
+
+    [TestCase("not pending")]
+    [TestCase("revoked")]
+    [TestCase("expired")]
+    [TestCase("unknown")]
+    public async Task ActivateAsync_WhenSessionCannotBeActivated_ReturnsFalseAndChangesNothing(string state)
+    {
+        var store = new InMemorySessionRotationStore();
+        var session = state switch
+        {
+            "not pending" => Session(ChainA, NewHash),
+            "revoked" => Replacement(ChainA, NewHash) with { RevokedAt = Now.AddMinutes(-1) },
+            _ => Replacement(ChainA, NewHash),
+        };
+        if (state != "unknown")
+        {
+            store.Add(session);
+        }
+
+        var activateAt = state == "expired" ? session.AbsoluteExpiresAt : Now;
+
+        var activated = await store.ActivateAsync(NewHash, activateAt);
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(activated, Is.False);
+            Assert.That(await store.FindAsync(NewHash), Is.EqualTo(state == "unknown" ? null : session));
+        });
+    }
+
+    [Test]
+    public async Task ActivateAsync_WhenChainWasRevokedAfterRotation_ReturnsFalse()
+    {
+        var store = new InMemorySessionRotationStore();
+        store.Add(Session(ChainA, OldHash));
+        await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
+        await store.RevokeChainAsync(ChainA, Now);
+
+        var activated = await store.ActivateAsync(NewHash, Now);
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(activated, Is.False);
+            Assert.That((await store.FindAsync(NewHash))?.IsActiveAt(Now), Is.False);
         });
     }
 
@@ -129,7 +218,7 @@ public sealed class InMemorySessionRotationStoreTests
 
         var revokedAgain = await store.RevokeChainAsync(ChainA, Now.AddMinutes(5));
 
-        Assert.Multiple(async () =>
+        await Assert.MultipleAsync(async () =>
         {
             Assert.That(revokedAgain, Is.Zero);
             Assert.That((await store.FindAsync(OldHash))?.RevokedAt, Is.EqualTo(Now));
@@ -137,7 +226,7 @@ public sealed class InMemorySessionRotationStoreTests
     }
 
     [Test]
-    public async Task RevokeChainAsync_RevokesOnlyActiveSessionsOfThatChain()
+    public async Task RevokeChainAsync_RevokesOnlySessionsOfThatChain()
     {
         var store = new InMemorySessionRotationStore();
         store.Add(Session(ChainA, "A-1"));
@@ -156,19 +245,37 @@ public sealed class InMemorySessionRotationStoreTests
     }
 
     [Test]
+    public async Task RevokeChainAsync_RevokesPendingReplacementSoItCanNeverBeActivated()
+    {
+        var store = new InMemorySessionRotationStore();
+        store.Add(Session(ChainA, OldHash));
+        await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
+
+        var revoked = await store.RevokeChainAsync(ChainA, Now);
+
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(revoked, Is.EqualTo(1));
+            Assert.That((await store.FindAsync(NewHash))?.IsRevoked, Is.True);
+            Assert.That(await store.ActivateAsync(NewHash, Now), Is.False);
+        });
+    }
+
+    [Test]
     public async Task RevokeAllForSubjectAsync_RevokesSessionsCreatedByRotation()
     {
         var store = new InMemorySessionRotationStore();
         store.Add(Session(ChainA, OldHash));
         store.Add(Session(ChainB, "OTHER-USER") with { SubjectId = "user-b" });
-        await store.RotateAsync(OldHash, Session(ChainA, "NEW"), Now);
+        await store.RotateAsync(OldHash, Replacement(ChainA, NewHash), Now);
+        await store.ActivateAsync(NewHash, Now);
 
         var revoked = await store.RevokeAllForSubjectAsync(UserA, Now);
 
         await Assert.MultipleAsync(async () =>
         {
             Assert.That(revoked, Is.EqualTo(1));
-            Assert.That((await store.FindAsync("NEW"))?.IsRevoked, Is.True);
+            Assert.That((await store.FindAsync(NewHash))?.IsRevoked, Is.True);
             Assert.That((await store.FindAsync("OTHER-USER"))?.IsRevoked, Is.False);
         });
     }
@@ -182,6 +289,18 @@ public sealed class InMemorySessionRotationStoreTests
         Assert.Throws<InvalidOperationException>(() => store.Add(Session(ChainB, OldHash)));
     }
 
+    private static async Task AssertUnchangedAsync(InMemorySessionRotationStore store)
+    {
+        await Assert.MultipleAsync(async () =>
+        {
+            Assert.That(await store.FindAsync(NewHash), Is.Null);
+            Assert.That((await store.FindAsync(OldHash))?.IsRevoked, Is.False);
+        });
+    }
+
     private static RotatableSession Session(Guid chainId, string tokenHash) =>
         new(chainId, UserA, tokenHash, SessionPrivilegeLevel.Authenticated, Now, Now.AddHours(8));
+
+    private static RotatableSession Replacement(Guid chainId, string tokenHash) =>
+        Session(chainId, tokenHash) with { IsPendingActivation = true };
 }

@@ -122,6 +122,21 @@ public sealed class ContractsTests
     }
 
     [Test]
+    public void RotatableSession_IsActiveAt_IsTrueOnlyWhenNotRevokedNotPendingAndNotExpired()
+    {
+        var active = new RotatableSession(
+            ChainId, "user-a", TokenHash, SessionPrivilegeLevel.Authenticated, Now, Now.AddHours(8));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(active.IsActiveAt(Now), Is.True);
+            Assert.That((active with { IsPendingActivation = true }).IsActiveAt(Now), Is.False);
+            Assert.That((active with { RevokedAt = Now }).IsActiveAt(Now), Is.False);
+            Assert.That(active.IsActiveAt(active.AbsoluteExpiresAt), Is.False);
+        });
+    }
+
+    [Test]
     public void LoginHistoryLimits_DefaultsAreWithinMaximums()
     {
         Assert.Multiple(() =>
