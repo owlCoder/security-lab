@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using NUnit.Framework;
 using Platform.Audit.Application;
@@ -152,6 +154,47 @@ public sealed class PostgresAuditEventStoreTests
 
         Assert.That((await new PostgresAuditEventStore(nextContext).FindAsync(record.Id))!
             .HasSameContentAs(record), Is.True);
+    }
+
+    [TestCase("UPDATE audit.audit_events SET outcome = 'Failure' WHERE id = @id")]
+    [TestCase("DELETE FROM audit.audit_events WHERE id = @id")]
+    public async Task Trigger_RejectsHistoryChangesEvenForTableOwner(string sql)
+    {
+        var record = NewEvent();
+        await using var context = OpenContext();
+        await new PostgresAuditEventStore(context).AppendAsync(record);
+        await using var connection = new NpgsqlConnection(context.Database.GetConnectionString());
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("id", record.Id);
+        var error = Assert.ThrowsAsync<PostgresException>(async () => await command.ExecuteNonQueryAsync());
+        Assert.That(error!.SqlState, Is.EqualTo("55000"));
+        await transaction.RollbackAsync();
+        await using var readContext = OpenContext();
+        Assert.That((await new PostgresAuditEventStore(readContext).FindAsync(record.Id))!
+            .HasSameContentAs(record), Is.True);
+    }
+
+    [Test]
+    public async Task UpgradeFromInitialSchema_PreservesHistoryAndEnablesTrigger()
+    {
+        await using var context = OpenContext();
+        var migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync("20261104182110_InitialAudit");
+        var record = NewEvent();
+        await new PostgresAuditEventStore(context).AppendAsync(record);
+        await migrator.MigrateAsync();
+        await using var next = OpenContext();
+        Assert.That((await new PostgresAuditEventStore(next).FindAsync(record.Id))!
+            .HasSameContentAs(record), Is.True);
+        await using var connection = new NpgsqlConnection(next.Database.GetConnectionString());
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT tgenabled = 'A' FROM pg_trigger
+            WHERE tgrelid = 'audit.audit_events'::regclass AND tgname = 'audit_events_append_only'
+            """, connection);
+        Assert.That(await command.ExecuteScalarAsync(), Is.EqualTo(true));
     }
 
     [Test]
