@@ -1,6 +1,7 @@
-%% ASN-04 / ASN-06, tim 15, celina 5 (Audit i API) - dijagram arhitekture
+%% ASN-04 / ASN-06, tim 15, celina 5 (Audit i API) - dijagram arhitekture, produkciona kompozicija
 flowchart TB
   classDef mine fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#0f172a
+  classDef wired fill:#e0e7ff,stroke:#4338ca,stroke-width:2px,stroke-dasharray:5 3,color:#0f172a
   classDef team fill:#f1f5f9,stroke:#64748b,color:#0f172a
   classDef other fill:#fef3c7,stroke:#b45309,color:#0f172a
   classDef store fill:#ffffff,stroke:#334155,color:#0f172a
@@ -15,57 +16,96 @@ flowchart TB
       CORR --> ACM --> SESS
     end
 
-    subgraph MINE["Celina 5: Modules/Assignments (moj deo)"]
+    subgraph MINE["Celina 5: Modules/Assignments/Api + Audit (moj deo)"]
       CTRL["AssignmentsController<br/>POST /attempts (ASN-04)<br/>POST /deadline-extensions (ASN-06)"]:::mine
       CALLER["AssignmentCaller<br/>akter = korisnik iz sesije + aktivan nalog"]:::mine
       SAH["StartAttemptApiHandler<br/>mapiranje ishoda + audit ASN-04"]:::mine
       EAH["ExtendDeadlineApiHandler<br/>validacija roka + mapiranje ishoda"]:::mine
-      ADAPT["DeadlineExtensionAuditAdapter<br/>implementira IDeadlineExtensionAuditWriter"]:::mine
-      WRITER["AssignmentAuditWriter<br/>IAssignmentAuditWriter"]:::mine
-      CTX["SessionAssignmentAuditContextProvider<br/>akter + korelacioni ID"]:::mine
+      ADAPT["DeadlineExtensionAuditAdapter<br/>IDeadlineExtensionAuditWriter"]:::mine
+      WRITER["AssignmentAuditWriter<br/>akter, radnja, vreme, ishod, korelacioni ID"]:::mine
       MAP["AssignmentAuditDraftMapper<br/>allowlist, bez tajni"]:::mine
-      COMP["AddAssignmentsApi()<br/>DI + fail-closed podrazumevani portovi"]:::mine
-      CHECK["AssignmentsCompositionCheck<br/>log nepovezanih portova pri startu"]:::mine
-      COMP --> CHECK
       CTRL --> CALLER
       CTRL --> SAH
       CTRL --> EAH
       SAH -.->|"posle odluke, best-effort"| WRITER
-      ADAPT -->|"AssignmentAuditDraft"| WRITER
-      WRITER --> CTX
+      ADAPT --> WRITER
       WRITER --> MAP
+    end
+
+    subgraph COMPOSE["Celina 5: Composition (produkciono povezivanje)"]
+      COMP["AddAssignmentsApi()<br/>fail-closed podrazumevani portovi (TryAdd)"]:::mine
+      ACCW["AddAssignmentsAccessAuthorization()<br/>uvek"]:::mine
+      PGW["AddAssignmentsPostgres()<br/>kada postoji ConnectionStrings:Assignments"]:::mine
+      CHECK["AssignmentsCompositionCheck<br/>log nepovezanih portova (Error van Dev)"]:::mine
+    end
+
+    subgraph INTEG["Modules/Assignments/Integration (portovi člana 4, uz dozvolu)"]
+      GATE["AssignmentAccessGate<br/>port -> AccessRequest"]:::wired
+      SAA["AccessDecisionStartAttemptAuthorization<br/>attempt.create"]:::wired
+      DEA["AccessDecisionDeadlineExtensionAuthorization<br/>assignment.manage"]:::wired
+      ENR["MembershipCourseEnrollmentCheck<br/>aktivan Student na kursu"]:::wired
+      RES["AssignmentResourceDescriptorResolver<br/>assignment -> kurs iz skladišta (dekorater)"]:::wired
+      SAA --> GATE
+      DEA --> GATE
+    end
+
+    subgraph PERS["Modules/Assignments/Persistence (portovi člana 1, uz dozvolu)"]
+      REPO["PostgresAssignmentRepository"]:::wired
+      ATT["PostgresAttemptStore<br/>FOR UPDATE brojač, idempotentnost"]:::wired
+      DLS["PostgresDeadlineExtensionStore<br/>rok + audit u 1 transakciji / outbox"]:::wired
+      MIG["AssignmentsDatabase<br/>verzionisane migracije + dev seed"]:::wired
     end
   end
 
-  subgraph ASN["Platform.Assignments (ostali članovi tima 15)"]
+  subgraph ASN["Platform.Assignments (članovi 1-3)"]
     SAS["StartAttemptService<br/>član 2, ASN-04"]:::team
     EDS["ExtendDeadlineService<br/>član 3, ASN-06"]:::team
-    PORTS1["IAssignmentRepository, IAttemptStore,<br/>IDeadlineExtensionStore<br/>član 1 (baza)"]:::team
-    PORTS4["IStartAttemptAuthorization,<br/>IDeadlineExtensionAuthorization,<br/>ICourseEnrollmentCheck<br/>član 4 (autorizacija)"]:::team
-    SAS --> PORTS1
-    SAS --> PORTS4
-    EDS --> PORTS1
-    EDS --> PORTS4
+    DOM["Assignment, StudentDeadlineOverride<br/>član 1 (domen)"]:::team
+  end
+
+  subgraph ACCESS["Platform.Access (tim 3, ACC-05)"]
+    DEC["IAccessDecision<br/>DefaultDenyAccessDecision"]:::other
+    POL["CourseRoleAccessPolicy<br/>katalog radnji"]:::other
+    MEM["IMembershipReader<br/>izvor članstva"]:::other
+    DEC --> POL --> MEM
   end
 
   subgraph AUD["Platform.Audit (tim 12, AUD-01/AUD-06)"]
     TAW["ITrustedAuditWriter<br/>katalog + validacija"]:::other
-    AUDDB[("audit.events<br/>append-only")]:::store
-    TAW --> AUDDB
+    TXW["ITransactionalAuditWriter<br/>u transakciji pozivaoca"]:::other
   end
 
   IDN["IIdentityContext + IAccountStatusReader<br/>Identity (IDN-02/IDN-03)"]:::other
-  LOG[("Tehnički log<br/>ILogger, bez tajni")]:::store
+  PG[("PostgreSQL<br/>šema assignments + audit")]:::store
+  LOG[("Tehnički log<br/>bez tajni")]:::store
 
   CLIENT -->|HTTPS| CORR
   SESS --> CTRL
   CALLER --> IDN
-  CTX --> IDN
-  CTX -->|"ICorrelationContext"| CORR
-  SAH -->|"StartAttemptAsync(actorId, ...)"| SAS
-  EAH -->|"ExtendDeadlineAsync(actorId, ...)"| EDS
+  SAH -->|"StartAttemptAsync"| SAS
+  EAH -->|"ExtendDeadlineAsync"| EDS
+  SAS --> REPO
+  SAS --> ATT
+  SAS --> SAA
+  EDS --> REPO
+  EDS --> DEA
+  EDS --> ENR
+  EDS --> DLS
   EDS -.->|"Denied / Failure"| ADAPT
+  GATE --> DEC
+  GATE --> IDN
+  POL --> RES
+  RES --> REPO
+  ENR --> MEM
+  REPO --> DOM
+  REPO --> PG
+  ATT --> PG
+  DLS --> PG
+  DLS -->|"Success, ista transakcija"| TXW
+  TXW --> PG
+  MIG --> PG
   WRITER -->|"AuditEventDraft + AuditContext"| TAW
   WRITER -->|"zapis + alarm"| LOG
-  COMP -.->|"TryAdd"| PORTS1
-  COMP -.->|"TryAdd"| PORTS4
+  COMP -.-> CHECK
+  ACCW -.->|"Replace"| INTEG
+  PGW -.->|"Replace"| PERS

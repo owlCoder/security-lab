@@ -28,10 +28,17 @@ AUD-01 (zapis ima akter, događaj, vreme i ishod), AUD-03 (bez tajni), AUD-04 (k
 - `DeadlineExtensionAuditAdapter`: implementacija porta `IDeadlineExtensionAuditWriter` koji je definisao član 3.
 - `AddAssignmentsApi()`: DI; portovi članova 1 i 4 dobijaju **fail-closed** podrazumevane implementacije
   (`TryAdd`), pa host radi i pre njihovih adaptera, a sve se odbija.
+- **Produkciono povezivanje portova** (odgovor na review PR-a, uz dozvolu članova 1 i 4):
+  `AddAssignmentsAccessAuthorization()` (autorizacija preko `IAccessDecision`) i `AddAssignmentsPostgres()`
+  (PostgreSQL skladišta), sa integracionim testovima stvarnih adaptera. Vidi odeljak „Produkciono povezivanje portova”.
 
 **Moj deo NE radi** (da ne bi ulazio u tuđi posao): logiku limita i dostupnosti (član 2), pravila roka
-(član 3), bazu i transakciju za uspešno produženje (član 1), odluku o pravima (član 4), Audit katalog,
-skladište i čitanje audita (AUD-01/AUD-06, tim 12). Audit modul se samo poziva preko njegovog javnog ugovora.
+(član 3), domenske entitete (član 1), pravila o pravima i članstvu (Access modul, tim 3), Audit katalog,
+skladište i čitanje audita (AUD-01/AUD-06, tim 12). Audit i Access moduli se samo pozivaju preko javnih ugovora.
+Adapteri u `Modules/Assignments/Integration` i `Modules/Assignments/Persistence` samo **prevode** portove
+članova 1 i 4 na postojeće module (Access, PostgreSQL); ne uvode nova pravila. Napisani su uz dozvolu
+članova 1 i 4 jer review traži stvarne adaptere; ako član 1 ili 4 isporuči svoje, zamena je jedna linija u
+`Program.cs`.
 
 ## Endpointi
 
@@ -115,23 +122,54 @@ naše nacrte čim tim 12 doda tipove. Otvorena tačka iz `ASN-06-contracts.md`: 
   `Idempotency-Key`, rok bez zone/u prošlosti/raniji, nevažeći student ID, student nije upisan, pad skladišta,
   pad audita, prekinut zahtev, ubačene vrednosti nalik tajnama.
 
-## Eksplicitno ograničenje: produkcioni portovi
+## Produkciono povezivanje portova
 
-Produkcione implementacije portova pripadaju članu 1 (`IAssignmentRepository`, `IAttemptStore`,
-`IDeadlineExtensionStore`) i članu 4 (`IStartAttemptAuthorization`, `IDeadlineExtensionAuthorization`,
-`ICourseEnrollmentCheck`) i nisu deo ove celine. Dok ih ne registruju:
+Review: „potvrditi produkciono povezivanje portova skladišta i autorizacije, uz integracione testove stvarnih
+adaptera”. Stanje posle ove izmene:
 
-- `AddAssignmentsApi()` registruje fail-closed podrazumevane implementacije (oznaka `IFailClosedAssignmentPort`):
-  ASN-04 vraća `404`, ASN-06 `403`; ništa se ne čita ni ne menja.
-- `AssignmentsCompositionCheck` pri pokretanju hosta loguje spisak nepovezanih portova (`Warning` u
-  Development, `Error` van njega), pa ograničenje nije tiho.
-- Kada član 1 ili 4 registruje pravi adapter (pre ili posle `AddAssignmentsApi()`), on se koristi umesto
-  podrazumevanog, a provera ga više ne prijavljuje (testovi `CompositionCheck_*`).
+| Port (vlasnik) | Produkcioni adapter | Kada je aktivan |
+|-|-|-|
+| `IStartAttemptAuthorization` (4) | `AccessDecisionStartAttemptAuthorization` → `IAccessDecision`, radnja `attempt.create` | uvek |
+| `IDeadlineExtensionAuthorization` (4) | `AccessDecisionDeadlineExtensionAuthorization` → `IAccessDecision`, radnja `assignment.manage` | uvek |
+| `ICourseEnrollmentCheck` (4) | `MembershipCourseEnrollmentCheck` → `IMembershipReader` (aktivan `Student`) | uvek |
+| (Access) `IResourceDescriptorResolver` | `AssignmentResourceDescriptorResolver`: resurs `assignment` → kurs iz same dodele; ostale tipove prosleđuje prethodnom resolveru | uvek |
+| `IAssignmentRepository` (1) | `PostgresAssignmentRepository` | `ConnectionStrings:Assignments` |
+| `IAttemptStore` (1) | `PostgresAttemptStore`: brojač po (dodela, student) pod `SELECT ... FOR UPDATE`, idempotentnost po `Idempotency-Key`, jedinstveni ključevi u bazi | `ConnectionStrings:Assignments` |
+| `IDeadlineExtensionStore` (1) | `PostgresDeadlineExtensionStore`: optimistička provera prethodnog roka, nova verzija roka (istorija, ASN-19), Success audit u **istoj transakciji** kroz `ITransactionalAuditWriter`; ako ga Audit modul ne primi (tip još nije u katalogu), zapis ide u `assignments.audit_outbox`, takođe u istoj transakciji (Audit odluka D3) | `ConnectionStrings:Assignments` |
+
+**Autorizacija** je povezana bez ikakve konfiguracije: odluku donosi centralni `DefaultDenyAccessDecision`
+(katalog radnji, `CourseRoleAccessPolicy`, podrazumevano odbijanje). Izvor članstva je `IMembershipReader`
+tima 3; dok on u produkciji ne postoji, Access koristi `EmptyMembershipReader` i **sve se odbija**. To nije
+naše ograničenje nego stanje platforme (isto važi za AUD-06 čitanje audita); čim tim 3 registruje pravi
+izvor, ASN-04/ASN-06 rade bez izmene našeg koda.
+
+**Skladišta**: šema `assignments` (verzionisane SQL migracije u `AssignmentsDatabase`). Web host ne migrira
+produkciju automatski (isti princip kao `MigrateAuditDatabaseAsync`); deploy korak je
+`AssignmentsDatabase.MigrateAsync(connectionString)`, a u Development-u to radi `Program.cs` i dodaje jednu demo
+dodelu (`a5500000-0000-4000-8000-000000000015`, demo kurs `aaaaaaaa-…`). Za Success audit u istoj transakciji
+`ConnectionStrings:Assignments` treba da pokazuje na bazu u kojoj je i audit šema; ako nije, zapis ostaje u outbox-u.
+
+Lokalno: u `.env` dodati
+`ConnectionStrings__Assignments=Host=127.0.0.1;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}`
+(ista baza kao Identity, gde Development već primenjuje i audit šemu), pa pokrenuti API.
+
+**Bez konfiguracije baze** skladišta ostaju fail-closed (ASN-04 `404`, ASN-06 `403`, ništa se ne čita ni
+menja), a `AssignmentsCompositionCheck` pri startu loguje `IAssignmentRepository, IAttemptStore,
+IDeadlineExtensionStore` (Error van Development-a). Fail-closed je dakle samo rezervni režim pogrešne
+konfiguracije, ne isporučeni scope.
+
+Otvoreno (nije deo ove celine): relay koji isporučuje redove iz `assignments.audit_outbox` u Audit modul čim
+tim 12 doda `assignment.*` tipove u katalog; `Assignment.CourseId` (string) i Access/Audit kurs (Guid) — kurs koji
+nije GUID se odbija (fail-closed).
 
 ## Dokaz rada
 
-- **Fajlovi:** `backend/Platform.Api/Modules/Assignments/**` (novo, uključujući `AssignmentsCompositionCheck`), `backend/Platform.Api/Program.cs`
-  (+2 linije), `backend/Platform.Api/Platform.Api.csproj` (+referenca na `Platform.Assignments`),
+- **Fajlovi:** `backend/Platform.Api/Modules/Assignments/**` (novo, uključujući `AssignmentsCompositionCheck`,
+  `Composition/AssignmentsProductionPortsExtensions.cs`, `Integration/**`, `Persistence/**`), `backend/Platform.Api/Program.cs`
+  (povezivanje portova i Development migracija),
+  `backend/Platform.Tests/AssignmentsIntegration/**` (integracioni testovi stvarnih adaptera),
+  `backend/Platform.Tests/Platform.Tests.csproj` (+`Testcontainers.PostgreSql`), `.github/workflows/ci.yml` (provera da su
+  PostgreSQL testovi zaista prošli), `backend/Platform.Api/Platform.Api.csproj` (+referenca na `Platform.Assignments`),
   `backend/Platform.Access.Tests/ApiEndpointCoverageTests.cs` (+2 rute u inventar),
   `backend/Platform.Tests/AssignmentsAuditApi/**` (testovi), `docs/components/assignments-audit-api/**`.
 - **Pokretanje testova:**
@@ -140,14 +178,27 @@ Produkcione implementacije portova pripadaju članu 1 (`IAssignmentRepository`, 
   dotnet test backend/SecurityLab.slnx --configuration Release --no-build
   ```
   Samo moji testovi: `dotnet test backend/Platform.Tests/Platform.Tests.csproj --configuration Release --no-build --filter "FullyQualifiedName~AssignmentsAuditApi"`
-- **Testovi (94 slučaja, NUnit):** `AssignmentAuditDraftMapperTests` 20, `AssignmentAuditWriterTests` 10,
+- **Testovi (NUnit):** `AssignmentAuditDraftMapperTests` 20, `AssignmentAuditWriterTests` 10,
   `DeadlineExtensionAuditAdapterTests` 8, `StartAttemptApiHandlerTests` 17, `ExtendDeadlineApiHandlerTests` 21,
-  `AssignmentsHttpTests` 18 (ceo HTTP pipeline preko `WebApplicationFactory<Program>`). Portovi članova 1 i 4 i
-  Audit skladište su test dvojnici; pravi `StartAttemptService` i `ExtendDeadlineService` se koriste.
+  `AssignmentsHttpTests` 18 (ceo HTTP pipeline preko `WebApplicationFactory<Program>`, portovi su dvojnici).
+  **Integracioni testovi stvarnih adaptera** (`Platform.Tests/AssignmentsIntegration`):
+  - `AccessAuthorizationAdapterTests` — pravi Access modul (`AddAccessControl`): student/nastavnik/asistent/
+    drugi kurs/blokiran/bivši član/nepoznat nalog, kurs iz skladišta a ne od pozivaoca, ne-GUID kurs, pad
+    skladišta i članstva, produkciono prazno članstvo (sve odbijeno), dekorisanje resolvera. Ne treba baza.
+  - `PostgresAssignmentStoresTests` — prava PostgreSQL baza: migracije, CHECK ograničenja, repozitorijum,
+    limit pod 25 istovremenih zahteva, idempotentnost (i pod konkurencijom), rok: istorija, zastareo prethodni
+    rok, dva istovremena produženja, audit u transakciji / outbox / pad audita, bez tajni u outbox-u.
+  - `AssignmentsProductionCompositionHttpTests` — `Program` sa produkcionom kompozicijom (Access + PostgreSQL +
+    `PostgresTransactionalAuditWriter`): svi portovi su pravi adapteri, 201/409/idempotentnost i limit pod
+    konkurencijom kroz HTTP, isti 404, 403 za studenta/drugi kurs/autsajdera bez upisa, 409 za neupisanog,
+    drugi rok mora biti posle sačuvanog.
+  PostgreSQL testovi koriste `AUDIT_TEST_ADMIN_CONNECTION_STRING` (CI, `scripts/audit/test-postgres.ps1`) ili
+  Docker (Testcontainers); svaki fixture pravi i briše svoju bazu. Bez oba su `Ignored` lokalno, a CI korak
+  „Verify ASN-04/ASN-06 PostgreSQL adapter tests ran and passed” pada ako nisu prošli.
 - **Demonstracija (KT1):** pokrenuti `AssignmentsHttpTests` i pokazati: 401 bez sesije, 201 i audit sa akterom i
   istim `X-Correlation-ID`, 409 iznad limita, isti 404 za tuđu i nepostojeću dodelu, 403 za studenta na ASN-06
   iako u telu šalje `actorId` nastavnika.
-- **Sledeći koraci i zavisnosti:** tim 12 dodaje `assignment.*` u katalog; član 1 upisuje Success u transakciji
-  i registruje PostgreSQL portove; član 4 registruje prave adaptere autorizacije; član 2 po želji dodaje
+- **Sledeći koraci i zavisnosti:** tim 12 dodaje `assignment.*` u katalog (tada Success ide direktno u
+  `audit.audit_events`, test se sam prilagođava) i relay za outbox; tim 3 registruje pravi `IMembershipReader`; član 2 po želji dodaje
   namenski izuzetak za limit (sada se prepoznaje po poruci, test `LimitMessage_MatchesStartAttemptService` čuva
   ugovor) i individualni rok u `StartAttemptService`; frontend poziva dve rute.

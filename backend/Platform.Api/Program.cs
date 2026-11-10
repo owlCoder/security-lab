@@ -7,6 +7,7 @@ using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
 using Platform.Api.Modules.Assignments.Composition;
+using Platform.Api.Modules.Assignments.Persistence;
 
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
@@ -89,6 +90,15 @@ builder.Services.AddAudit();
 builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 // ASN-04/ASN-06 (tim 15, celina 5): audit adapter i kontroleri; posle AddAudit/AddAuditPersistence.
 builder.Services.AddAssignmentsApi();
+// ASN-04/ASN-06 produkciono povezivanje portova: autorizacija (član 4) uvek ide kroz Access modul
+// (IAccessDecision, podrazumevano odbijanje); skladišta (član 1) su PostgreSQL kada postoji
+// ConnectionStrings:Assignments, inače ostaju fail-closed i AssignmentsCompositionCheck to prijavljuje.
+builder.Services.AddAssignmentsAccessAuthorization();
+var assignmentsConnectionString = builder.Configuration.GetConnectionString(AssignmentsDatabase.ConnectionStringName);
+if (!string.IsNullOrWhiteSpace(assignmentsConnectionString))
+{
+    builder.Services.AddAssignmentsPostgres(assignmentsConnectionString);
+}
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -196,6 +206,20 @@ if (app.Environment.IsDevelopment())
 
         await app.SeedDevelopmentAccountsAsync();
     }
+    // ASN-04/ASN-06: šema assignments i jedna demo dodela (samo kada je baza konfigurisana).
+    if (!string.IsNullOrWhiteSpace(assignmentsConnectionString))
+    {
+        try
+        {
+            await AssignmentsDatabase.MigrateAsync(assignmentsConnectionString);
+            await AssignmentsDatabase.SeedDevelopmentAsync(assignmentsConnectionString, TimeProvider.System);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning("The assignments schema was not migrated: {ExceptionType}", ex.GetType().Name);
+        }
+    }
+
     // LAB-03 drugi demo kurs: 3333 je student samo ovde, ne na prvom kursu.
     // Primer: X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher pravi laboratoriju na prvom kursu.
     var secondDemoCourse = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");

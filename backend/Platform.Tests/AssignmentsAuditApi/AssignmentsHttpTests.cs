@@ -3,7 +3,9 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Api.Modules.Assignments.Audit;
+using Microsoft.Extensions.Configuration;
 using Platform.Api.Modules.Assignments.Composition;
+using Platform.Api.Modules.Assignments.Persistence;
 using Platform.Assignments.Domain.Models;
 using Platform.Audit.Contracts;
 
@@ -298,20 +300,29 @@ public sealed class AssignmentsHttpTests
         });
     }
 
-    // ---------- podrazumevana kompozicija (bez adaptera članova 1 i 4) ----------
+    // ---------- podrazumevana kompozicija (Program.cs bez ConnectionStrings:Assignments) ----------
 
     [Test]
-    public void CompositionCheck_ReportsEveryUnconnectedPort_InDefaultComposition()
+    public void CompositionCheck_WithoutDatabase_ReportsOnlyStoragePorts_AuthorizationIsWiredToAccess()
     {
         using var factory = new AssignmentsHostFactory(useFakePorts: false);
         using var scope = factory.Services.CreateScope();
 
+        // Lokalni .env može da postavi ConnectionStrings:Assignments; tada ovo nije kompozicija „bez baze”.
+        var configured = scope.ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetConnectionString(AssignmentsDatabase.ConnectionStringName);
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            Assert.Ignore("ConnectionStrings:Assignments is configured locally; the no-database composition is not active.");
+        }
+
         var notConfigured = AssignmentsCompositionCheck.GetNotConfiguredPorts(scope.ServiceProvider);
 
+        // Autorizacija (član 4) je u produkciji uvek povezana sa Access modulom; bez baze ostaju
+        // samo skladišta (član 1), i to fail-closed i eksplicitno prijavljeno.
         Assert.That(notConfigured, Is.EquivalentTo(new[]
         {
             "IAssignmentRepository", "IAttemptStore", "IDeadlineExtensionStore",
-            "IStartAttemptAuthorization", "IDeadlineExtensionAuthorization", "ICourseEnrollmentCheck",
         }));
     }
 

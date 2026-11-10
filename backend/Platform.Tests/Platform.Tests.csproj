@@ -16,6 +16,8 @@
 		<PackageReference Include="NUnit" Version="4.3.2" />
 		<PackageReference Include="NUnit.Analyzers" Version="4.7.0" />
 		<PackageReference Include="NUnit3TestAdapter" Version="5.0.0" />
+		<!-- ASN-04/ASN-06 tim 15: izolovan PostgreSQL za integracione testove stvarnih adaptera (kao Platform.Laboratories.IntegrationTests). -->
+		<PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -28,4 +30,4 @@
 		<ProjectReference Include="..\Platform.Prerequisites\Platform.Prerequisites.csproj" />
 	</ItemGroup>
 
-</Project>
+</Project>

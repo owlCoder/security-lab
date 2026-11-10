@@ -1,4 +1,4 @@
-%% ASN-04 / ASN-06, tim 15, celina 5 (Audit i API) - dijagram toka podataka (DFD)
+%% ASN-04 / ASN-06, tim 15, celina 5 (Audit i API) - dijagram toka podataka (DFD), produkciona kompozicija
 flowchart TB
   classDef ext fill:#fde68a,stroke:#92400e,color:#0f172a
   classDef proc fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#0f172a
@@ -13,38 +13,51 @@ flowchart TB
   subgraph TB2["Granica poverenja 2: server, Platform.Api"]
     P1["P1 Prijem HTTP zahteva<br/>korelacioni ID + provera sesije"]:::procOther
     P2["P2 Utvrđivanje aktera<br/>(AssignmentCaller)"]:::proc
-    P3["P3 API handler<br/>validacija ulaza, mapiranje ishoda<br/>(Start/ExtendDeadlineApiHandler)"]:::proc
-    P4["P4 Use-case<br/>ASN-04 započni pokušaj (član 2)<br/>ASN-06 produži rok (član 3)"]:::procOther
-    P5["P5 Provera prava i članstva<br/>(portovi člana 4, podrazumevano odbijanje)"]:::procOther
+    P3["P3 API handler<br/>validacija ulaza, mapiranje ishoda"]:::proc
+    P4["P4 Use-case<br/>ASN-04 (član 2) / ASN-06 (član 3)"]:::procOther
+    P5["P5 Autorizacioni adapteri<br/>port -> IAccessDecision<br/>(attempt.create / assignment.manage)"]:::proc
+    P5A["P5a Access odluka<br/>podrazumevano odbijanje (tim 3)"]:::procOther
     P6["P6 Audit adapter<br/>akter, radnja, vreme, ishod,<br/>korelacioni ID; allowlist"]:::proc
+    P7["P7 PostgreSQL adapteri<br/>atomski limit, rok + audit"]:::proc
   end
 
-  subgraph TB3["Granica poverenja 3: skladišta"]
+  subgraph TB3["Granica poverenja 3: skladišta (PostgreSQL)"]
     D1[("D1 Sesije i nalozi<br/>Identity")]:::store
-    D2[("D2 Dodele i individualni rokovi<br/>član 1")]:::store
-    D3[("D3 Pokušaji<br/>član 1")]:::store
-    D4[("D4 Audit log, append-only<br/>tim 12")]:::store
-    D5[("D5 Tehnički log")]:::store
+    D2[("D2 assignments.assignments")]:::store
+    D3[("D3 assignments.attempts<br/>+ attempt_counters")]:::store
+    D4[("D4 assignments.deadline_overrides<br/>istorija, ASN-19")]:::store
+    D5[("D5 audit.audit_events<br/>tim 12, append-only")]:::store
+    D6[("D6 assignments.audit_outbox<br/>ista transakcija kao D4")]:::store
+    D7[("D7 Članstvo na kursu<br/>IMembershipReader, tim 3")]:::store
+    D8[("D8 Tehnički log")]:::store
   end
 
   STU -->|"POST /attempts<br/>kolačić sesije, Idempotency-Key"| P1
   TCH -->|"POST /deadline-extensions<br/>kolačić sesije, studentId, newDueAtUtc"| P1
-  P1 -->|"token sesije"| D1
-  D1 -->|"userId, nivo, status naloga"| P1
+  P1 <-->|"token sesije / userId, status"| D1
   P1 -->|"401 bez sesije"| STU
   P1 -->|"proverena sesija"| P2
-  P2 -->|"userId"| D1
   P2 -->|"actorId (samo iz sesije)"| P3
   P3 -->|"actorId, assignmentId, requestId / novi rok"| P4
-  P4 -->|"actorId, courseId iz dodele"| P5
-  P5 -->|"dozvoli / odbij"| P4
-  P4 -->|"čitanje dodele i roka"| D2
-  P4 -->|"atomska rezervacija mesta"| D3
-  P4 -->|"novi rok + Success zapis zajedno"| D2
+  P4 -->|"čitanje dodele"| P7
+  P7 <-->|"dodela"| D2
+  P4 -->|"actorId, assignmentId"| P5
+  P5 -->|"status naloga"| D1
+  P5 -->|"AccessRequest(subject, action, assignment)"| P5A
+  P5A -->|"kurs iz dodele"| D2
+  P5A -->|"uloga + status članstva"| D7
+  P5A -->|"Allow / Deny"| P5
+  P5 -->|"true / false"| P4
+  P4 -->|"ASN-04: rezerviši pokušaj (FOR UPDATE)"| P7
+  P7 <-->|"brojač + pokušaj ili null iznad limita"| D3
+  P4 -->|"ASN-06: novi rok + Success zapis"| P7
+  P7 -->|"nova verzija roka"| D4
+  P7 -->|"Success u istoj transakciji"| D5
+  P7 -->|"ili outbox, ista transakcija"| D6
   P4 -->|"ishod / izuzetak"| P3
   P4 -->|"Denied / Failure (ASN-06)"| P6
   P3 -->|"ishod ASN-04 (nacrt bez aktera)"| P6
-  P6 -->|"AuditEventDraft + AuditContext"| D4
-  P6 -->|"strukturisan zapis, alarm bez detalja"| D5
+  P6 -->|"AuditEventDraft + AuditContext"| D5
+  P6 -->|"strukturisan zapis, alarm bez detalja"| D8
   P3 -->|"201 attemptId / 404 / 409"| STU
   P3 -->|"200 novi rok / 403 / 400 / 409"| TCH
