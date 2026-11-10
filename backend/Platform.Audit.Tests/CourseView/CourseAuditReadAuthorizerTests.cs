@@ -56,7 +56,7 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task Teacher_InCourseK_IsAllowed_WithTheAccountAsViewer()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         var result = await Authorize(Account(TeacherId), CourseK);
 
@@ -66,7 +66,7 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task TeacherInK_RequestingL_IsForbidden()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         var result = await Authorize(Account(TeacherId), CourseL);
 
@@ -76,8 +76,8 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task TeacherInK_StudentInL_CannotReadL()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
-        memberships.Set(Membership(CourseRole.Student, courseId: CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Student, courseId: CourseL));
 
         var own = await Authorize(Account(TeacherId), CourseK);
         var other = await Authorize(Account(TeacherId), CourseL);
@@ -92,7 +92,7 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task Student_IsForbidden_EvenWithTheActionInTheSnapshot()
     {
-        memberships.Set(Membership(CourseRole.Student, delegatedActions: ["audit.events.read"]));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Student, delegatedActions: ["audit.events.read"]));
 
         Assert.That(await Authorize(Account(TeacherId), CourseK), Is.EqualTo(CourseAuditReadAuthorization.Forbidden));
     }
@@ -103,7 +103,7 @@ public sealed class CourseAuditReadAuthorizerTests
     [TestCase(new[] { "audit.events.read" }, true, TestName = "Assistant_WithAuditReadDelegation_IsAllowed")]
     public async Task Assistant_NeedsTheExactDelegatedAction(string[] delegated, bool allowed)
     {
-        memberships.Set(Membership(CourseRole.Assistant, delegatedActions: delegated));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant, delegatedActions: delegated));
 
         var result = await Authorize(Account(TeacherId), CourseK);
 
@@ -113,14 +113,14 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task RevokedMembershipOrDelegation_AppliesFromTheNextCall()
     {
-        memberships.Set(Membership(CourseRole.Assistant, delegatedActions: ["audit.events.read"]));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant, delegatedActions: ["audit.events.read"]));
         var before = await Authorize(Account(TeacherId), CourseK);
 
         // Delegation revoked or expired: the provider stops returning the action.
-        memberships.Set(Membership(CourseRole.Assistant));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant));
         var afterRevocation = await Authorize(Account(TeacherId), CourseK);
 
-        memberships.Set(Membership(CourseRole.Teacher) with { Status = MembershipStatus.Left });
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher) with { Status = MembershipStatus.Left });
         var afterLeaving = await Authorize(Account(TeacherId), CourseK);
 
         Assert.Multiple(() =>
@@ -136,7 +136,7 @@ public sealed class CourseAuditReadAuthorizerTests
     public async Task Administrator_WithoutTeacherMembershipInK_IsForbidden()
     {
         // Access has no global administrator right for course audit (D4); only course membership counts.
-        memberships.Set(Membership(CourseRole.Teacher, accountId: AdminId, courseId: CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher, accountId: AdminId, courseId: CourseL));
 
         Assert.That(await Authorize(Account(AdminId), CourseK), Is.EqualTo(CourseAuditReadAuthorization.Forbidden));
     }
@@ -144,7 +144,7 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task BlockedAccount_IsNotAllowed_EvenAsTeacher()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         var result = await Authorize(Account(TeacherId, AccountState.Blocked), CourseK);
 
@@ -256,8 +256,8 @@ public sealed class CourseAuditReadAuthorizerTests
     [Test]
     public async Task ParallelSubjects_GetTheirOwnResults()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
-        memberships.Set(Membership(CourseRole.Teacher, accountId: OtherAccountId, courseId: CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher, accountId: OtherAccountId, courseId: CourseL));
 
         var results = await Task.WhenAll(Enumerable.Range(0, 40).Select(i => i % 2 == 0
             ? Authorize(Account(TeacherId), CourseK).AsTask()

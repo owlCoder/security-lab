@@ -40,7 +40,14 @@ S-14 does not duplicate them.
 | Application-layer check | `Platform.Audit/Application/CourseView/CourseAuditReadAuthorizer.cs` | Second decision right before the query, through `IAccessDecision`; maps Deny to 401/403; the viewer must be an active account with a GUID ID |
 | View record | `Platform.Audit/Application/CourseView/CourseAuditViewRecorder.cs` | Writes `audit.events.viewed` through `ITrustedAuditWriter`; any failure returns `false` and raises alarm 6301 |
 | Error responses | `Platform.Audit/Endpoints/CourseAuditProblemResults.cs` | 400 / 401 / 403 / 503 shapes; 401/403 reuse `AccessProblemDetailsWriter` |
-| DI | `Platform.Audit/Composition/CourseAuditViewServiceCollectionExtensions.cs` | `AddCourseAuditView()`: authorizer singleton, recorder scoped; not called by `Platform.Api` yet |
+| DI | `Platform.Audit/Composition/CourseAuditViewServiceCollectionExtensions.cs` | `AddCourseAuditView()`: authorizer singleton, recorder scoped; not called by `Platform.Api` yet. After S-07 it also registers the S-07 query service (see below) |
+
+### DI of the S-07 query service
+
+S-07 deliberately registers neither `ICourseAuditQueryService` nor its normalizer and reader. Agreed
+with the S-07 owner (member 4): the registration belongs to S-14, in `AddCourseAuditView()`, because
+only S-14 has the authorization in front of the query and the `audit.events.viewed` record after it.
+The query service is therefore never resolvable in a host without the protected endpoint around it.
 
 ### Two authorization checks
 
@@ -165,8 +172,13 @@ prefix, so in Development only the Access checks apply. Outside Development the 
 1. Handler: subject from `IAccessSubjectProvider`, correlation ID from `ICorrelationContext`,
    `CourseAuditReadAuthorizer`, `ICourseAuditQueryService`, `CourseAuditViewRecorder`, results.
 2. Map S-07 errors to `CourseAuditFilterError` (camelCase field name, code name).
-3. `MapCourseAuditEndpoints()` in Audit composition; in `Program.cs` one `AddCourseAuditView()` line
+3. Register the S-07 services in `AddCourseAuditView()` (agreed with member 4; S-07 registers none):
+   `ICourseAuditQueryService` → `CourseAuditQueryService`, `CourseAuditQueryNormalizer` and
+   `ICourseAuditEventReader` → `PostgresCourseAuditEventReader`. The reader and service are scoped
+   (they use `AuditDbContext`); the normalizer needs only `TimeProvider` and can be a singleton. Check the lifetimes with `ValidateScopes`/`ValidateOnBuild` and a
+   composition test.
+4. `MapCourseAuditEndpoints()` in Audit composition; in `Program.cs` one `AddCourseAuditView()` line
    and one map line (reviewed by member 1).
-4. Host tests through `Platform.Api`: 401, K/L isolation, 400 boundaries, 503 on storage failure and
+5. Host tests through `Platform.Api`: 401, K/L isolation, 400 boundaries, 503 on storage failure and
    on a failed view record (no event in the body), exactly one `audit.events.viewed` per success.
-5. Update `SECURITY_MATRIX.md` rows for AUD-06 with the final evidence.
+6. Update `SECURITY_MATRIX.md` rows for AUD-06 with the final evidence.

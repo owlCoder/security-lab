@@ -98,7 +98,7 @@ public sealed class CourseAuditRouteTests
     [Test]
     public async Task Anonymous_Gets401_WithoutReachingTheHandler()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         using var response = await Get(CourseK, subject: null);
 
@@ -113,7 +113,7 @@ public sealed class CourseAuditRouteTests
     [Test]
     public async Task TeacherOfK_ReachesTheHandler_ForK()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         using var response = await Get(CourseK, TeacherId.ToString("D"));
 
@@ -127,7 +127,7 @@ public sealed class CourseAuditRouteTests
     [Test]
     public async Task TeacherOfK_Gets403_ForL_AndTheDecisionUsesTheRouteCourse()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
         var asked = new ConcurrentQueue<(Guid Account, Guid Course)>();
         memberships.Handler = (account, course, _) =>
         {
@@ -149,8 +149,8 @@ public sealed class CourseAuditRouteTests
     public async Task Forbidden_LooksTheSame_ForAnExistingAndAnUnknownCourse()
     {
         // L has another teacher; M has nobody. The caller must not be able to tell them apart.
-        memberships.Set(Membership(CourseRole.Teacher));
-        memberships.Set(Membership(CourseRole.Teacher, accountId: OtherAccountId, courseId: CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher, accountId: OtherAccountId, courseId: CourseL));
 
         using var existing = await Get(CourseL, TeacherId.ToString("D"));
         using var unknown = await Get(CourseM, TeacherId.ToString("D"));
@@ -170,7 +170,7 @@ public sealed class CourseAuditRouteTests
     [Test]
     public async Task BlockedTeacher_Gets403()
     {
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         using var response = await Get(CourseK, "blocked:" + TeacherId.ToString("D"));
 
@@ -199,7 +199,7 @@ public sealed class CourseAuditRouteTests
     public async Task QueryStringCourse_IsIgnored_OnlyTheRouteCourseIsAuthorized()
     {
         // A teacher of K cannot reach L by adding a course filter of their own.
-        memberships.Set(Membership(CourseRole.Teacher));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Teacher));
 
         using var response = await Get($"{CourseAuditEndpointRoute.For(CourseL)}?courseId={CourseK:D}", TeacherId.ToString("D"));
 
