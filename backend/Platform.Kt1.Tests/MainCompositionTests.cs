@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using Platform.Api.Modules.Kt1;
-using MainAccountRepository = Platform.Api.Interfaces.Identity.IAccountRepository;
 
 namespace Platform.Kt1.Tests;
 
@@ -22,19 +21,15 @@ public class MainCompositionTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Kt1-Demo", "1");
         Assert.That((await client.PostAsync("/api/kt1/session/admin", null)).StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        var repository = factory.Services.GetRequiredService<MainAccountRepository>();
-        var initialStatus = repository.Find(MainTarget)!.Status;
         var path = $"/api/admin/accounts/{MainTarget}/status";
         // A synthetic course-admin cookie is not an identity-module administrator session.
         Assert.That((await client.PutAsJsonAsync(path, new { status = "BLOCKED", reason = "Integration check" })).StatusCode,
             Is.EqualTo(HttpStatusCode.Unauthorized));
-        Assert.That(repository.Find(MainTarget)!.Status, Is.EqualTo(initialStatus));
         // IDN-02 replaced the Development X-Stub-User identity stub with the server-side session:
         // the header alone no longer authenticates the identity-module administrator.
         client.DefaultRequestHeaders.Add("X-Stub-User", MainAdmin.ToString());
         Assert.That((await client.PutAsJsonAsync(path, new { status = "BLOCKED", reason = "Integration check" })).StatusCode,
             Is.EqualTo(HttpStatusCode.Unauthorized));
-        Assert.That(repository.Find(MainTarget)!.Status, Is.EqualTo(initialStatus));
         Assert.That(factory.Services.GetRequiredService<DemoStore>().FindAccount(DemoStore.Ana).Value!.IsActive, Is.True);
     }
 

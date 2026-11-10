@@ -8,6 +8,9 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Platform.Access/Platform.Access.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Platform.Audit.Tests" />
   </ItemGroup>
   <ItemGroup>

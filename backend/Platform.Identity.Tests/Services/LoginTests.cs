@@ -179,6 +179,25 @@ public class LoginTests
         Assert.That(_events.Single().Outcome, Is.EqualTo("failure"));
     }
 
+    [Test]
+    [Category("IDN-03")]
+    public async Task AccountBlockedAfterTheStatusCheck_IsRefused_LikeAnyBlockedLogin_AndNoSuccessIsAudited()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active));
+        _sessions
+            .Setup(s => s.CreateAsync(id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AccountNotActiveException(id));
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-raced");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.InvalidCredentials));
+        Assert.That(result.Session, Is.Null);
+        var e = _events.Single();
+        Assert.That(e.Outcome, Is.EqualTo("denied"));
+        Assert.That(e.ActorId, Is.EqualTo(id));
+    }
+
     [TestCaseSource(nameof(Passwords))]
     public async Task AuditEvents_NeverContainEmailPasswordOrToken(string password)
     {
