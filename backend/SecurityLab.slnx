@@ -29,6 +29,10 @@
     <Project Path="Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj" />
     <Project Path="Platform.Laboratories.Tests/Platform.Laboratories.Tests.csproj" />
   </Folder>
+  <Folder Name="/RevisionBinding/">
+    <Project Path="Platform.RevisionBinding/Platform.RevisionBinding.csproj" />
+    <Project Path="Platform.RevisionBinding.Tests/Platform.RevisionBinding.Tests.csproj" />
+  </Folder>
   <Folder Name="/Team21/">
     <Project Path="Team21.Acc.Core/Team21.Acc.Core.csproj" />
     <Project Path="Team21.Acc.Infrastructure/Team21.Acc.Infrastructure.csproj" />

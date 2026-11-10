@@ -1,0 +1,23 @@
+<!--
+  REV-03: Vezivanje pokušaja za tačnu reviziju.
+
+  Ovaj projekat sadrži pravila i ugovore kojima se studentski pokušaj
+  vezuje za tačno jednu objavljenu reviziju laboratorije. Naknadna izmjena
+  ili nova objava zadatka ne smije promijeniti već započeti pokušaj.
+
+  Projekat namjerno nema zavisnost od baze, HTTP-a ni drugih timova:
+  podatke o revizijama dobija preko ugovora (interfejsa), a stvarne
+  implementacije se povezuju u kompozicionom korijenu (Platform.Api).
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Ista verzija .NET-a kao i ostatak rješenja. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Automatski uključuje česte namespace-ove (System, System.Linq...). -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Kompajler upozorava na moguće null vrijednosti. -->
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
