@@ -86,6 +86,8 @@ else
 
 builder.Services.AddAudit();
 builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+// AUD-06 (S-14): course audit view, protected by audit.events.read on the route course
+builder.Services.AddCourseAuditView();
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -215,6 +217,8 @@ app.MapControllers();
 app.MapLaboratories();
 app.MapTeam21Acc();
 app.MapRevisionReviews();
+// AUD-06 (S-14): GET /api/courses/{courseId}/audit-events
+app.MapCourseAuditEndpoints();
 
 if (app.Environment.IsDevelopment())
 {
