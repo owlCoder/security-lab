@@ -1,5 +1,6 @@
 using Platform.Assignments.Application;
 using Platform.Assignments.Contracts;
+using Platform.Assignments.Domain.Enums;
 using Platform.Assignments.Domain.Models;
 
 namespace Platform.Tests.Assignments;
@@ -328,7 +329,8 @@ public sealed class ExtendDeadlineServiceTests
                 "revision-1",
                 Due.AddDays(-7),
                 Due,
-                maxAttempts: 2);
+                maxAttempts: 2,
+                scope: AssignmentScope.Course);
 
             Store = new FakeDeadlineExtensionStore();
             Audit = new FakeDeadlineExtensionAuditWriter();
