@@ -33,10 +33,11 @@ public sealed class CourseAuditReadAuthorizerTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IMembershipReader>(memberships);
-        services.AddScoped<ITrustedAuditWriter, ValidatingTrustedAuditWriter>();
         services.AddAccessControl();
         services.AddAudit();
-        services.AddCourseAuditView();
+        // Only the authorizer: the full AddCourseAuditView() composition is covered by
+        // CourseAuditViewCompositionTests and needs AddAuditPersistence for the S-07 reader.
+        services.AddSingleton<CourseAuditReadAuthorizer>();
         provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,

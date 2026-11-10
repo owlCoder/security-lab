@@ -5,9 +5,8 @@ using Platform.Access.Domain.Constants;
 namespace Platform.Audit.Endpoints;
 
 /// <summary>
-/// Route and Access metadata of the course audit endpoint (AUD-06, S-14). The handler itself is
-/// added together with the S-07 query service; until then nothing maps this route and the real
-/// host answers 404 for it (an unfinished endpoint stays unavailable).
+/// Route and Access metadata of the course audit endpoint (AUD-06, S-14), mapped by
+/// <c>MapCourseAuditEndpoints()</c> with <see cref="CourseAuditEndpointHandler"/>.
 /// </summary>
 internal static class CourseAuditEndpointRoute
 {

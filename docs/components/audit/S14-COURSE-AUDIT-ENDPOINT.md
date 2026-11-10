@@ -8,60 +8,91 @@
 
 **Requirements:** AUD-06; related AUD-11, AUD-19, SEC-01, SEC-04, SEC-05, OPS-06, ACC-03/ACC-07 (with S-15)
 
-**Status:** building blocks implemented and tested; **the endpoint is not mapped**. The handler
-needs the S-07 query contract (`ICourseAuditQueryService`, `CourseAuditQuery`, `CourseAuditQueryResult`),
-which is in [PR #98](https://github.com/owlCoder/security-lab/pull/98) and not on `main` yet.
-Until the handler is wired, `GET /api/courses/{courseId}/audit-events` answers 404 in the real host
-(test `RealApiHost_DoesNotExposeTheUnfinishedEndpoint`). Nothing in `Program.cs` changes in this part.
+**Status:** endpoint implemented, mapped in `Platform.Api` and tested with test-only subjects and
+memberships. **It is not a finished production integration.** The real host has no session-based
+Access subject for `/api/courses/...` and no real membership provider on `main` yet, so today every
+real caller gets 401 (no subject) or 403 (no membership). The endpoint fails closed: no event leaves
+the server until those dependencies are delivered (see [Dependencies](#dependencies-and-open-points)).
 
-## Route contract (target)
+## Route contract
 
 `GET /api/courses/{courseId:guid}/audit-events?type=&outcome=&actorId=&from=&to=&correlationId=&page=&pageSize=`
 
 | Result | HTTP | Body |
 |-|-|-|
-| No authenticated subject | 401 | Access problem details, no event data |
+| No authenticated subject (or no valid session outside Development) | 401 | Access problem details, no event data |
 | No current right for the course (or the check failed) | 403 | Access problem details; identical for an existing and an unknown course |
 | Malformed `courseId` | 404 | The `guid` route constraint never reaches the handler or the membership reader |
-| Refused filter (S-07 `Invalid`) | 400 | `errors: [{ field, code }]`, never the refused value |
-| Storage failure (S-07 `Unavailable`) | 503 | No partial data, no exception text |
+| Refused filter (S-07 `Invalid`, or a filter given twice) | 400 | `errors: [{ field, code }]`, never the refused value |
+| Storage failure (S-07 `Unavailable` or an exception) | 503 | No partial data, no exception text |
 | `audit.events.viewed` not recorded | 503 | Sent **before** any event (D5, provisional) |
-| Success | 200 | S-07 `CourseAuditPage` (allowlisted `CourseAuditEventDto`, no `details`, no total count) |
+| Success | 200 | S-07 `CourseAuditPage`, `Cache-Control: no-store` |
 
 Every error is `application/problem+json` with `Cache-Control: no-store` and `correlationId`.
 Limits, parsing and sorting are S-07's (`CourseAuditQueryLimits`, DECISIONS.md "D5 query limits");
-S-14 does not duplicate them.
+S-14 does not duplicate them. A `+` in a time offset must be sent as `%2B`.
 
-## What is implemented now
+Success body (enums as lower-case names, the same spelling as the `outcome` filter):
 
-| Part | File | Responsibility |
+```json
+{
+  "courseId": "…", "from": "…Z", "to": "…Z", "page": 1, "pageSize": 50, "hasNextPage": false,
+  "items": [
+    { "id": "…", "occurredAt": "…", "eventType": "access.denied", "outcome": "denied",
+      "actorKind": "anonymous", "actorId": null, "resourceType": "Course", "resourceId": "…",
+      "correlationId": "…" }
+  ]
+}
+```
+
+No `details`, no schema version and no total count. Field visibility can change only through D4.
+
+## Request flow
+
+The handler (`Platform.Audit/Endpoints/CourseAuditEndpointHandler.cs`) has a fixed order:
+
+1. `AccessControlMiddleware` decides on the route metadata (`audit.events.read`, `course/{courseId}`).
+   Anonymous callers stop here with 401.
+2. The handler takes the subject from `IAccessSubjectProvider` and the correlation ID from
+   `ICorrelationContext` (S-10), and calls `CourseAuditReadAuthorizer` again. A Deny here is 401/403.
+   This check comes **before** filter validation, so an outsider learns nothing from a 400.
+3. The raw filters go to `ICourseAuditQueryService` (S-07) with the route course. A filter given
+   twice is refused as `InvalidFormat` before S-07.
+4. On `Ok`, `CourseAuditViewRecorder` writes `audit.events.viewed`. Only when it is recorded is the
+   page sent; otherwise 503 without data.
+
+The course comes only from the route value; a `courseId` in the query string is ignored. Membership
+is read on every decision; nothing is cached, so a revocation applies from the next request (T08).
+
+| Part | File |
+|-|-|
+| Handler and 200 result | `Platform.Audit/Endpoints/CourseAuditEndpointHandler.cs` |
+| Route and Access metadata | `Platform.Audit/Endpoints/CourseAuditEndpointRoute.cs` |
+| Error responses | `Platform.Audit/Endpoints/CourseAuditProblemResults.cs` |
+| Application-layer check | `Platform.Audit/Application/CourseView/CourseAuditReadAuthorizer.cs` |
+| View record | `Platform.Audit/Application/CourseView/CourseAuditViewRecorder.cs` |
+| DI and mapping | `Platform.Audit/Composition/CourseAuditViewServiceCollectionExtensions.cs` |
+| Host wiring | `Platform.Api/Program.cs`: `AddCourseAuditView()` after `AddAuditPersistence(...)`, `MapCourseAuditEndpoints()` after the other maps |
+
+## DI
+
+`AddCourseAuditView()` registers the S-14 parts and, as agreed with the S-07 owner (member 4), the
+S-07 query service. S-07 registers nothing itself, because it does no authorization: the query
+service is resolvable only in a host that also has the protected endpoint around it.
+
+| Service | Lifetime | Why |
 |-|-|-|
-| Route and Access metadata | `Platform.Audit/Endpoints/CourseAuditEndpointRoute.cs` | Route template with the `guid` constraint; `RequireCourseAuditRead()` declares `audit.events.read` on `course/{courseId}` from the central Access catalog |
-| Application-layer check | `Platform.Audit/Application/CourseView/CourseAuditReadAuthorizer.cs` | Second decision right before the query, through `IAccessDecision`; maps Deny to 401/403; the viewer must be an active account with a GUID ID |
-| View record | `Platform.Audit/Application/CourseView/CourseAuditViewRecorder.cs` | Writes `audit.events.viewed` through `ITrustedAuditWriter`; any failure returns `false` and raises alarm 6301 |
-| Error responses | `Platform.Audit/Endpoints/CourseAuditProblemResults.cs` | 400 / 401 / 403 / 503 shapes; 401/403 reuse `AccessProblemDetailsWriter` |
-| DI | `Platform.Audit/Composition/CourseAuditViewServiceCollectionExtensions.cs` | `AddCourseAuditView()`: authorizer singleton, recorder scoped; not called by `Platform.Api` yet. After S-07 it also registers the S-07 query service (see below) |
+| `CourseAuditReadAuthorizer` | singleton | stateless; uses the singleton `IAccessDecision` |
+| `CourseAuditViewRecorder` | scoped | uses the scoped `ITrustedAuditWriter` (`AuditDbContext`) |
+| `CourseAuditQueryNormalizer` | singleton | only `TimeProvider` |
+| `ICourseAuditEventReader` → `PostgresCourseAuditEventReader` | scoped | `AuditDbContext` |
+| `ICourseAuditQueryService` → `CourseAuditQueryService` | scoped | uses the reader |
 
-### DI of the S-07 query service
+`MapCourseAuditEndpoints()` throws at startup when `AddCourseAuditView()` was not called, so the
+route can never exist without its authorization. Lifetimes are checked with `ValidateScopes` and
+`ValidateOnBuild` (`CourseAuditViewCompositionTests`).
 
-S-07 deliberately registers neither `ICourseAuditQueryService` nor its normalizer and reader. Agreed
-with the S-07 owner (member 4): the registration belongs to S-14, in `AddCourseAuditView()`, because
-only S-14 has the authorization in front of the query and the `audit.events.viewed` record after it.
-The query service is therefore never resolvable in a host without the protected endpoint around it.
-
-### Two authorization checks
-
-1. `AccessControlMiddleware` reads the route metadata and decides before the handler runs.
-   An anonymous caller gets 401 there; the handler is never reached.
-2. The handler calls `CourseAuditReadAuthorizer` before `ICourseAuditQueryService`. S-07 does no
-   authorization by design, so the query is never called without a current Allow in the same code
-   path, and a revocation between the two checks already applies to this request (T08).
-
-The course comes only from the route value; a `courseId` in the query string is ignored
-(`QueryStringCourse_IsIgnored_OnlyTheRouteCourseIsAuthorized`). The subject comes only from the
-server-side `IAccessSubjectProvider`. Membership is read on every decision; nothing is cached.
-
-### `audit.events.viewed`
+## `audit.events.viewed`
 
 | Field | Value |
 |-|-|
@@ -75,54 +106,68 @@ The `actorId` and `correlationId` filters are not recorded: the catalog schema o
 No event content is recorded. The recorder never calls `IAccessDecision`, so recording a view cannot
 start another decision or an `access.denied` record (no recursion with S-13).
 
-Failure alarm (event id 6301, level Error), only fixed fields:
-`audit.events.viewed.failure reason={invalid_summary|rejected|unavailable|failed} code={rejection code or exception type} correlationId={validated id or "invalid"}`.
+Alarms (level Error, fixed fields only, never filter values, events or exception text):
+
+| Event id | Message |
+|-|-|
+| 6301 | `audit.events.viewed.failure reason={invalid_summary\|rejected\|unavailable\|failed} code={rejection code or exception type} correlationId={id or "invalid"}` |
+| 6302 | `audit.course_view.unavailable code={Unavailable or exception type} correlationId={id}` |
 
 ## Rights matrix and evidence
 
+Host tests run through the real `Platform.Api` (Program.cs composition, session middleware active)
+with a test-only subject and test-only memberships (`CourseAuditEndpointHostFactory`).
+
 | Subject / context | Result | Test |
 |-|-|-|
-| Anonymous | 401, handler not reached | `CourseAuditRouteTests.Anonymous_Gets401_WithoutReachingTheHandler`, `CourseAuditReadAuthorizerTests.Anonymous_IsUnauthenticated_WithoutASecondDecision` |
-| Teacher in K, request for K | Allowed, viewer = account | `TeacherOfK_ReachesTheHandler_ForK`, `Teacher_InCourseK_IsAllowed_WithTheAccountAsViewer` |
-| Teacher in K, request for L | 403, same body as for an unknown course | `TeacherOfK_Gets403_ForL_AndTheDecisionUsesTheRouteCourse`, `Forbidden_LooksTheSame_ForAnExistingAndAnUnknownCourse` |
-| Teacher in K, student in L | 403 for L | `TeacherInK_StudentInL_CannotReadL` |
-| Student in K | 403 | `Student_IsForbidden_EvenWithTheActionInTheSnapshot` |
-| Assistant in K | Only with the exact delegated `audit.events.read` | `Assistant_NeedsTheExactDelegatedAction` (4 cases) |
-| Revoked delegation or membership | 403 from the next call | `RevokedMembershipOrDelegation_AppliesFromTheNextCall` |
-| Administrator without teacher membership in K | 403 | `Administrator_WithoutTeacherMembershipInK_IsForbidden` |
-| Blocked account | 403 | `BlockedTeacher_Gets403`, `BlockedAccount_IsNotAllowed_EvenAsTeacher` |
+| Anonymous | 401, no query | `CourseAuditEndpointHostTests.Anonymous_Gets401_WithoutEventsOrQuery`, `CourseAuditViewCompositionTests.RealApiHost_MapsTheEndpointOnce_AndAnAnonymousCallerGets401` |
+| No valid session (outside Development) | 401 | `WithoutTestSession_TheSessionCheckStillApplies` |
+| Teacher in K, request for K | 200, one `audit.events.viewed` | `TeacherOfK_Gets200_WithTheAllowlistedPage_AndExactlyOneViewRecord`, `CourseAuditEndpointPostgresTests.TeacherOfK_SeesOnlyKInStableOrder_AndTheViewIsStoredOnce` |
+| Teacher in K, request for L (T07) | 403, same body as for an unknown course, no query, no record | `TeacherOfK_Gets403_ForL_LooksLikeAnUnknownCourse_AndNothingIsReadOrRecorded`, `CourseAuditEndpointPostgresTests.TeacherOfK_Gets403ForL_AndNoViewOfLIsStored` |
+| Teacher in K, student in L | 403 for L | `CourseAuditReadAuthorizerTests.TeacherInK_StudentInL_CannotReadL` |
+| Student in K, blocked teacher | 403 | `StudentAndBlockedTeacher_Get403` |
+| Assistant in K | 200 only with the exact delegated `audit.events.read` | `Assistant_NeedsTheExactDelegation` (3 cases) |
+| Revoked membership (T08) | 403 from the next request | `RevokedMembership_AppliesFromTheNextRequest` |
+| Administrator without teacher membership in K | 403 | `CourseAuditReadAuthorizerTests.Administrator_WithoutTeacherMembershipInK_IsForbidden` |
 | Non-account subject (for example `dev-user`) | 403 | `AllowForANonAccountSubject_IsStillForbidden` |
-| Decision error | 403, no exception text | `DecisionThatThrows_IsForbidden` |
+| Outsider with invalid filters | 403, not 400 | `CallerWithoutTheRight_Gets403_EvenWithInvalidFilters` |
 
-Other evidence: `CourseAuditViewRecorderTests` (draft accepted by the real validator, UTC range,
-invalid summaries, Rejected/Unavailable/exception → `false` with an alarm without values or secrets),
-`CourseAuditProblemResultsTests` (400 without values; a filter error accepts only identifier-like
-names, so a refused value cannot be echoed), `CourseAuditViewCompositionTests` (strict DI, lifetimes,
-missing persistence fails at startup, route not mapped in the real host) and
-`CourseAuditViewPostgresTests` (one `audit.events.viewed` row through the real writer and the
-restricted runtime role).
+| Behaviour | Test |
+|-|-|
+| T11: 14 refused filters (page, size, offset, range, date-only, type, outcome, actor, correlation, repeated filter) → 400 with exactly the expected `field:code` | `InvalidFilter_Gets400_WithFieldAndCode_BeforeAnyDatabaseCall` |
+| T11: boundary values (size 1 and 100, last allowed page, a 31-day range, `%2B` offset) pass validation | `BoundaryValues_PassValidation_AndReachStorage` |
+| Script and SQL fragments in filters are not in the response or the log | `HostileFilterValues_AreNeverEchoed_InTheResponseOrTheLog` |
+| Storage down → 503 without data or connection details | `StorageDown_Gets503_WithoutDataOrInternalDetails`, `QueryServiceThatThrows_Gets503` |
+| View record fails or throws → 503 and no event in the body | `ViewRecordUnavailable_Gets503_AndNoEventIsSent`, `ViewRecordWriterThrows_Gets503_AndNoEventIsSent` |
+| Only K's rows, ordered by time descending, against PostgreSQL | `CourseAuditEndpointPostgresTests.TeacherOfK_SeesOnlyKInStableOrder_AndTheViewIsStoredOnce` |
+| Stable order for equal times (`Id DESC`), page bounds, SQL course filter | S-07: `PostgresCourseAuditQueryTests` |
 
-All identities and courses in tests are synthetic.
+Other unit evidence: `CourseAuditReadAuthorizerTests`, `CourseAuditViewRecorderTests`,
+`CourseAuditProblemResultsTests`, `CourseAuditRouteTests`, `CourseAuditViewCompositionTests`,
+`CourseAuditViewPostgresTests`. All identities and courses in tests are synthetic.
 
 ## Component architecture
 
-Solid lines exist now; dashed lines are added with the handler after S-07.
+Solid lines exist on this branch; dashed lines are owed by other teams.
 
 ```mermaid
 flowchart LR
-    Client["Client"] --> MW["AccessControlMiddleware<br/>(route metadata: audit.events.read, course/{courseId})"]
-    MW --> Decision["IAccessDecision<br/>(Access, singleton)"]
+    Client["Client"] --> MW["AccessControlMiddleware<br/>(audit.events.read, course/{courseId})"]
+    MW --> Decision["IAccessDecision (Access, singleton)"]
     Decision --> Policy["CourseAuditReadPolicy (S-08)"]
     Policy --> Members["IMembershipReader"]
-    MW -.-> Handler["S-14 handler (after S-07)"]
-    Handler -.-> Authz["CourseAuditReadAuthorizer"]
+    Members -.-> RealMembers["ACC-02 StoreMembershipReader / ACC-07 delegations (not on main)"]
+    MW --> Handler["CourseAuditEndpointHandler (S-14)"]
+    Subject["IAccessSubjectProvider"] -.-> RealSubject["Session-based subject (no owner yet)"]
+    Handler --> Subject
+    Handler --> Authz["CourseAuditReadAuthorizer"]
     Authz --> Decision
-    Handler -.-> Query["ICourseAuditQueryService (S-07, PR #98)"]
-    Query -.-> DB[("audit.events")]
-    Handler -.-> Recorder["CourseAuditViewRecorder"]
+    Handler --> Query["ICourseAuditQueryService (S-07)"]
+    Query --> DB[("audit.events")]
+    Handler --> Recorder["CourseAuditViewRecorder"]
     Recorder --> Writer["ITrustedAuditWriter (scoped)"]
     Writer --> DB
-    Handler -.-> Results["CourseAuditProblemResults / 200 page"]
+    Handler --> Results["200 page / CourseAuditProblemResults"]
 ```
 
 ## Data flow and trust boundaries (input for S-18, member 7)
@@ -140,10 +185,11 @@ flowchart LR
     end
     C -->|"courseId from route only"| A1
     A1 -->|"Allow"| A2
-    A2 -->|"Allow + viewer account"| Q
+    A2 -->|"Allow + viewer account, raw filters"| Q
     Q -->|"page of allowlisted DTOs"| V
     V -->|"Recorded: 200 with page"| C
     V -.->|"not recorded: 503, no data"| C
+    Q -.->|"Invalid: 400 field/code; Unavailable: 503"| C
     A1 -.->|"Deny: 401/403, no data"| C
     A2 -.->|"Deny: 401/403, no data"| C
 ```
@@ -155,30 +201,18 @@ leaves the server.
 
 | Dependency | Owner | Status |
 |-|-|-|
-| S-07 query contract and SQL ([PR #98](https://github.com/owlCoder/security-lab/pull/98)) | member 4 | open; handler, 200/400/503 mapping and endpoint host tests wait for it |
-| Real subject for `/api/courses/...` | Identity / Access owners | open: only `/api/revisions` maps a session to an Access subject (`RevisionRequestIdentity`); elsewhere the subject is anonymous, so the real endpoint would answer only 401 |
-| Real membership and delegation provider | Access / ACC-07 owners | open: the default `EmptyMembershipReader` denies everyone |
-| S-15 (current delegation in the query flow, measured with S-14) | member 5 | open; joint merge agreed with member 5 |
-| D4: global view, events without a course, visible fields | members 5, 7, 9 with the assistant | provisional: only the course view, no automatic admin access |
+| S-07 query contract and SQL | member 4 | done: [PR #98](https://github.com/owlCoder/security-lab/pull/98) merged |
+| Session-based Access subject for `/api/courses/...` | member 1 with Team 3 / Identity | open, no owner yet: only `/api/revisions` maps a session to an Access subject (`RevisionRequestIdentity`). Until then every real caller is anonymous → 401 |
+| Real membership provider | ACC-02 | open: `StoreMembershipReader` is on `feature/ACC-02-membership`, not on `main`; until then `EmptyMembershipReader` denies everyone → 403 |
+| Current delegations in `DelegatedActions` | ACC-07 | open: the ACC-02 reader returns an empty set; assistants get 403 until ACC-07 fills it with valid (not expired, not revoked) actions |
+| S-15 (current delegation in the query flow, measured with S-14) | member 5 | open; joint merge to be agreed |
+| D4: global view, events without a course, visible fields | members 5, 7, 9 with the assistant | provisional: only the course view, no automatic admin access, DTO without `details` |
 | D5: limits and failure of `audit.events.viewed` | members 4, 5, 6 | provisional: S-07 limits; 503 before data |
-| Exact 401/403 for an inactive account or revoked session | Identity | provisional: inactive account → 403 from Access (`AccountNotActive`) |
+| Exact 401/403 for an inactive account or revoked session | Identity | provisional: no session → 401 (session middleware); inactive account → 403 (`AccountNotActive`) |
 
-Note for the Development environment: `SessionCheckMiddleware` skips the session check for every
-path under `/api/courses` (a Team 21 test-header exception). The course audit route falls under that
-prefix, so in Development only the Access checks apply. Outside Development the session check runs.
+In Development, `SessionCheckMiddleware` skips the session check for every path under `/api/courses`
+(a Team 21 test-header exception), and `DevelopmentFakeSubjectProvider` supplies the non-account
+subject `dev-user`, which the authorizer refuses. Outside Development the session check runs.
 
-## Remaining work after S-07 is on main
-
-1. Handler: subject from `IAccessSubjectProvider`, correlation ID from `ICorrelationContext`,
-   `CourseAuditReadAuthorizer`, `ICourseAuditQueryService`, `CourseAuditViewRecorder`, results.
-2. Map S-07 errors to `CourseAuditFilterError` (camelCase field name, code name).
-3. Register the S-07 services in `AddCourseAuditView()` (agreed with member 4; S-07 registers none):
-   `ICourseAuditQueryService` → `CourseAuditQueryService`, `CourseAuditQueryNormalizer` and
-   `ICourseAuditEventReader` → `PostgresCourseAuditEventReader`. The reader and service are scoped
-   (they use `AuditDbContext`); the normalizer needs only `TimeProvider` and can be a singleton. Check the lifetimes with `ValidateScopes`/`ValidateOnBuild` and a
-   composition test.
-4. `MapCourseAuditEndpoints()` in Audit composition; in `Program.cs` one `AddCourseAuditView()` line
-   and one map line (reviewed by member 1).
-5. Host tests through `Platform.Api`: 401, K/L isolation, 400 boundaries, 503 on storage failure and
-   on a failed view record (no event in the body), exactly one `audit.events.viewed` per success.
-6. Update `SECURITY_MATRIX.md` rows for AUD-06 with the final evidence.
+When ACC-02 is merged, its namespace `Platform.Membership` hides the short `Membership(...)` test
+helper; the S-14 tests already call `AuditAuthorizationExamples.Membership(...)`.
