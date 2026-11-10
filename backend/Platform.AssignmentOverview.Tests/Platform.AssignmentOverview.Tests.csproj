@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Platform.AssignmentOverview\Platform.AssignmentOverview.csproj" />
     <ProjectReference Include="..\Platform.Assignments\Platform.Assignments.csproj" />
+    <ProjectReference Include="..\Platform.AssignmentPrerequisites\Platform.AssignmentPrerequisites.csproj" />
   </ItemGroup>
 
 </Project>

@@ -154,7 +154,8 @@ public class MyAssignmentsEndpointTests
         Assert.That(names, Is.EquivalentTo(new[]
         {
             "assignmentId", "courseId", "publishedLabRevisionId",
-            "availableFromUtc", "dueAtUtc", "maxAttempts"
+            "availableFromUtc", "dueAtUtc", "maxAttempts",
+            "isLocked", "missingAssignmentIds"
         }));
     }
 

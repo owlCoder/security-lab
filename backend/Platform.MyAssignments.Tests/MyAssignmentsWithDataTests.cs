@@ -8,7 +8,9 @@ using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.AssignmentOverview.Contracts;
 using Platform.AssignmentOverview.Infrastructure;
+using Platform.Assignments.Contracts;
 
 namespace Platform.MyAssignments.Tests;
 
@@ -19,7 +21,10 @@ public class MyAssignmentsWithDataTests
     private const string Route = "/api/me/assignments";
     private const string Token = "test-token";
 
-    private static WebApplicationFactory<Program> CreateFactory(string environment, Guid studentId) =>
+    private static WebApplicationFactory<Program> CreateFactory(
+        string environment,
+        Guid studentId,
+        Action<IServiceCollection>? configure = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment(environment);
@@ -27,6 +32,7 @@ public class MyAssignmentsWithDataTests
             {
                 services.RemoveAll<ISessionManager>();
                 services.AddSingleton<ISessionManager>(new FixedSession(studentId));
+                configure?.Invoke(services);
             });
         });
 
@@ -54,9 +60,35 @@ public class MyAssignmentsWithDataTests
         Assert.That(ids, Is.EquivalentTo(new[]
         {
             DevelopmentAssignmentData.OibAssignmentId,
-            DevelopmentAssignmentData.SecurityAssignmentId
+            DevelopmentAssignmentData.SecurityAssignmentId,
+            DevelopmentLockData.LockedAssignmentId,
+            DevelopmentLockData.UnlockedAssignmentId
         }));
         Assert.That(ids, Does.Not.Contain(DevelopmentAssignmentData.OtherCourseAssignmentId));
+    }
+
+    // ASN-07: dodela sa nepoloženim preduslovom je u odgovoru označena kao zaključana.
+    [Test]
+    public async Task Response_MarksAssignmentWithUnfinishedPrerequisiteAsLocked()
+    {
+        using var factory = CreateFactory("Development", Guid.Parse(DevelopmentAssignmentData.StudentId));
+        using var client = factory.CreateClient();
+
+        var response = await GetAsync(client);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = json.RootElement.GetProperty("assignments").EnumerateArray()
+            .ToDictionary(a => a.GetProperty("assignmentId").GetGuid());
+
+        var locked = items[DevelopmentLockData.LockedAssignmentId];
+        Assert.That(locked.GetProperty("isLocked").GetBoolean(), Is.True);
+        Assert.That(
+            locked.GetProperty("missingAssignmentIds").EnumerateArray().Select(x => x.GetGuid()),
+            Is.EquivalentTo(new[] { DevelopmentAssignmentData.OibAssignmentId }));
+
+        var unlocked = items[DevelopmentLockData.UnlockedAssignmentId];
+        Assert.That(unlocked.GetProperty("isLocked").GetBoolean(), Is.False);
     }
 
     [Test]
@@ -72,16 +104,53 @@ public class MyAssignmentsWithDataTests
         Assert.That(json.RootElement.GetProperty("assignments").GetArrayLength(), Is.EqualTo(0));
     }
 
+    // Van Developmenta upisi i dodele nisu povezani: kontrolisan 503, bez izmišljenih podataka.
     [Test]
-    public void OutsideDevelopment_FailsClosed_InsteadOfReturningInventedData()
+    public async Task OutsideDevelopment_FailsClosed_InsteadOfReturningInventedData()
     {
         using var factory = CreateFactory("Production", Guid.Parse(DevelopmentAssignmentData.StudentId));
         using var client = factory.CreateClient();
 
-        // Test server prosledjuje neuhvacen izuzetak; na pravom serveru je to odgovor 500 bez podataka.
-        var error = Assert.ThrowsAsync<InvalidOperationException>(() => GetAsync(client));
+        var response = await GetAsync(client);
 
-        Assert.That(error!.Message, Does.Contain("no implementation outside Development"));
+        await AssertServiceUnavailableAsync(response);
+    }
+
+    // ASN-07: lista radi, ali preduslovi i pokušaji nisu povezani van Developmenta.
+    // Endpoint ne sme da vrati listu bez zaključavanja (sve „otključano“), nego kontrolisan 503.
+    [Test]
+    public async Task OutsideDevelopment_LockDependenciesUnavailable_Returns503WithoutData()
+    {
+        using var factory = CreateFactory(
+            "Production",
+            Guid.Parse(DevelopmentAssignmentData.StudentId),
+            services =>
+            {
+                services.RemoveAll<IStudentCourseReader>();
+                services.AddSingleton<IStudentCourseReader, DevelopmentStudentCourseReader>();
+                services.RemoveAll<IAssignmentRepository>();
+                services.AddSingleton<IAssignmentRepository, DevelopmentAssignmentRepository>();
+            });
+        using var client = factory.CreateClient();
+
+        var response = await GetAsync(client);
+
+        await AssertServiceUnavailableAsync(response);
+    }
+
+    private static async Task AssertServiceUnavailableAsync(HttpResponseMessage response)
+    {
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var json = JsonDocument.Parse(body);
+        Assert.That(json.RootElement.GetProperty("error").GetString(), Is.EqualTo("service_unavailable"));
+        Assert.That(json.RootElement.GetProperty("correlationId").GetString(), Is.Not.Empty);
+
+        // Bez podataka i bez detalja greške (imena klasa, poruke izuzetka).
+        Assert.That(json.RootElement.TryGetProperty("assignments", out _), Is.False);
+        Assert.That(body, Does.Not.Contain("Unavailable"));
+        Assert.That(body, Does.Not.Contain(DevelopmentAssignmentData.OibAssignmentId.ToString()));
     }
 
     private sealed class FixedSession(Guid userId) : ISessionManager

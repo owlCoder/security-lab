@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Platform.Access.AspNet;
 using Platform.Api.Interfaces.Identity;
+using Platform.AssignmentOverview.Application;
 using Platform.AssignmentOverview.Contracts;
+using Platform.AssignmentOverview.Domain;
+using Platform.AssignmentOverview.Infrastructure;
 
 namespace Platform.Api.Endpoints;
 
@@ -11,7 +14,9 @@ public sealed record MyAssignmentResponse(
     string PublishedLabRevisionId,
     DateTimeOffset? AvailableFromUtc,
     DateTimeOffset DueAtUtc,
-    int MaxAttempts);
+    int MaxAttempts,
+    bool IsLocked,
+    IReadOnlyList<Guid> MissingAssignmentIds);
 
 public sealed record MyAssignmentsResponse(
     IReadOnlyList<MyAssignmentResponse> Assignments,
@@ -38,6 +43,8 @@ public static class MyAssignmentsEndpoints
         HttpContext context,
         IIdentityContext identity,
         [FromServices] IMyAssignmentsService service,
+        [FromServices] AssignmentLockService locks,
+        [FromServices] ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         var correlationId = Guid.NewGuid().ToString("N");
@@ -51,9 +58,35 @@ public static class MyAssignmentsEndpoints
                 statusCode: StatusCodes.Status401Unauthorized);
         }
 
-        var assignments = await service.GetForStudentAsync(
-            caller.UserId.Value.ToString(),
-            cancellationToken);
+        var studentId = caller.UserId.Value.ToString();
+
+        IReadOnlyList<StudentAssignmentView> assignments;
+        IReadOnlyDictionary<Guid, AssignmentLockStatus> lockStatuses;
+
+        try
+        {
+            assignments = await service.GetForStudentAsync(
+                studentId,
+                cancellationToken);
+
+            // ASN-07: zaključanost računa server; klijent je samo prikazuje.
+            lockStatuses = await locks.GetLockStatusesAsync(
+                studentId,
+                assignments,
+                cancellationToken);
+        }
+        catch (DependencyUnavailableException ex)
+        {
+            // Fail-closed, ali kontrolisano: bez podataka, bez detalja o grešci, sa ID-jem za log.
+            loggerFactory.CreateLogger("MyAssignments").LogWarning(
+                "My assignments unavailable: {Contract} is not connected. CorrelationId {CorrelationId}",
+                ex.Contract,
+                correlationId);
+
+            return Results.Json(
+                new MyAssignmentsErrorResponse("service_unavailable", correlationId),
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
 
         return Results.Ok(new MyAssignmentsResponse(
             assignments
@@ -63,7 +96,9 @@ public static class MyAssignmentsEndpoints
                     a.PublishedLabRevisionId,
                     a.AvailableFromUtc,
                     a.DueAtUtc,
-                    a.MaxAttempts))
+                    a.MaxAttempts,
+                    lockStatuses[a.AssignmentId].IsLocked,
+                    lockStatuses[a.AssignmentId].MissingAssignmentIds))
                 .ToList(),
             correlationId));
     }

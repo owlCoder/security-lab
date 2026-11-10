@@ -30,6 +30,9 @@ public static class DevelopmentAssignmentData
         new Assignment(SecurityAssignmentId, CourseSecurity, "rev-xss-1", null, Due, 2),
 
         // Kurs na koji student nije upisan; ne sme da se pojavi u njegovoj listi.
-        new Assignment(OtherCourseAssignmentId, CourseOther, "rev-csrf-1", null, Due, 1)
+        new Assignment(OtherCourseAssignmentId, CourseOther, "rev-csrf-1", null, Due, 1),
+
+        // ASN-07: dodele sa preduslovima, za prikaz „zaključano“.
+        .. DevelopmentLockData.CreateAssignments()
     ];
 }
