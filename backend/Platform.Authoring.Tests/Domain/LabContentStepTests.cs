@@ -68,4 +68,91 @@ public class LabContentStepTests
 
         Assert.That(ex.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepSequence));
     }
+    [Test]
+    public void Step_with_empty_title_is_rejected()
+    {
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabStep.Create(1, "", "Do this first."));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepTitle));
+    }
+
+    [Test]
+    public void Step_with_whitespace_title_is_rejected()
+    {
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabStep.Create(1, "   ", "Do this first."));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepTitle));
+    }
+
+    [Test]
+    public void Step_with_empty_instruction_is_rejected()
+    {
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabStep.Create(1, "Step One", ""));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepInstruction));
+    }
+
+    [Test]
+    public void Step_with_whitespace_instruction_is_rejected()
+    {
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabStep.Create(1, "Step One", "   "));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepInstruction));
+    }
+
+    [Test]
+    public void Step_title_exceeding_max_length_is_rejected()
+    {
+        var title = new string('A', LabStep.MaxTitleLength + 1);
+
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabStep.Create(1, title, "Do this first."));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepTitle));
+    }
+
+    [Test]
+    public void Step_instruction_exceeding_max_length_is_rejected()
+    {
+        var instruction = new string('A', LabStep.MaxInstructionLength + 1);
+
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabStep.Create(1, "Step One", instruction));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepInstruction));
+    }
+    [Test]
+    public void Steps_with_null_entry_are_rejected()
+    {
+        LabStep?[] steps =
+        {
+        LabStep.Create(1, "Step One", "Do this first."),
+        null
+    };
+
+        var ex = Assert.Throws<DomainRuleException>(() =>
+            LabContent.Create("Lab", "Goal", LabType.AccessControl, steps!));
+
+        Assert.That(ex!.Code, Is.EqualTo(AuthoringErrorCodes.InvalidStepSequence));
+    }
+
+    [Test]
+    public void Steps_are_stored_in_sequence_order()
+    {
+        var steps = new[]
+        {
+        LabStep.Create(3, "Step Three", "Do this third."),
+        LabStep.Create(1, "Step One", "Do this first."),
+        LabStep.Create(2, "Step Two", "Do this second.")
+    };
+
+        var content = LabContent.Create("Lab", "Goal", LabType.AccessControl, steps);
+
+        Assert.That(content.Steps.Select(s => s.SequenceOrder),
+            Is.EqualTo(new[] { 1, 2, 3 }));
+    }
 }

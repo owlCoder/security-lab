@@ -35,9 +35,17 @@ public sealed record LabContent
         if (!Enum.IsDefined(type))
             throw new DomainRuleException(AuthoringErrorCodes.InvalidLabType);
 
-        var stepList = (steps?.ToArray() ?? Array.Empty<LabStep>());
+        var stepList = steps?.ToArray() ?? Array.Empty<LabStep>();
 
-        var orderedSteps = stepList.OrderBy(s => s.SequenceOrder).ToArray();
+        if (stepList.Any(step => step is null))
+        {
+            throw new DomainRuleException(AuthoringErrorCodes.InvalidStepSequence);
+        }
+
+        var orderedSteps = stepList
+            .OrderBy(step => step.SequenceOrder)
+            .ToArray();
+
         for (int i = 0; i < orderedSteps.Length; i++)
         {
             if (orderedSteps[i].SequenceOrder != i + 1)
@@ -46,6 +54,6 @@ public sealed record LabContent
             }
         }
 
-        return new LabContent { Title = cleanTitle, Goal = cleanGoal, Type = type, Steps = stepList };
+        return new LabContent { Title = cleanTitle, Goal = cleanGoal, Type = type, Steps = orderedSteps };
     }
 }
