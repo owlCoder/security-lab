@@ -386,9 +386,9 @@ public class ConfigurationValidationTests
 
     
     [Test]
-    public async Task ACC05_Startup_DefaultConfiguration_Succeeds()
+    public async Task ACC05_Startup_WithExplicitPolicyExemptions_Succeeds()
     {
-        await using var provider = BuildProvider(_ => { });
+        await using var provider = BuildProvider(ConfigureCoursePolicyCoverage);
 
         await StartCheckAsync(provider);
     }
@@ -396,7 +396,7 @@ public class ConfigurationValidationTests
     [Test]
     public async Task ACC05_Startup_FreezesActionAndPolicyRegistration()
     {
-        await using var provider = BuildProvider(_ => { });
+        await using var provider = BuildProvider(ConfigureCoursePolicyCoverage);
         await StartCheckAsync(provider);
 
         var catalog = provider.GetRequiredService<InMemoryActionCatalog>();
@@ -508,6 +508,23 @@ public class ConfigurationValidationTests
         services.AddAccessControl();
         return services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
+    }
+
+    private static void ConfigureCoursePolicyCoverage(IServiceCollection services)
+    {
+        var actionsWithPolicies = CourseRolePolicies.All
+            .Select(definition => definition.Action.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var actionsWithoutPolicies = AccessActions.All
+            .Select(definition => definition.Id)
+            .Where(action => !actionsWithPolicies.Contains(action))
+            .ToHashSet(StringComparer.Ordinal);
+
+        services.AddSingleton(new AccessConfigurationOptions
+        {
+            RequirePolicyCoverage = true,
+            ActionsWithoutPolicy = actionsWithoutPolicies
+        });
     }
 
     private static async Task StartCheckAsync(IServiceProvider provider)
