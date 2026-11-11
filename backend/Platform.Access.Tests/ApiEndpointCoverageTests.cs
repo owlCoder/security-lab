@@ -12,6 +12,38 @@ namespace Platform.Access.Tests.AspNet;
 [Property("RequirementId", "ACC-05")]
 public class ApiEndpointCoverageTests
 {
+    private static readonly HashSet<string> ApprovedPublicRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/api/health",
+        "/api/access/demo-deny",   
+    };
+
+    // Each of these existing routes has an independently tested authorization
+    // guard or credential check in its own handler/filter. No new route may be
+    // delegated without an explicit review and addition to this inventory.
+    private static readonly HashSet<string> ApprovedDelegatedRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/api/admin/accounts",
+        "/api/admin/accounts/{id:guid}/status",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/me",
+        "/api/authoring/templates",
+        "/api/authoring/templates/{templateId:guid}/drafts",
+        "/api/laboratories/",
+        "/api/laboratories/{id:guid}",
+        "/api/laboratories/{id:guid}/title",
+        "/api/labs/",
+        "/api/labs/{id:guid}",
+        "/api/labs/{id:guid}/title",
+        // AUT-07: PreviewStudentView poziva IAccessDecision (lab.preview + LabPreviewPolicy).
+        "/api/labs/{id:guid}/preview",
+        // AUT-04: session identity and account status are checked by LabCaller.
+        // GetStudentLabView calls IAccessDecision before returning public content.
+        // HTTP access boundaries are covered by StudentLabViewTests.
+        "/api/labs/{id:guid}/student-view",
+    };
+
     [Test]
     public void ACC05_Every_real_route_is_protected_or_approved_public()
     {
