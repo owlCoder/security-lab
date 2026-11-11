@@ -1,13 +1,16 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Platform.Audit.Contracts;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Integration;
 
 namespace Platform.Identity.Tests.Helpers;
 
-public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProgram> where TProgram : class 
+public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProgram> where TProgram : class
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -27,6 +30,11 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
             {
                 options.UseNpgsql(TestDatabaseFixture.ConnectionString);
             });
+        });
+        builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ITrustedAuditWriter>();
+            services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
         });
     }
 }

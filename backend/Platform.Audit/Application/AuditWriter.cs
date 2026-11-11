@@ -101,7 +101,7 @@ internal sealed class AuditWriter : IAuditWriter, ITrustedAuditWriter
 /// Supplies actor and correlation data from trusted server infrastructure. An
 /// implementation must not construct this context from an HTTP body or query string.
 /// </summary>
-internal interface IAuditContextProvider
+public interface IAuditContextProvider
 {
     AuditContext? GetCurrentContext();
 }

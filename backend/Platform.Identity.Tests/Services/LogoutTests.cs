@@ -4,6 +4,8 @@ using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
+using Platform.Audit.Contracts;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -21,7 +23,9 @@ public class LogoutTests
     {
         _store = new FakeStore();
         _audit = new RecordingAudit();
-        _logout = new LogoutService(_store, _audit, TimeProvider.System);
+        _logout = new LogoutService(
+            _store,
+            new IdentityAuditProducer(_audit, NullLogger<IdentityAuditProducer>.Instance));
     }
 
     [Test]
@@ -33,11 +37,11 @@ public class LogoutTests
 
         Assert.That(session.RevokedAt, Is.Not.Null);
         var e = _audit.Events.Single();
-        Assert.That(e.Action, Is.EqualTo("auth.logout"));
-        Assert.That(e.ActorId, Is.EqualTo(session.UserId));
-        Assert.That(e.Target, Is.EqualTo(session.SessionHandle.ToString()));
-        Assert.That(e.Outcome, Is.EqualTo("success"));
-        Assert.That(e.CorrelationId, Is.EqualTo("corr-1"));
+        Assert.That(e.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthLogout));
+        Assert.That(e.Context.Actor.Id, Is.EqualTo(session.UserId));
+        Assert.That(e.Draft.Resource, Is.Null);
+        Assert.That(e.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+        Assert.That(e.Context.CorrelationId, Is.EqualTo("corr-1"));
     }
 
     [Test]
@@ -91,8 +95,19 @@ public class LogoutTests
         await _logout.ExecuteAsync(Token, "corr-7");
 
         var e = _audit.Events.Single();
-        Assert.That(string.Join('|', e.Action, e.Target, e.Outcome, e.CorrelationId, e.Detail),
+        Assert.That(string.Join('|', e.Draft.EventType, e.Draft.Outcome, e.Context.CorrelationId),
             Does.Not.Contain(Token));
+    }
+
+    [Test]
+    public async Task AuditUnavailable_DoesNotRestoreRevokedSession()
+    {
+        var session = _store.Add(Token, Guid.NewGuid());
+        _audit.Result = AuditWriteResult.Unavailable();
+
+        await _logout.ExecuteAsync(Token, "corr-audit-down");
+
+        Assert.That(session.RevokedAt, Is.Not.Null);
     }
 
     private sealed class FakeStore : ISessionStore
@@ -130,9 +145,20 @@ public class LogoutTests
             throw new NotSupportedException();
     }
 
-    private sealed class RecordingAudit : IAuditWriter
+    private sealed record RecordedAudit(AuditEventDraft Draft, AuditContext Context);
+
+    private sealed class RecordingAudit : ITrustedAuditWriter
     {
-        public List<AuditEvent> Events { get; } = [];
-        public void Write(AuditEvent e) => Events.Add(e);
+        public List<RecordedAudit> Events { get; } = [];
+        public AuditWriteResult Result { get; set; } = AuditWriteResult.Recorded(Guid.NewGuid());
+
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft,
+            AuditContext context,
+            CancellationToken cancellationToken = default)
+        {
+            Events.Add(new RecordedAudit(draft, context));
+            return ValueTask.FromResult(Result);
+        }
     }
 }

@@ -18,6 +18,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.Identity.Services;
+using Platform.Audit.Contracts;
 
 namespace Platform.RateLimiting.Tests;
 
@@ -294,6 +295,10 @@ public sealed class LoginEndpointRateLimitingTests
                 services.AddSingleton<ICredentialVerifier>(Credentials);
                 services.RemoveAll<ISessionCreator>();
                 services.AddSingleton<ISessionCreator, FakeSessionCreator>();
+                // This fixture isolates IDN-05 throttling and has no Audit database. Successful
+                // login still needs the mandatory writer contract to report a durable record.
+                services.RemoveAll<ITrustedAuditWriter>();
+                services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
             });
         }
     }
@@ -322,4 +327,13 @@ internal sealed class FakeSessionCreator : ISessionCreator
     public Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default) =>
         Task.FromResult<IssuedSession?>(new IssuedSession(
             Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(1)));
+}
+
+internal sealed class SuccessfulAuditWriter : ITrustedAuditWriter
+{
+    public ValueTask<AuditWriteResult> WriteAsync(
+        AuditEventDraft draft,
+        AuditContext context,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(AuditWriteResult.Recorded(draft.EventId ?? Guid.NewGuid()));
 }

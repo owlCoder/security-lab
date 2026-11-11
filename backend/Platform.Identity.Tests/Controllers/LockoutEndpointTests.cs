@@ -2,13 +2,17 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Persistence;
+using Platform.Identity.Tests.Helpers;
 using Testcontainers.PostgreSql;
 
 namespace Platform.Identity.Tests.Controllers;
@@ -31,6 +35,11 @@ public sealed class LockoutEndpointTests
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting("ConnectionStrings:Identity", connectionString);
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ITrustedAuditWriter>();
+                services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
+            });
         }
     }
 
