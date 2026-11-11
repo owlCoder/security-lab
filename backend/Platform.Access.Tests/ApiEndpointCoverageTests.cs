@@ -93,7 +93,7 @@ public class ApiEndpointCoverageTests
         Assert.That((await client.GetAsync("/api/health")).StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
         var res = await client.GetAsync($"/api/laboratories/{Guid.NewGuid()}");
-        Assert.That(res.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(res.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
         Assert.That(await res.Content.ReadAsStringAsync(), Does.Not.Contain("laboratory"));
 
         Assert.That((await client.GetAsync("/api/test/no-metadata")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
