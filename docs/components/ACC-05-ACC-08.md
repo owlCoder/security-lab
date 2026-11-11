@@ -96,8 +96,9 @@ poziv na zamrznutom Access katalogu/registu namerno baca grešku.
 API host zahteva potpunu pokrivenost politika za sve akcije koje se mogu
 koristiti. Jedine izuzetke eksplicitno navodi `ActionsWithoutPolicy`; oni ostaju
 bez politike i zato se i dalje odbijaju (`NoPolicy`). Trenutni izuzeci su
-`public.info.read`, `public.catalog.read`, `system.config.manage`,
-`results.sensitive.read` i `evaluation.task.process`. Izuzetak nije dozvola.
+`public.catalog.read`, `account.status.change`, `system.config.manage`,
+`results.sensitive.read` i `evaluation.task.process`. Izuzetak nije dozvola;
+`public.info.read` nije izuzetak i ima registrovanu politiku.
 `ActionScope.Unknown` i nevažeći resource type odbacuju se prilikom validacije.
 Resource type je case-sensitive ASCII obrazac `[a-z][a-z0-9-]{0,63}`; isti
 validator koriste katalog i ASP.NET endpoint metadata.
@@ -215,114 +216,193 @@ moduli treba da ga obezbede kroz dogovorenu integraciju.
 ## Dijagram arhitekture
 
 ```mermaid
-flowchart LR
-  subgraph CONFIG["Kompozicija hosta"]
-    ACTIONS["AccessActions.All"] --> CATALOG["InMemoryActionCatalog"]
-    BUILTIN_POLICIES["CourseRolePolicies.All"] --> REGISTRY["InMemoryAccessPolicyRegistry"]
-    ADD_ACTION["AddAccessAction<TPolicy>(definition)"] --> CATALOG
-    ADD_ACTION --> REGISTRY["InMemoryAccessPolicyRegistry"]
-    ADD_POLICY["AddAccessPolicy<TPolicy>(action)"] --> REGISTRY
-    CATALOG --> STARTUP["AccessConfigurationStartupCheck<br/>validnost, policy coverage / exemptions<br/>i zamrzavanje"]
+flowchart TB
+  CLIENT["Klijent"] --> ROUTING["HTTP rutiranje"]
+  ROUTING --> ACM["AccessControlMiddleware"]
+  ENDPOINT_META["Endpoint metapodaci<br/>RequireAccess action/resurs"] --> ACM
+  ACM -->|"endpoint nije pronađen"| NEXT["Nastavak pipeline-a bez Access odluke"]
+
+  subgraph IDENTITY["Identifikacija subjekta"]
+    ACM --> SUBJECT_PROVIDER["IAccessSubjectProvider"]
+    SUBJECT_PROVIDER --> SUBJECT["SubjectRef ili null"]
+  end
+  ACM --> REQUEST["AccessRequest"]
+  SUBJECT --> REQUEST
+
+  subgraph DECISION_FLOW["Odluka o pristupu"]
+    REQUEST --> DECISION["DefaultDenyAccessDecision"]
+    DECISION --> CATALOG["IActionCatalog"]
+    CATALOG --> DECISION
+    DECISION --> REGISTRY["IAccessPolicyRegistry"]
+    REGISTRY --> POLICY["IAccessPolicy"]
+    POLICY --> RESOLVERS["Membership / resource resolvers"]
+    RESOLVERS --> POLICY
+    POLICY --> DECISION
+  end
+
+  subgraph CONFIGURATION["Konfiguracija i startup"]
+    ACTIONS["Centralne i dodatno registrovane akcije"] --> CATALOG
+    POLICIES["Ugrađene i dodatno registrovane politike"] --> REGISTRY
+    CATALOG --> STARTUP["Startup konfiguraciona validacija"]
     REGISTRY --> STARTUP
   end
+  DECISION --> ACM
 
-  CLIENT["Klijent"] -->|"HTTP zahtev"| ACM["AccessControlMiddleware"]
-  ENDPOINT_META["Routovani endpoint: metapodaci<br/>tačno jedan RequireAccess zahtev;<br/>public / delegated metadata se odbija"] --> ACM
-  ACM -->|"GetSubjectAsync(HttpContext)"| SUBJECT_PROVIDER["IAccessSubjectProvider"]
-  SUBJECT_PROVIDER -->|"SubjectRef ili null"| ACM
-  REVISION["RevisionSessionSubjectProvider<br/>revision rute: cookie, ISessionManager<br/>i IAccountStatusReader"] --> SUBJECT_PROVIDER
-  DEFAULT["DevelopmentFakeSubjectProvider u Development;<br/>inače AnonymousAccessSubjectProvider"] --> SUBJECT_PROVIDER
-  ACM -->|"validirana action, route vrednost i subject"| REQUEST["AccessRequest<br/>subject, action, resource, correlationId"]
-  REQUEST -->|"DecideAsync; middleware rok 3 s"| DECISION["DefaultDenyAccessDecision"]
-  DECISION -->|"action ID"| CATALOG
-  CATALOG -->|"ActionDefinition"| CHECKS["Provera scope-a, tipa resursa,<br/>subjekta i aktivnog naloga<br/>(osim Public akcija)"]
-  CATALOG -->|"nema akcije → UnknownAction"| DECISION
-  CHECKS -->|"prolazi: action ID"| REGISTRY
-  CHECKS -->|"ne prolazi → Deny + razlog"| DECISION
-  REGISTRY -->|"registrovana politika"| POLICY_META["Provera policy Id/version"]
-  DECISION -->|"AccessRequest; PolicyTimeout (2 s)"| POLICY_META
-  POLICY_META -->|"validna politika + AccessRequest"| POLICY["IAccessPolicy<br/>npr. CourseRoleAccessPolicy"]
-  POLICY_META -->|"prazan Id/version → PolicyError"| DECISION
-  REGISTRY -->|"nema politike → NoPolicy"| DECISION
-  POLICY -->|"ResourceRef"| RESOURCE["IResourceDescriptorResolver;<br/>IResourceOwnershipResolver<br/>samo kada se zahteva vlasništvo"]
-  RESOURCE -->|"course ID / owner ID"| POLICY
-  POLICY -->|"account ID + course ID"| MEMBERSHIP["IMembershipReader"]
-  MEMBERSHIP -->|"članstvo, status, uloga,<br/>delegirane akcije"| POLICY
-  POLICY -->|"true → Allow; false → PolicyDenied;<br/>izuzetak ili timeout → PolicyError"| DECISION
-  DECISION -->|"AccessDecision: Allow ili Deny,<br/>razlog, policy ID/verzija, correlationId"| ACM
+  subgraph AUDIT_FLOW["Audit odbijanja"]
+    DECISION --> AUDIT_ADAPTER["IAccessAuditWriter"]
+    ACM -->|"odbijanja pre evaluacije"| AUDIT_ADAPTER
+    AUDIT_ADAPTER --> WRITER_BINDING["Audit writer registrovan u hostu"]
+    WRITER_BINDING -->|"API host"| CENTRAL_AUDIT["CentralAccessAuditWriter"]
+    CENTRAL_AUDIT -->|"samo Deny"| TRUSTED_AUDIT["ITrustedAuditWriter"]
+    WRITER_BINDING -->|"logger fallback host"| LOGGER_WRITER["LoggerAccessAuditWriter"]
+    LOGGER_WRITER --> LOG["Host logger"]
+  end
 
-  ACM -->|"nevažeći Access metadata, subject-provider greška<br/>ili ne-client decision timeout/greška"| EARLY_DENY["Deny + PolicyError"]
-  EARLY_DENY -->|"AccessRequest + AccessDecision"| AUDIT["IAccessAuditWriter"]
-  DECISION -->|"AccessRequest + AccessDecision<br/>(Allow i Deny)"| AUDIT
-  AUDIT -->|"Allow se ignoriše; Deny se mapira"| CENTRAL_AUDIT["CentralAccessAuditWriter<br/>→ ITrustedAuditWriter"]
-  AUDIT -->|"greška; decision-path AuditTimeout 1 s<br/>se loguje, odluka ostaje ista"| LOG["ILogger"]
-
-  ACM -->|"Allow → _next"| SESSION["SessionCheckMiddleware<br/>gde je primenjen"]
-  SESSION -->|"sesija prihvaćena / anonymous ruta"| HANDLER["Izvršavanje endpoint-a"]
-  ACM -->|"401 / 403 ProblemDetails;<br/>samo correlationId"| RESPONSE["HTTP odgovor klijentu"]
-  EARLY_DENY -->|"401 / 403 prema grani odbijanja"| RESPONSE
-  ACM -->|"Deny: 401 za Unauthenticated/null subject,<br/>inače 403"| RESPONSE
-  SESSION -->|"sesija nedostaje/nevažeća: 401"| RESPONSE
-  RESPONSE --> CLIENT
+  subgraph RESPONSE_FLOW["Nastavak zahteva i odgovor"]
+    NEXT --> SESSION
+    ACM -->|"Allow"| SESSION["SessionCheckMiddleware<br/>gde je registrovan"]
+    SESSION --> ENDPOINT["Endpoint"]
+    ACM -->|"Deny"| RESPONSE["Access ProblemDetails<br/>401/403"]
+    SESSION -->|"nevažeća sesija"| SESSION_FAILURE["401 status<br/>bez Access ProblemDetails"]
+    RESPONSE --> CLIENT
+    SESSION_FAILURE --> CLIENT
+    ENDPOINT --> CLIENT
+  end
 ```
 
-**Veza sa platformom:** `Platform.Api` je kompozicioni sloj; moduli registruju odobrene akcije/politike pre izgradnje hosta i koriste server-side resolvere preko javnih ugovora.
+Definicije kataloga se validiraju pri njegovoj izgradnji. Pri pokretanju se
+katalog i registar zamrzavaju, a zatim se proveravaju pokrivenost politika i
+izuzeci; konfiguraciona greška prekida pokretanje. U API hostu audit adapter je
+centralni; drugi hostovi mogu koristiti logger fallback. Session middleware je
+posle Access middleware-a u API pipeline-u.
 
-## Dijagram toka podataka
+## Dijagrami toka podataka
+
+### 1. Konfiguracioni podaci
 
 ```mermaid
-flowchart LR
-  subgraph CLIENT["Granica poverenja: klijent"]
-    USER["Korisnik"] -->|"HTTP zahtev; session cookie ako postoji"| HTTP["HTTP zahtev"]
-  end
-
-  subgraph SERVER["Granica poverenja: serverska platforma"]
-    HTTP --> ROUTING["UseRouting: endpoint i route vrednosti"]
-    ROUTING -->|"HTTP zahtev / HttpContext"| MIDDLEWARE["AccessControlMiddleware"]
-    ROUTING -->|"endpoint metadata + route vrednosti;<br/>action, resource type, route-param naziv"| MIDDLEWARE
-    MIDDLEWARE -->|"GetSubjectAsync(HttpContext)"| SUBJECT_PROVIDER["RevisionSessionSubjectProvider<br/>IAccessSubjectProvider dekorator"]
-    SUBJECT_PROVIDER -->|"revision ruta: cookie token"| IDENTITY["ISessionManager<br/>IAccountStatusReader"]
-    IDENTITY -->|"validirana sesija / status"| SUBJECT_PROVIDER
-    OTHER_PROVIDER["Unutrašnji provider za druge rute:<br/>DevelopmentFakeSubjectProvider<br/>ili AnonymousAccessSubjectProvider"] --> SUBJECT_PROVIDER
-    SUBJECT_PROVIDER -->|"SubjectRef ili null"| MIDDLEWARE
-    MIDDLEWARE -->|"validni action i ResourceRef iz route vrednosti;<br/>SubjectRef/null + TraceIdentifier"| REQUEST["AccessRequest"]
-    MIDDLEWARE -->|"nevažeći endpoint metadata, route ID,<br/>subject lookup ili decision exception"| PRECHECK_DENY["Pre-evaluation Deny<br/>+ PolicyError"]
-
-    REQUEST --> DECISION["DefaultDenyAccessDecision"]
-    DECISION -->|"action ID"| CATALOG[("IActionCatalog<br/>ActionDefinition")]
-    CATALOG -->|"ActionDefinition"| CHECKS["Provera scope-a, tipa resursa,<br/>subject-a i AccountState.Active<br/>(osim Public akcija)"]
-    CATALOG -->|"akcija nije u katalogu → UnknownAction"| DECISION
-    REQUEST -->|"SubjectRef/state + ResourceRef"| CHECKS
-    CHECKS -->|"neusklađen scope/resurs → PolicyError;<br/>nedostaje/neaktivan subject → Deny"| DECISION
-    CHECKS -->|"validno: action ID"| REGISTRY[("IAccessPolicyRegistry<br/>mapa action ID → politika")]
-    REGISTRY -->|"registrovana politika"| SELECT["Provera policy Id/version"]
-    REGISTRY -->|"nema politike → NoPolicy"| DECISION
-    SELECT -->|"prazan Id/version → PolicyError"| DECISION
-    DECISION -->|"AccessRequest + PolicyTimeout (2 s);<br/>middleware decision cap 3 s"| SELECT
-    SELECT -->|"validna politika + AccessRequest"| POLICY["IAccessPolicy<br/>prima ceo AccessRequest"]
-    POLICY -->|"ResourceRef"| RESOLVER["IResourceDescriptorResolver<br/>i, kada je zahtevano,<br/>IResourceOwnershipResolver"]
-    RESOLVER -->|"course ID / owner ID"| POLICY
-    POLICY -->|"account ID + course ID"| MEMBERSHIP["IMembershipReader"]
-    MEMBERSHIP -->|"članstvo, status, uloga,<br/>delegirane akcije"| POLICY
-    POLICY -->|"true / false;<br/>greška ili timeout"| DECISION
-    DECISION -->|"AccessDecision: Allow ili Deny,<br/>razlog, policy ID/verzija, correlationId"| MIDDLEWARE
-
-    DECISION -->|"AccessRequest + AccessDecision<br/>za svaki ishod; AuditTimeout 1 s"| AUDIT_ADAPTER["IAccessAuditWriter"]
-    PRECHECK_DENY -->|"AccessRequest + Deny AccessDecision"| AUDIT_ADAPTER
-    AUDIT_ADAPTER -->|"Allow se ignoriše; Deny draft:<br/>denialReason + valid action/policyId/version;<br/>context: actor + correlationId<br/>(bez ResourceRef)"| AUDIT["ITrustedAuditWriter"]
-    AUDIT_ADAPTER -->|"greška logovana; na decision putanji<br/>AuditTimeout 1 s ne menja ishod"| LOG["ILogger"]
-    AUDIT -->|"nije zabeležen / greška: warning ili log"| LOG
-
-    DECISION -->|"Allow"| MIDDLEWARE
-    DECISION -->|"Deny + razlog"| MIDDLEWARE
-    MIDDLEWARE -->|"Allow"| LATER["Dalji pipeline:<br/>SessionCheckMiddleware gde se primenjuje"]
-    LATER -->|"nastavak"| ENDPOINT["Endpoint"]
-    MIDDLEWARE -->|"Deny: 401 ako je neautentifikovan,<br/>inače 403; ProblemDetails s correlationId"| HTTP_RESPONSE["Konačan HTTP odgovor"]
-    PRECHECK_DENY -->|"401 / 403 prema grani odbijanja"| HTTP_RESPONSE
-    LATER -->|"nevažeća/nedostajuća sesija: 401"| HTTP_RESPONSE
-  end
-  HTTP_RESPONSE -->|"HTTP odgovor"| USER
+flowchart TB
+  ACTION_DEFS["AccessActions.All<br/>dodatne ActionDefinition"] --> CATALOG_VALIDATION["Validacija ID-a, scope-a,<br/>resource type-a, duplikata<br/>i obaveznih akcija"]
+  CATALOG_VALIDATION --> CATALOG["InMemoryActionCatalog"]
+  POLICY_DEFS["CourseRolePolicies.All<br/>AddAccessPolicy registracije"] --> REGISTRY["InMemoryAccessPolicyRegistry"]
+  ADD_ACTION["AddAccessAction registracije"] --> CATALOG_VALIDATION
+  ADD_ACTION --> REGISTRY
+  CONFIG["AccessConfigurationOptions"] --> STARTUP["AccessConfigurationStartupCheck"]
+  CATALOG --> STARTUP
+  REGISTRY --> STARTUP
+  STARTUP --> FREEZE["Zamrzavanje registra i kataloga"]
+  FREEZE --> VALIDATE["AccessConfigurationValidator.Validate"]
+  VALIDATE -->|"validno"| READY["Katalog/registar spremni"]
+  VALIDATE -->|"konfiguracija ne prolazi validaciju"| CONFIG_ERROR["Greška pri pokretanju"]
+  READY -->|"akcija bez politike, uz eksplicitni izuzetak"| NO_POLICY["Runtime odluka: NoPolicy"]
 ```
+
+### 2. HTTP zahtev i AccessRequest
+
+```mermaid
+flowchart TB
+  CLIENT["Klijent"] -->|"HTTP zahtev + mogući session cookie"| ROUTING["UseRouting"]
+  ROUTING -->|"HttpContext sa endpoint-om i route vrednostima"| ACM["AccessControlMiddleware"]
+  ACM --> META_CHECK["Provera Access metapodataka"]
+  META_CHECK -->|"tačno jedan RequireAccess;<br/>nije public/delegated"| SUBJECT_LOOKUP["IAccessSubjectProvider.GetSubjectAsync"]
+  META_CHECK -->|"nedostaje/više zahteva,<br/>public ili delegated"| EARLY_DENY["Pre-decision Deny"]
+  SUBJECT_LOOKUP --> REVISION_PROVIDER["RevisionSessionSubjectProvider<br/>dekorator"]
+  REVISION_PROVIDER -->|"revision ruta: session cookie"| SESSION_MANAGER["ISessionManager.ValidateAsync"]
+  SESSION_MANAGER -->|"validna aktivna sesija"| ACCOUNT_READER["IAccountStatusReader.FindAsync"]
+  ACCOUNT_READER -->|"nalog Active + validan user ID"| SUBJECT["SubjectRef(user ID, Active)"]
+  SESSION_MANAGER -->|"nema/nevažeća/neaktivna sesija"| NO_SUBJECT["null subject"]
+  ACCOUNT_READER -->|"nalog nedostaje ili nije Active"| NO_SUBJECT
+  REVISION_PROVIDER -->|"ostale rute: prosledi inner provider-u"| INNER["DevelopmentFakeSubjectProvider<br/>ili AnonymousAccessSubjectProvider"]
+  INNER -->|"SubjectRef ili null"| SUBJECT_RESULT["Subject provider rezultat"]
+  SUBJECT --> SUBJECT_RESULT
+  NO_SUBJECT --> SUBJECT_RESULT
+  SUBJECT_RESULT -->|"SubjectRef ili null"| ACM
+  ACM --> ACTION_CHECK["Validacija ActionId"]
+  SUBJECT_LOOKUP -->|"izuzetak"| EARLY_DENY
+  ACTION_CHECK -->|"nevažeći action ID"| EARLY_DENY
+  ACTION_CHECK -->|"validno"| RESOURCE_CHECK["Izgradnja ResourceRef"]
+  RESOURCE_CHECK -->|"resource type + ID iz route parametra;<br/>provera i normalizacija"| RESOURCE["ResourceRef ili null"]
+  RESOURCE_CHECK -->|"loš metadata/route ID"| EARLY_DENY
+  RESOURCE --> REQUEST["AccessRequest<br/>subject, action, resource, correlationId"]
+  ACM -->|"SubjectRef ili null"| REQUEST
+  ACTION_CHECK -->|"action"| REQUEST
+  ACM -->|"TraceIdentifier"| REQUEST
+  EARLY_DENY -->|"middleware pravi AccessRequest<br/>sa dostupnim podacima"| EARLY_REQUEST["AccessRequest (može biti nepotpun)"]
+  EARLY_DENY -->|"Deny: PolicyError"| EARLY_DECISION["AccessDecision"]
+```
+
+### 3. Podaci odluke i politike
+
+```mermaid
+flowchart TB
+  REQUEST["AccessRequest<br/>subject, action, resource, correlationId"] --> ENGINE["DefaultDenyAccessDecision"]
+  ENGINE -->|"action ID"| CATALOG["IActionCatalog"]
+  CATALOG -->|"nema akcije"| UNKNOWN["Deny: UnknownAction"]
+  CATALOG -->|"startup-validirana ActionDefinition"| CHECKS["Provera scope/resursa/subjekta"]
+  REQUEST --> CHECKS
+  CHECKS -->|"nevažeći scope ili resource type"| INVALID["Deny: PolicyError"]
+  CHECKS -->|"osim Public: subject null/neaktivan"| UNAUTH["Deny: Unauthenticated / AccountNotActive"]
+  CHECKS -->|"validno"| REGISTRY["IAccessPolicyRegistry"]
+  REGISTRY -->|"nema politike"| NO_POLICY["Deny: NoPolicy"]
+  REGISTRY -->|"politika postoji"| POLICY_CHECK["Provera policy Id/version"]
+  POLICY_CHECK -->|"nedostaje Id/version"| INVALID
+  POLICY_CHECK -->|"validna politika + AccessRequest"| POLICY["IAccessPolicy<br/>npr. CourseRoleAccessPolicy"]
+  POLICY -->|"ResourceRef"| RESOLVER["IResourceDescriptorResolver<br/>(mora i IResourceOwnershipResolver<br/>kad se traži vlasništvo)"]
+  RESOLVER -->|"course ID / owner ID"| POLICY
+  POLICY -->|"account ID + course ID"| MEMBERSHIP["IMembershipReader"]
+  MEMBERSHIP -->|"account/course ID, Active status,<br/>role i delegated actions"| POLICY
+  POLICY -->|"true"| ALLOW["Allow"]
+  POLICY -->|"false"| DENY["Deny: PolicyDenied"]
+  POLICY -->|"izuzetak/PolicyTimeout 2 s"| INVALID
+  ENGINE -->|"greška evaluacije, policy timeout ili cancellation<br/>(PolicyError; middleware token nakon 3 s)"| INVALID
+  UNKNOWN --> RESULT["AccessDecision<br/>outcome, reason, policyId/version,<br/>correlationId"]
+  INVALID --> RESULT
+  UNAUTH --> RESULT
+  NO_POLICY --> RESULT
+  ALLOW --> RESULT
+  DENY --> RESULT
+```
+
+### 4. Audit podaci
+
+```mermaid
+flowchart TB
+  ENGINE["Decision engine"] -->|"AccessRequest + AccessDecision<br/>za svaki ishod"| AUDIT["IAccessAuditWriter"]
+  EARLY["Middleware denial pre decision-a"] -->|"AccessRequest + Deny"| AUDIT
+  AUDIT -->|"Allow"| IGNORE["Central adapter ga ignoriše"]
+  AUDIT -->|"Deny"| CENTRAL["CentralAccessAuditWriter"]
+  CENTRAL --> MAPPER["AccessDeniedAuditMapper"]
+  MAPPER -->|"draft: denialReason, valid action/policy/version;<br/>context: actor + correlationId; bez ResourceRef"| TRUSTED["ITrustedAuditWriter"]
+  TRUSTED -->|"nije zabeležen"| WARNING["ILogger warning"]
+  CENTRAL -->|"greška"| CALLER["Pozivalac"]
+  CALLER -->|"decision audit: timeout 1 s;<br/>middleware pre-decision audit: bez sopstvenog timeout-a"| LOG["ILogger; odluka ostaje Deny"]
+  AUDIT -->|"samo kada je fallback registrovan"| FALLBACK["LoggerAccessAuditWriter"]
+  FALLBACK -->|"loguje samo Deny"| LOG
+```
+
+### 5. Rezultat HTTP obrade
+
+```mermaid
+flowchart TB
+  ACM["AccessControlMiddleware"] -->|"decision Allow"| NEXT["_next"]
+  NEXT --> SESSION["SessionCheckMiddleware"]
+  SESSION -->|"sesija validna / AllowAnonymous /<br/>Development bypass rute"| ENDPOINT["Endpoint"]
+  SESSION -->|"sesija nedostaje ili nevažeća"| SESSION_401["401 status"]
+  ACM -->|"metadata gate rejection /<br/>subject-provider exception"| FORBIDDEN["403 ProblemDetails"]
+  ACM --> STATUS["Status za action/resource grešku<br/>ili Access Deny"]
+  STATUS -->|"subject null ili Unauthenticated"| UNAUTH["401 ProblemDetails"]
+  STATUS -->|"subject postoji i drugi Deny razlog"| FORBIDDEN
+  UNAUTH --> RESPONSE["correlationId; bez razloga/resursa"]
+  FORBIDDEN --> RESPONSE
+  RESPONSE --> CLIENT["HTTP odgovor"]
+  SESSION_401 --> CLIENT
+  ENDPOINT --> CLIENT
+```
+
+`AccessProblemDetailsWriter` vraća 401 za neautentifikovanog subjekta, a inače
+403, sa `correlationId` bez detalja odluke. `SessionCheckMiddleware` može
+postaviti 401 nakon dozvoljene Access odluke; taj odgovor nije ProblemDetails
+koji formira Access middleware.
 
 
 ## Demonstracija
@@ -360,16 +440,3 @@ if (app.Environment.IsDevelopment())
 Ako se API pokrene bez `ASPNETCORE_ENVIRONMENT=Development`, `/api/health` će raditi, ali će `/api/access/demo-deny` vratiti `404 Not Found`. To znači da ruta nije registrovana, a ne da je autorizacija odbila zahtev.
 
 Ovim se proveravaju pokretanje API-ja i početni ACC-05 tok. Demo ruta je samo razvojna i namerno nije dostupna u produkciji.
-
-## Legacy authorization metadata
-
-`DelegatedAuthorizationAttribute` i `DelegateAuthorization()` ostaju samo zbog
-source compatibility-ja. Access middleware ih uvek odbija; marker nikada nije
-dozvola niti migracioni bypass. Rute moraju koristiti jedan `RequireAccess`
-zahtev ili eksplicitno odobreni `AllowPublic`. Nedostajući, višestruki ili
-konfliktni zahtevi se odbijaju i audituju. ACC-05 coverage test odbacuje svaku
-rutu sa legacy markerom.
-
-Audit probni `/__test/audit-events` postoji isključivo u `Testing` hostu
-i oslanja se na testovima definisan sintetički kontekst. Ne postoji u
-produkcijskom registru endpoint-a.
