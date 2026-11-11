@@ -36,19 +36,23 @@ public sealed class AccessControlMiddleware
 
         var requirements = endpoint.Metadata.GetOrderedMetadata<IAccessRequirementMetadata>();
         var requirement = requirements.Count == 1 ? requirements[0] : null;
+#pragma warning disable CS0618 // The middleware intentionally continues rejecting legacy markers during migration.
         var isPublic = endpoint.Metadata.GetMetadata<PublicEndpointMetadata>() is not null
                        || endpoint.Metadata.GetMetadata<AllowPublicAttribute>() is not null;
         var delegated = endpoint.Metadata.GetMetadata<DelegatedAuthorizationAttribute>() is not null;
+#pragma warning restore CS0618
 
         var correlationId = context.TraceIdentifier;
         if (requirement is null || isPublic || delegated)
         {
             _logger.LogWarning(
-                "Endpoint {Endpoint} does not have exactly one access requirement. CorrelationId: {CorrelationId}",
-                endpoint.DisplayName, correlationId);
+                "Access denied for endpoint {Endpoint}: {Reason}. Replace legacy/public authorization metadata with exactly one RequireAccess action and a registered policy. CorrelationId: {CorrelationId}",
+                endpoint.DisplayName,
+                requirement is null ? "missing-or-ambiguous-requirement" : "legacy-or-public-metadata",
+                correlationId);
             await AuditMiddlewareDenialAsync(
                 auditWriter,
-                new AccessRequest(null, string.Empty, null, correlationId),
+                new AccessRequest(null, requirement?.Action ?? string.Empty, null, correlationId),
                 AccessDecision.Deny(AccessDenialReason.PolicyError, correlationId));
             await AccessProblemDetailsWriter.WriteAsync(context, unauthenticated: false, correlationId);
             return;

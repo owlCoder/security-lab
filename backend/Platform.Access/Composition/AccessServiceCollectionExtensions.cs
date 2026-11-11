@@ -25,6 +25,7 @@ public static class AccessServiceCollectionExtensions
         where TPolicy : class, IAccessPolicy
     {
         ArgumentNullException.ThrowIfNull(services);
+        EnsureRegistrationOpen(services);
         ArgumentNullException.ThrowIfNull(definition);
         ActionCatalogValidator.Validate(definition);
 
@@ -47,6 +48,7 @@ public static class AccessServiceCollectionExtensions
         where TPolicy : class, IAccessPolicy
     {
         ArgumentNullException.ThrowIfNull(services);
+        EnsureRegistrationOpen(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
 
         if (!ActionId.IsValid(action))
@@ -88,7 +90,10 @@ public static class AccessServiceCollectionExtensions
 
         services.AddSingleton<AccessControlServicesRegistered>();
         services.TryAddSingleton(new AccessDecisionOptions());
-        services.TryAddSingleton(new AccessConfigurationOptions());
+        services.TryAddSingleton(new AccessConfigurationOptions
+        {
+            RequirePolicyCoverage = true
+        });
         services.TryAddSingleton(TimeProvider.System);
 
         services.AddSingleton<InMemoryActionCatalog>(sp =>
@@ -182,6 +187,15 @@ public static class AccessServiceCollectionExtensions
             .Where(descriptor => descriptor.ServiceType == typeof(AccessPolicyRegistration))
             .Select(descriptor => descriptor.ImplementationInstance)
             .OfType<AccessPolicyRegistration>();
+
+    private static void EnsureRegistrationOpen(IServiceCollection services)
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AccessControlServicesRegistered)))
+        {
+            throw new InvalidOperationException(
+                "Register all Access actions and policies before AddAccessControl(), then call AddAccessControl() once before building the host.");
+        }
+    }
 
     internal sealed record AccessPolicyRegistration(
         string Action,

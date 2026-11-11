@@ -9,6 +9,7 @@ using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
 
+using Platform.Access.Application.Options;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Constants;
@@ -57,16 +58,7 @@ if (builder.Environment.IsDevelopment())
 // Access module
 
 builder.Services.AddCentralAccessAudit();
-builder.Services.AddAccessControl();
-builder.Services.AddAccessAspNet();
 builder.Services.AddRevisionAuthorization();
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddScoped<
-        IAccessSubjectProvider,
-        DevelopmentFakeSubjectProvider>();
-}
 
 var kt1Enabled = Kt1Endpoints.Enabled(
     builder.Environment,
@@ -227,6 +219,20 @@ else
 }
 
 // Kreiranje aplikacije
+builder.Services.AddSingleton(new AccessConfigurationOptions
+{
+    RequirePolicyCoverage = true,
+    ActionsWithoutPolicy = new HashSet<string>(StringComparer.Ordinal)
+    {
+        AccessActions.PublicCatalogRead.Id,
+        AccessActions.AccountStatusChange.Id,
+        AccessActions.SystemConfigManage.Id,
+        AccessActions.ResultsSensitiveRead.Id,
+        AccessActions.EvaluationTaskProcess.Id
+    }
+});
+builder.Services.AddAccessControl();
+builder.Services.AddAccessAspNet();
 builder.Services.AddRevisionRequestIdentity();
 var app = builder.Build();
 app.UseRouting();
