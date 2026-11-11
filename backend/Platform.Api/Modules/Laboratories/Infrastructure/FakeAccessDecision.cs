@@ -12,6 +12,7 @@ public sealed class FakeAccessDecision : IAccessDecision
         // Uloga je samo prvi uslov; vlasnistvo nad konkretnom laboratorijom proverava LaboratoryService.
         [LabActions.Read] = [PlatformRole.Teacher],
         [LabActions.Rename] = [PlatformRole.Teacher],
+        [LabActions.Search] = [PlatformRole.Student, PlatformRole.Teacher, PlatformRole.Assistant, PlatformRole.Administrator],
     };
 
     public AccessResult Decide(IIdentityContext subject, string action, string? resourceId = null)

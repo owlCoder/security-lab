@@ -15,6 +15,8 @@ export function failureLines(failure: ApiFailure): string[] {
       return ['Isti podatak već postoji.']
     case 'notImplemented':
       return ['Server je proverio prava, ali kreiranje još nije implementirano (LAB-01 API je u izradi).']
+    case 'filtersUnavailable':
+      return ['Filteri po osobinama trenutno nisu dostupni. Pokušajte ponovo kasnije ili pretražite po nazivu.']
     default:
       return ['Došlo je do greške. Pokušajte ponovo.']
   }
@@ -27,6 +29,7 @@ const STATUS: Partial<Record<ApiFailure['kind'], number>> = {
   notFound: 404,
   conflict: 409,
   notImplemented: 501,
+  filtersUnavailable: 503,
 }
 
 /** HTTP status koji je server vratio, da se na demonstraciji vidi da je odluku doneo server. */
