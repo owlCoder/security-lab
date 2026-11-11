@@ -69,7 +69,7 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
             return AccessDecision.Deny(AccessDenialReason.UnknownAction, correlationId);
         }
 
-        if (definition.Scope == ActionScope.Unknown ||
+        if (!Enum.IsDefined(definition.Scope) ||
             (definition.ResourceType is null && request.Resource is not null) ||
             (definition.ResourceType is not null &&
              (request.Resource is null ||

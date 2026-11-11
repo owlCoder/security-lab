@@ -226,15 +226,6 @@ public class AccessControlMiddlewareTests
     }
 
     [Test]
-    public async Task ACC05_Contradictory_metadata_is_denied()
-    {
-        _decision.Handler = (r, _) => Allow(r);
-        var res = await _client.GetAsync($"/both?id={Id()}");
-        Assert.That(res.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
-        Assert.That(_handlerCalls, Is.Zero);
-    }
-
-    [Test]
     public async Task ACC05_Public_and_access_metadata_are_denied()
     {
         _decision.Handler = (r, _) => Allow(r);

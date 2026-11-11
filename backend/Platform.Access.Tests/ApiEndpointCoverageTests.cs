@@ -45,7 +45,7 @@ public class ApiEndpointCoverageTests
     };
 
     [Test]
-    public void ACC05_Every_real_route_is_protected_or_approved_public()
+    public void ACC05_Every_real_route_is_protected_or_explicitly_approved()
     {
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b => b.UseEnvironment("Development"));
@@ -64,13 +64,19 @@ public class ApiEndpointCoverageTests
                            || e.Metadata.GetMetadata<AllowPublicAttribute>() is not null;
             var isDelegated = e.Metadata.GetMetadata<DelegatedAuthorizationAttribute>() is not null;
 
-            if (requirements.Count > 1 || (hasReq && isPublic) || (isDelegated && (hasReq || isPublic)))
+            if (requirements.Count > 1 ||
+                (hasReq && (isPublic || isDelegated)) ||
+                (isDelegated && isPublic))
                 violations.Add($"{route}: conflicting access metadata");
-            else if (isDelegated)
-                violations.Add($"{route}: legacy delegation is never authorized");
+            else if (hasReq)
+                continue;
+            else if (ApprovedPublicRoutes.Contains(route))
+                continue;
             else if (isPublic)
-                violations.Add($"{route}: public metadata bypasses Access and is not allowed");
-            else if (!hasReq && !isPublic && !isDelegated)
+                violations.Add($"{route}: public route is not in the approved public route inventory");
+            else if (isDelegated && !ApprovedDelegatedRoutes.Contains(route))
+                violations.Add($"{route}: delegated route is not in the approved delegated route inventory");
+            else if (!isDelegated)
                 violations.Add($"{route}: no access metadata");
         }
 

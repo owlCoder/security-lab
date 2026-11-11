@@ -78,6 +78,24 @@ public sealed class CourseRoleAccessPolicyTests
         Assert.That(await Evaluate(action), Is.True);
     }
 
+    [Test]
+    public async Task MembershipReader_SnapshotsDelegatedActionsOnSet()
+    {
+        var delegatedActions = new HashSet<string>(StringComparer.Ordinal) { "lab.read" };
+        memberships.Set(new CourseMembership(
+            accountId,
+            courseId,
+            CourseRole.Assistant,
+            MembershipStatus.Active,
+            delegatedActions));
+
+        delegatedActions.Clear();
+        delegatedActions.Add("attempt.read.course");
+
+        Assert.That(await Evaluate("lab.read"), Is.True);
+        Assert.That(await Evaluate("attempt.read.course"), Is.False);
+    }
+
     [TestCase("lab.draft.manage")]
     [TestCase("lab.revision.publish")]
     [TestCase("lab.criteria.hidden.read")]
