@@ -153,6 +153,15 @@ public class SessionManagerValidationTests
     private async Task<(string Token, Session Session)> CreateSessionAsync(Guid userId, AuthLevel level = AuthLevel.Active)
     {
         using var db = new PlatformIdentityDbContext(_options);
+
+        // IDN-03 / SEC-03: ValidateAsync refuses a session whose account is missing or not Active,
+        // so every session here belongs to a persisted Active account.
+        if (!await db.Accounts.AnyAsync(account => account.Id == userId))
+        {
+            db.Accounts.Add(new UserAccount(userId, $"{userId:N}@example.test"));
+            await db.SaveChangesAsync();
+        }
+
         return await new SessionStore(db, _clock).CreateAsync(userId, level, Lifetime, CancellationToken.None);
     }
 

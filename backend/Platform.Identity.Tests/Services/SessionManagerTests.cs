@@ -34,6 +34,11 @@ public class SessionManagerTests
             .Options;
 
         await using var db = new PlatformIdentityDbContext(options);
+
+        // IDN-03 / SEC-03: ValidateAsync refuses sessions of missing or non-Active accounts.
+        db.Accounts.AddRange(
+            new UserAccount(ownerUserId, $"{ownerUserId:N}@example.test"),
+            new UserAccount(otherUserId, $"{otherUserId:N}@example.test"));
         db.Sessions.AddRange(
             new Session(Guid.NewGuid(), ownerUserId, TokenHash(revokedToken), revokedHandle,
                 AuthLevel.Active, now, now.AddHours(8)),

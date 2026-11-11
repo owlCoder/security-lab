@@ -12,8 +12,10 @@ public sealed class Assignment
         DateTimeOffset? availableFromUtc,
         DateTimeOffset dueAtUtc,
         int maxAttempts,
+        AssignmentScope scope,
         bool allowStartAfterDeadline = false,
-        AssignmentStatus status = AssignmentStatus.Active)
+        AssignmentStatus status = AssignmentStatus.Active,
+        string? groupId = null)
     {
         if (id == Guid.Empty)
         {
@@ -44,21 +46,50 @@ public sealed class Assignment
                 "At least one attempt must be allowed.");
         }
 
+        if (scope != AssignmentScope.Course &&
+            scope != AssignmentScope.Group)
+        {
+            throw new ArgumentException(
+                "Assignment scope must be Course or Group.",
+                nameof(scope));
+        }
+
+        if (scope == AssignmentScope.Group &&
+            string.IsNullOrWhiteSpace(groupId))
+        {
+            throw new ArgumentException(
+                "Group ID is required for group assignments.",
+                nameof(groupId));
+        }
+
+        if (scope == AssignmentScope.Course && groupId is not null)
+        {
+            throw new ArgumentException(
+                "Group ID must be null for course assignments.",
+                nameof(groupId));
+        }
+
         Id = id;
         CourseId = courseId;
+        GroupId = groupId;
+        Scope = scope;
         PublishedLabRevisionId = publishedLabRevisionId;
         AvailableFromUtc = availableFromUtc;
         DueAtUtc = dueAtUtc;
         MaxAttempts = maxAttempts;
         AllowStartAfterDeadline = allowStartAfterDeadline;
         Status = status;
+
     }
 
     public Guid Id { get; }
 
     public string CourseId { get; }
 
+    public string? GroupId { get; }
+
     public string PublishedLabRevisionId { get; }
+    public AssignmentScope Scope { get; }
 
     public DateTimeOffset? AvailableFromUtc { get; }
 

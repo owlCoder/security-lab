@@ -20,7 +20,11 @@ public sealed class StoreSessionCreator(ISessionStore store, ILogger<StoreSessio
 
         try
         {
-            var (token, session) = await store.CreateAsync(userId, storedLevel, Lifetime, ct);
+            // Re-checks the status under a row lock: login read it earlier and it may have changed since (IDN-03).
+            var created = await store.CreateForActiveAccountAsync(userId, storedLevel, Lifetime, ct);
+            if (created is null) throw new AccountNotActiveException(userId);
+
+            var (token, session) = created.Value;
             return new IssuedSession(token, session.SessionHandle, session.ExpiresAt);
         }
         catch (Exception ex) when (ex is DbUpdateException or DbException)

@@ -39,7 +39,18 @@ public sealed class LoginService(
             return Fail(LoginOutcome.InvalidCredentials, check.AccountId, correlationId, "denied", $"account is {check.Status}");
 
         // MFA (IDN-06) is not implemented yet: until an MFA policy exists every login is Active.
-        var session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
+        IssuedSession? session;
+        try
+        {
+            session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
+        }
+        catch (AccountNotActiveException)
+        {
+            // The account was blocked or archived after the status check above (IDN-03, SEC-03): same answer as a
+            // login that was refused up front, and no session exists that a later reactivation could revive.
+            return Fail(LoginOutcome.InvalidCredentials, check.AccountId, correlationId, "denied", "account is no longer active");
+        }
+
         if (session is null)
             return Fail(LoginOutcome.Unavailable, check.AccountId, correlationId, "failure", "session store unavailable");
 
