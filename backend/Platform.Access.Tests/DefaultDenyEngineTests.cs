@@ -508,22 +508,22 @@ public class DefaultDenyEngineTests
             found = policy;
             return true;
         }
+    }
 
-        private static async Task<AccessDecision> DecideWithDefinition(
-            ActionDefinition definition,
-            ResourceRef? resource)
-        {
-            var catalog = new SingleActionCatalog(definition);
-            var registry = new InMemoryAccessPolicyRegistry();
-            registry.Register(definition.Id, FakePolicy.Permit());
-            var engine = EngineFixture.Build(catalog, registry, new RecordingAuditWriter());
-            var request = new AccessRequest(
-                new SubjectRef("subject-1", AccountState.Active),
-                definition.Id,
-                resource,
-                "scope-test");
+    private static async Task<AccessDecision> DecideWithDefinition(
+        ActionDefinition definition,
+        ResourceRef? resource)
+    {
+        var catalog = new SingleActionCatalog(definition);
+        var registry = new InMemoryAccessPolicyRegistry();
+        registry.Register(definition.Id, FakePolicy.Permit());
+        var engine = EngineFixture.Build(catalog, registry, new RecordingAuditWriter());
+        var request = new AccessRequest(
+            new SubjectRef("subject-1", AccountState.Active),
+            definition.Id,
+            resource,
+            "scope-test");
 
-            return await engine.DecideAsync(request);
-        }
+        return await engine.DecideAsync(request);
     }
 }
