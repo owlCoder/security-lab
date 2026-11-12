@@ -1,10 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.Infrastructure.Catalog;
-using Platform.Access.Infrastructure.Policies;
+//using Platform.Access.Infrastructure.Catalog;
+//using Platform.Access.Infrastructure.Policies;
 using Platform.Authoring.Application;
 using Platform.Authoring.Infrastructure;
+using Platform.Access.Composition;
 
 namespace Platform.Authoring.Composition;
 
@@ -31,10 +32,26 @@ public static class AuthoringServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers Authoring actions and policies before AddAccessControl(). 
+    /// </summary>
+    
+    public static IServiceCollection AddAuthoringAccess(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        foreach(var action in AuthoringActions.All)
+        {
+            var isCopy = action == AuthoringActions.TemplateCopy;
+            services.AddAccessAction<AuthoringAuthorPolicy>(new ActionDefinition(action, isCopy ? ActionScope.Course : ActionScope.Authenticated, isCopy ? AuthoringActions.TemplateResourceType : null, false));
+        }
+
+        return services;
+    }
+
+    /// <summary>
     /// Call once after builder.Build(). Registers the Authoring actions and their policy with the
     /// Access module. An action without a policy is denied by default.
     /// </summary>
-    public static IServiceProvider RegisterAuthoringAccess(this IServiceProvider services)
+    /*public static IServiceProvider RegisterAuthoringAccess(this IServiceProvider services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -57,4 +74,5 @@ public static class AuthoringServiceCollectionExtensions
 
         return services;
     }
+    */
 }
