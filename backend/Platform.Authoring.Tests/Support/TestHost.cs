@@ -31,13 +31,10 @@ internal static class TestHost
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(Config(authors));
+        services.AddAuthoringAccess();
         services.AddAccessControl();
         services.AddAuthoring();
-
-        var provider = services.BuildServiceProvider(
-            new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
-        provider.RegisterAuthoringAccess();
-        return provider;
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true});
     }
 }
 
