@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-//using Platform.Access.Infrastructure.Catalog;
-//using Platform.Access.Infrastructure.Policies;
 using Platform.Authoring.Application;
 using Platform.Authoring.Infrastructure;
 using Platform.Access.Composition;
@@ -13,7 +11,7 @@ namespace Platform.Authoring.Composition;
 public static class AuthoringServiceCollectionExtensions
 {
     /// <summary>
-    /// Call after AddAccessControl(). Everything here is a singleton because every dependency is
+    /// Everything here is a singleton because every dependency is
     /// stateless or in-memory. When the PostgreSQL repository arrives, the services that use it
     /// become scoped (see docs/components/audit/DI-GUIDELINES.md).
     /// </summary>
@@ -46,33 +44,4 @@ public static class AuthoringServiceCollectionExtensions
 
         return services;
     }
-
-    /// <summary>
-    /// Call once after builder.Build(). Registers the Authoring actions and their policy with the
-    /// Access module. An action without a policy is denied by default.
-    /// </summary>
-    /*public static IServiceProvider RegisterAuthoringAccess(this IServiceProvider services)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        var catalog = services.GetRequiredService<InMemoryActionCatalog>();
-        var policies = services.GetRequiredService<InMemoryAccessPolicyRegistry>();
-        var policy = new AuthoringAuthorPolicy(services.GetRequiredService<IAuthorDirectory>());
-
-        foreach (var action in AuthoringActions.All)
-        {
-            // Copying a template is resource-scoped; listing templates has no resource.
-            // Preserve the strict default-deny engine's type and scope checks.
-            var isCopy = action == AuthoringActions.TemplateCopy;
-            catalog.Register(new ActionDefinition(
-                action,
-                isCopy ? ActionScope.Course : ActionScope.Authenticated,
-                isCopy ? AuthoringActions.TemplateResourceType : null,
-                false));
-            policies.Register(action, policy);
-        }
-
-        return services;
-    }
-    */
 }

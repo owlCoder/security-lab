@@ -35,14 +35,6 @@ internal static class TestHost
         services.AddAccessControl();
         services.AddAuthoring();
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true});
-        
-        /*services.AddAuthoring();
-
-        var provider = services.BuildServiceProvider(
-            new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
-        provider.RegisterAuthoringAccess();
-        return provider;
-        */
     }
 }
 
