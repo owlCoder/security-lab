@@ -1,5 +1,6 @@
 import { setFetcher, type Fetcher } from './http'
 import type { Decision, Person, RevisionAction, RevisionDetail, RevisionStatus, RevisionSummary } from './revisions'
+import { handleLabMock } from '../labs/mock'
 
 const MOCK_PASSWORD = 'demo-lozinka'
 const MAX_FAILURES = 5
@@ -166,6 +167,11 @@ export const mockFetcher: Fetcher = async (input, init) => {
   const headers = (init?.headers ?? {}) as Record<string, string>
   const url = new URL(input, 'http://mock')
   const path = url.pathname
+  const labResponse = handleLabMock(input, init)
+
+    if (labResponse !== undefined) {
+      return labResponse
+    }
 
   if (method === 'POST' && path === '/api/auth/login') return handleLogin(body)
   if (method === 'GET' && path === '/api/health') return json(200, { status: 'ok' })

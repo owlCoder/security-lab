@@ -14,6 +14,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import LabVisibilitySection from './labs/LabVisibilitySection'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -93,6 +94,7 @@ export default function App() {
           <LabsSection />
           <Acc06 />
           <CoursesPage />
+          <LabVisibilitySection />
         </>} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
