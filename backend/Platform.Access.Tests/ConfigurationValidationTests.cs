@@ -111,9 +111,9 @@ public class ConfigurationValidationTests
     public async Task ACC05_Composition_RegistersAdditionalActionAndPolicyBeforeBuild()
     {
         var services = new ServiceCollection();
-        services.AddAccessControl();
         services.AddAccessAction<RegisteredPolicy>(
             new ActionDefinition("example.read", ActionScope.Authenticated, null, false));
+        services.AddAccessControl();
 
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
@@ -166,8 +166,8 @@ public class ConfigurationValidationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopedDependency>();
         services.AddSingleton<ScopedDependencyPolicy>();
-        services.AddAccessControl();
         services.AddAccessPolicy<ScopedDependencyPolicy>("audit.events.read");
+        services.AddAccessControl();
 
         var exception = Assert.Throws<AggregateException>(
             () => services.BuildServiceProvider(
