@@ -24,6 +24,8 @@ using Platform.Authoring.Composition;
 using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
+using IVerificationEmailSender = Platform.Identity.Interfaces.IEmailSender;
+using Platform.Identity.Services;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
@@ -74,6 +76,9 @@ builder.Services.AddIdentityModule();
 
 // IDN-02: prijava, odjava i sesije
 builder.Services.AddIdentityModule(builder.Configuration);
+
+// IDN-10: slanje verifikacionog emaila
+builder.Services.AddTransient<IVerificationEmailSender, EmailSender>();
 
 if (builder.Environment.IsDevelopment())
 {
