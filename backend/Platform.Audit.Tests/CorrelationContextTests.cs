@@ -218,8 +218,8 @@ public sealed class CorrelationContextTests
 
     private static ServiceProvider BuildStrictProvider() =>
         new ServiceCollection()
-            .AddAccessControl()
             .AddAudit()
+            .AddAccessControl()
             .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
 }
 
@@ -227,7 +227,9 @@ public sealed record CorrelationProbeResult(string? CorrelationId, string TraceI
 
 internal sealed class CorrelationHostFactory : WebApplicationFactory<Program>
 {
-    internal const string ProbePath = "/__test/correlation";
+    // The probe route carries the synthetic probe course, so it can declare RequireAccess (ACC-05).
+    internal const string ProbeRoute = "/__test/correlation/courses/{courseId}";
+    internal const string ProbePath = "/__test/correlation/courses/" + AuditTestAccess.ProbeCourse;
     internal const string DeniedProbePath = "/__test/correlation-denied";
 
     public ScopeCapturingLoggerProvider Logs { get; } = new();
@@ -244,6 +246,7 @@ internal sealed class CorrelationHostFactory : WebApplicationFactory<Program>
         {
             services.RemoveAll<ISessionManager>();
             services.AddSingleton<ISessionManager, CorrelationTestSessionManager>();
+            AuditTestAccess.AllowProbeCourse(services);
             services.AddControllers().AddApplicationPart(typeof(CorrelationProbeController).Assembly);
         });
     }
@@ -286,8 +289,10 @@ public sealed class CorrelationProbeController(ICorrelationContext correlation, 
 {
     internal const string LogMessage = "correlation probe reached";
 
-    [DelegatedAuthorization]
-    [HttpGet(CorrelationHostFactory.ProbePath)]
+    // Real Access check (ACC-05): audit.events.read on the probe course, allowed by the S-08 policy
+    // for the synthetic teacher from AuditTestAccess. The session check still runs after it.
+    [RequireAccess("audit.events.read", ResourceType = "course", IdRouteParam = "courseId")]
+    [HttpGet(CorrelationHostFactory.ProbeRoute)]
     public CorrelationProbeResult Get()
     {
         logger.LogInformation(LogMessage);
