@@ -197,50 +197,8 @@ public sealed class LoginEndpointRateLimitingTests
         });
     }
 
-    // ---------------------------------------------------------------- planirano: blokada po nalogu
-
-    // docs/components/identity/IDN-05.md: "Planirano: brojanje neuspesnih prijava po nalogu i privremena
-    // blokada ... kroz ugovor ILoginAttemptLimiter". LoginService ga jos ne poziva, pa ove testove treba
-    // ukljuciti (skinuti [Ignore]) cim blokada po nalogu bude implementirana. Prag od 10 prilagoditi
-    // podesenom pragu limitera; IP limit je ovde postavljen visoko da ne bi on bio uzrok blokade.
-
-    [Test, Ignore("IDN-05: blokada po nalogu (ILoginAttemptLimiter) nije implementirana.")]
-    public async Task ManyFailuresForOneAccount_FromDifferentClients_BlockEvenTheCorrectPassword()
-    {
-        using var api = new LoginApiFactory(permitLimit: 1000);
-        for (var i = 0; i < 10; i++)
-            await Login(api, $"203.0.113.{100 + i}", KnownEmail, WrongPassword);
-
-        var attempt = await Login(api, "203.0.113.200", KnownEmail, CorrectPassword);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(attempt.Response.StatusCode, Is.EqualTo(StatusCodes.Status429TooManyRequests));
-            Assert.That(attempt.Response.Headers.RetryAfter.ToString(), Is.Not.Empty);
-            Assert.That(attempt.Response.Headers.SetCookie.ToString(), Does.Not.Contain(SessionCookie.Name));
-        });
-    }
-
-    [Test, Ignore("IDN-05: blokada po nalogu (ILoginAttemptLimiter) nije implementirana.")]
-    public async Task AccountBlock_AppliesToUnknownEmail_Identically()
-    {
-        using var api = new LoginApiFactory(permitLimit: 1000);
-        for (var i = 0; i < 10; i++)
-        {
-            await Login(api, $"203.0.113.{100 + i}", KnownEmail, WrongPassword);
-            await Login(api, $"203.0.114.{100 + i}", "nepostojeci@example.test", WrongPassword);
-        }
-
-        var known = await Login(api, "203.0.113.200", KnownEmail, WrongPassword);
-        var unknown = await Login(api, "203.0.114.200", "nepostojeci@example.test", WrongPassword);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(known.Response.StatusCode, Is.EqualTo(StatusCodes.Status429TooManyRequests));
-            Assert.That(unknown.Response.StatusCode, Is.EqualTo(StatusCodes.Status429TooManyRequests));
-        });
-        Assert.That(await Body(unknown), Is.EqualTo(await Body(known)));
-    }
+    // Account-level lockout uses the real credential store and PostgreSQL in
+    // Platform.Identity.Tests.Controllers.LockoutEndpointTests.
 
     // ---------------------------------------------------------------- pomocno
 

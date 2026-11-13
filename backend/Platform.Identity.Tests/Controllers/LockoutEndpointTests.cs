@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -9,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Platform.Identity.Entities;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Persistence;
+using Platform.Api.Services.Identity;
 using Testcontainers.PostgreSql;
 
 namespace Platform.Identity.Tests.Controllers;
@@ -31,6 +36,8 @@ public sealed class LockoutEndpointTests
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting("ConnectionStrings:Identity", connectionString);
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);
+            // These tests exercise account lockout independently of the IP limiter.
+            builder.UseSetting("RateLimiting:Login:PermitLimit", "1000");
         }
     }
 
@@ -105,11 +112,78 @@ public sealed class LockoutEndpointTests
     }
 
     [Test]
+    public async Task ManyFailuresForOneAccount_FromDifferentClients_BlockEvenTheCorrectPassword()
+    {
+        var (id, email) = await CreateStudentAsync();
+        for (var i = 0; i < MaxAttempts; i++)
+            Assert.That((await LoginFromAsync($"203.0.113.{100 + i}", email, WrongPassword)).Status,
+                Is.EqualTo(StatusCodes.Status401Unauthorized));
+
+        var attempt = await LoginFromAsync("203.0.113.200", email, Password);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var account = await db.Accounts.AsNoTracking().SingleAsync(value => value.Id == id);
+        Assert.Multiple(() =>
+        {
+            Assert.That(account.LockoutEnd, Is.GreaterThan(DateTimeOffset.UtcNow));
+            Assert.That(attempt.Status, Is.EqualTo(StatusCodes.Status401Unauthorized));
+            Assert.That(attempt.Body, Does.Contain("invalid_credentials"));
+            Assert.That(attempt.RetryAfter, Is.Empty, "Only IP throttling exposes Retry-After.");
+            Assert.That(attempt.Cookie, Does.Not.Contain(SessionCookie.Name));
+        });
+        Assert.That(await db.Sessions.AnyAsync(value => value.UserId == id), Is.False);
+    }
+
+    [Test]
+    public async Task AccountBlock_AppliesToUnknownEmail_Identically()
+    {
+        var (_, email) = await CreateStudentAsync();
+        var unknownEmail = $"nobody-{Guid.NewGuid():N}@example.com";
+        for (var i = 0; i < MaxAttempts; i++)
+        {
+            await LoginFromAsync($"203.0.113.{100 + i}", email, WrongPassword);
+            await LoginFromAsync($"203.0.114.{100 + i}", unknownEmail, WrongPassword);
+        }
+
+        // There is no account row for an unknown address. Its public response must still
+        // match a locked account, including when the correct password is supplied.
+        var known = await LoginFromAsync("203.0.113.200", email, Password);
+        var unknown = await LoginFromAsync("203.0.114.200", unknownEmail, Password);
+        Assert.Multiple(() =>
+        {
+            Assert.That(known.Status, Is.EqualTo(StatusCodes.Status401Unauthorized));
+            Assert.That(known.Cookie, Does.Not.Contain(SessionCookie.Name));
+            Assert.That(known.RetryAfter, Is.Empty);
+            Assert.That(unknown, Is.EqualTo(known));
+        });
+    }
+
+    [Test]
     public void Host_refuses_to_start_with_an_invalid_lockout_setting()
     {
         using var factory = new Factory(_db.GetConnectionString(), maxAttempts: "0");
 
         Assert.Catch<OptionsValidationException>(() => factory.CreateClient());
+    }
+
+    private async Task<(int Status, string? ContentType, string CacheControl, string Body, string Cookie, string RetryAfter)>
+        LoginFromAsync(string remoteIp, string email, string password)
+    {
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { email, password }));
+        var context = await _factory.Server.SendAsync(http =>
+        {
+            http.Request.Method = HttpMethods.Post;
+            http.Request.Path = "/api/auth/login";
+            http.Connection.RemoteIpAddress = IPAddress.Parse(remoteIp);
+            http.Request.ContentType = "application/json";
+            http.Request.ContentLength = bytes.Length;
+            http.Request.Body = new MemoryStream(bytes);
+        });
+        using var reader = new StreamReader(context.Response.Body);
+        return (context.Response.StatusCode, context.Response.ContentType,
+            context.Response.Headers.CacheControl.ToString(), await reader.ReadToEndAsync(),
+            context.Response.Headers.SetCookie.ToString(), context.Response.Headers.RetryAfter.ToString());
     }
 
     private async Task<(HttpStatusCode Status, string? ContentType, string? CacheControl, string Body)> LoginAsync(

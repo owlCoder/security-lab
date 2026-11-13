@@ -134,6 +134,10 @@ else
 
 // Kreiranje aplikacije
 builder.Services.AddRevisionRequestIdentity();
+
+//AUT-06: register the resolver that identifies the caller from the validated session
+builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
+
 var app = builder.Build();
 app.UseRouting();
 
