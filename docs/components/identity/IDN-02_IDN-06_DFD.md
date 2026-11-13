@@ -43,8 +43,7 @@ flowchart LR
   subgraph DATA["Data zone: PostgreSQL, memory and log - TB2 is its outer edge"]
     D1[("D1 identity.accounts: email, status, role, password_hash, failed_login_count, lockout_end")]
     D2[("D2 identity.sessions: token_hash, auth_level, expiry, revoked_at")]
-    D3[("D3 Audit log - via IAuditWriter, application log")]
-    D4[("D4 InMemoryAccountRepository - IDN-03, not shared with D1")]
+    D3[("D3 Audit log - login/logout via IAuditWriter (application log); IDN-03 via audit.audit_events")]
     D5[("D5 identity.AspNetUsers - IDN-01 registration, not shared with D1")]
   end
 
@@ -73,7 +72,9 @@ flowchart LR
   E4 -->|"F17 connection string, seed password"| P6
   P6 -->|"F18 apply migrations, upsert 4 dev accounts"| D1
 
-  OM <-->|"F19 find and save account status"| D4
+  OM <-->|"F19 lock account, write status, revoke sessions, write Audit record - one transaction"| D1
+  OM -->|"F19 revoke all sessions"| D2
+  OM -->|"F19 account.status.changed"| D3
   OM -->|"F20 create account"| D5
 
   classDef planned stroke-dasharray: 5 3,fill:#f5f5f5,color:#000;
@@ -83,7 +84,7 @@ flowchart LR
   class P2,P5 planned;
   class P1,P3,P4,P6,D1,D2 implemented;
   class D3 stub;
-  class OM,D4,D5 neighbour;
+  class OM,D5 neighbour;
 ```
 
 Legend: circle = process, rectangle = external actor or module, cylinder = data store, double-headed arrow = request and response of one named flow, dotted line = out-of-band channel or planned flow. Dashed grey = planned, not implemented yet. Yellow = working but temporary (audit goes to the application log). Green = implemented. Blue-grey = owned by another module, shown because it touches our data or contracts.
@@ -118,8 +119,8 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 |-|-|-|-|
 | D1 | `identity.accounts` (`PlatformIdentityDbContext`, entity `UserAccount`) | `id`, `email` (unique, lower-case), `status` (`Active`, `Blocked`, `Archived`), `role` (`Student`, `Teacher`, `Administrator`), `password_hash` (BCrypt, nullable), `failed_login_count`, `lockout_end` (IDN-05). MFA columns planned (names pending US-12) | implemented. Read and written by login (F6, `EfCredentialStore`, the writes touch only `failed_login_count` and `lockout_end`), written by the seeder (P6). Migrations `InitialIdentity`, `AddAccountPasswordHash`, `AddAccountRole`, `AddAccountLockout` |
 | D2 | `identity.sessions` (entity `Session`) | `id`, `user_id` (FK to D1, cascade), `token_hash` (SHA-256, unique, never the token), `session_handle` (public, unique), `auth_level` (`MfaPending` or `Active`), `created_at`, `expires_at`, `last_activity_at`, `revoked_at` (concurrency token) | implemented (migration `AddSessions`), accessed through `ISessionStore` and `SessionManager` |
-| D3 | Audit log | actor, action, target, time, outcome, correlation ID, detail | `LoggerAuditWriter` writes to the application log. A real store is owned by the AUD team |
-| D4 | `InMemoryAccountRepository` | `UserAccount` objects for IDN-03, seeded at startup in Development (admin, student, other) | temporary, lost on restart, **not the same data as D1** |
+| D3 | Audit log | actor, action, target, time, outcome, correlation ID, detail | Login and logout: `LoggerAuditWriter` writes to the application log. IDN-03 status changes: `audit.audit_events` through `ITransactionalAuditWriter`, in the same transaction as D1 and D2 |
+| D4 | (removed) | `InMemoryAccountRepository` no longer exists | IDN-03 writes to D1 |
 | D5 | `identity.AspNetUsers` (`AccountDbContext`, ASP.NET Core Identity) | accounts created by IDN-01 registration | implemented by IDN-01, **not the same data as D1**, not migrated on startup |
 
 ## Data flows
@@ -144,7 +145,7 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 | F16 | E3 -> P4 | Revoke all sessions of a user when IDN-03 blocks or archives the account. Revoke one and list reserved for IDN-07 | `ISessionManager.RevokeAllForUser` (`SessionManager`) | `identity.sessions` | implemented, called by `ChangeAccountStatus` |
 | F17 | E4 -> P6 | Connection string and seed password from `.env` or user-secrets. Not in the repository | `Seed:DevelopmentPassword`, `ConnectionStrings:Identity` | none | implemented, Development only |
 | F18 | P6 -> D1 | Pending migrations applied. Four accounts upserted (administrator, student, teacher, blocked student), BCrypt hash set only if missing | `ApplyIdentityMigrationsAsync`, `SeedDevelopmentAccountsAsync` | `identity.accounts`, creates `identity.sessions` | implemented. Throws outside Development |
-| F19 | E3 <-> D4 | IDN-03 reads an account and saves the new status | `IAccountRepository` (`InMemoryAccountRepository`) | in-memory | implemented, temporary. Login does not see this status (see [Known deviations](#known-deviations)) |
+| F19 | E3 <-> D1, D2, D3 | IDN-03 locks the account row, writes the new status, revokes all sessions (Blocked, Archived) and writes the `account.status.changed` Audit record in one transaction. Rolled back as a whole if any step fails | `ChangeAccountStatus`, `IAccountStatusStore` (`EfAccountStatusStore`), `ITransactionalAuditWriter` | `identity.accounts`, `identity.sessions`, `audit.audit_events` | implemented. Login and the session check read the same status |
 | F20 | E3 -> D5 | IDN-01 creates an account for the administrator-only endpoint | `POST /api/admin/accounts`, `IAccountRegistration` | `identity.AspNetUsers` | implemented by IDN-01. The new account cannot log in (see [Known deviations](#known-deviations)) |
 
 ## Trust boundaries
@@ -202,10 +203,10 @@ The phone (E2) is outside all boundaries. The TOTP secret would leave the server
 
 These are the places where the code and the intended single data model differ. They matter for the diagram because several stores hold account data:
 
-- **Three account stores.** Login and the seeder use D1 (`identity.accounts`), IDN-03 status change uses D4 (in memory), IDN-01 registration uses D5 (`identity.AspNetUsers`). An account blocked through `PUT /api/admin/accounts/{id}/status` can still log in, and an account created through `POST /api/admin/accounts` cannot log in. Resolved when `IAccountRepository` and registration use D1 (ADM-02).
+- **Two account stores.** Login, the seeder and the IDN-03 status change use D1 (`identity.accounts`); IDN-01 registration uses D5 (`identity.AspNetUsers`). An account created through `POST /api/admin/accounts` cannot log in. Resolved when registration uses D1 (ADM-02). An account blocked through `PUT /api/admin/accounts/{id}/status` can no longer log in and its sessions are revoked.
 - **Administrator check is a stub.** `ConfigAdminDirectory` reads `Stub:AdminIds` from configuration. The `role` column in D1 is not used for authorization yet.
 - **`POST /api/admin/accounts` resolves the caller from `Identity:DevSubjectId`** (`DevelopmentSubjectResolver`), not from the session. Outside Development the caller is always unauthenticated.
-- **Audit goes to the application log** (D3), not to a store owned by AUD.
+- **Login and logout audit goes to the application log** (D3), not to a store owned by AUD. IDN-03 already writes to `audit.audit_events`.
 - **No CSRF token (US-15), no inactivity timeout.** The session lifetime is fixed at 8 hours (US-14).
 
 ## Implementation status
@@ -221,11 +222,11 @@ Present in the repository now:
 - Session revocation: `SessionManager.RevokeAllForUser`, `RevokeSession` and `ListForUser` work against `identity.sessions`. `ChangeAccountStatus` (IDN-03) calls `RevokeAllForUser` when it blocks or archives an account.
 - US-09 development seed: `DevelopmentDatabase` and `DevelopmentAccountSeeder` (four accounts, Development only), test helper `TestUsers` in `Platform.Identity.Tests`.
 - Frontend: `frontend/src/auth/authApi.ts` calls `/api/auth/me`, `/api/auth/login` and `/api/auth/logout`, `frontend/src/api/accounts.ts` calls `POST /api/admin/accounts`.
-- Not used on the request path: `StubIdentityContext`, `AnonymousIdentityContext` and `StoreSessionManager` (a stub whose revoke and list methods do nothing, shadowed by `SessionManager` in `Program.cs`).
+- Not used on the request path: `StubIdentityContext`, `AnonymousIdentityContext` and `StoreSessionManager` (a stub whose revoke and list methods do nothing, no longer registered in `Program.cs`).
 
 Planned (this DFD describes them, but the code does not exist yet): P2 MFA verify, P5 MFA enroll, `IMfaPolicy`, MFA columns in D1, CSRF token, endpoints for revoke one and list sessions.
 
-Open decisions that can change this diagram (to confirm with the assistant): which groups have mandatory MFA, physical names of the MFA columns, exact MFA endpoint names, when D4 and D5 are merged into D1.
+Open decisions that can change this diagram (to confirm with the assistant): which groups have mandatory MFA, physical names of the MFA columns, exact MFA endpoint names, when D5 is merged into D1.
 
 ## Evidence of work
 

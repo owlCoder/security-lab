@@ -58,6 +58,14 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
         if (session is null || session.RevokedAt is not null || session.ExpiresAt <= now)
             return null;
 
+        // SEC-03 / IDN-03: a blocked or archived account is refused on its very next request, even if a session
+        // was created after the revocation (a login that raced with the status change).
+        var status = await db.Accounts
+            .Where(account => account.Id == session.UserId)
+            .Select(account => (AccountStatus?)account.Status)
+            .SingleOrDefaultAsync(ct);
+        if (status != AccountStatus.Active) return null;
+
         session.Touch(now);
         try
         {
