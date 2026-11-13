@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import LabCatalog from './components/catalog/LabCatalog'
 import LabVisibilitySection from './labs/LabVisibilitySection'
 
 function LoginRoute() {
@@ -97,6 +98,7 @@ export default function App() {
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          <Route path="catalog" element={<LabCatalog />} />
         </Route>
       </Route>
     </Routes>
