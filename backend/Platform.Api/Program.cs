@@ -60,6 +60,7 @@ if (builder.Environment.IsDevelopment())
 
 builder.Services.AddCentralAccessAudit();
 builder.Services.AddRevisionAuthorization();
+builder.Services.AddRevisionAccessPolicies();
 
 var kt1Enabled = Kt1Endpoints.Enabled(
     builder.Environment,
@@ -135,54 +136,6 @@ builder.Services
             LabVisibilityActions.KeyRead,
             ActionScope.Course,
             "lab",
-            true))
-    .AddAccessAction<RevisionActionPolicy>(
-        new ActionDefinition(
-            RevisionActions.Create,
-            ActionScope.Course,
-            "course",
-            false))
-    .AddAccessAction<RevisionActionPolicy>(
-        new ActionDefinition(
-            RevisionActions.Read,
-            ActionScope.Course,
-            "revision",
-            false))
-    .AddAccessAction<RevisionActionPolicy>(
-        new ActionDefinition(
-            RevisionActions.Mine,
-            ActionScope.Course,
-            "revision",
-            false))
-    .AddAccessAction<RevisionActionPolicy>(
-        new ActionDefinition(
-            RevisionActions.PendingReviews,
-            ActionScope.Course,
-            "revision",
-            false))
-    .AddAccessAction<RevisionActionPolicy>(
-        new ActionDefinition(
-            RevisionActions.Submit,
-            ActionScope.Course,
-            "revision",
-            false))
-    .AddAccessAction<RevisionApprovalPolicy>(
-        new ActionDefinition(
-            RevisionActions.Approve,
-            ActionScope.Course,
-            "revision",
-            true))
-    .AddAccessAction<RevisionActionPolicy>(
-        new ActionDefinition(
-            RevisionActions.Return,
-            ActionScope.Course,
-            "revision",
-            false))
-    .AddAccessAction<RevisionApprovalPolicy>(
-        new ActionDefinition(
-            RevisionActions.UnlockAccount,
-            ActionScope.System,
-            null,
             true));
 
 // IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
@@ -197,6 +150,7 @@ builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 
 // IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
+builder.Services.AddIdentityAuthenticationAccess();
 builder.Services.AddIdentitySessionAccess();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();

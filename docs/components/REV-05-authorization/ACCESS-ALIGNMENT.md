@@ -2,6 +2,10 @@
 
 Validation date: 12 November 2026.
 
+This is the historical PR #188 report for main. The stricter
+`feature/ACC-05-deny-action-by-default` branch replaces all auth public/legacy
+markers with registered RequireAccess actions; see [STRICT-ACCESS-ALIGNMENT.md](STRICT-ACCESS-ALIGNMENT.md).
+
 ## Scope and behavior
 
 `POST /api/auth/login` now declares `[AllowPublic]` for ACC-05 and retains

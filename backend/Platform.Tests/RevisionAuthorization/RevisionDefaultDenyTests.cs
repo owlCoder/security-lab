@@ -21,8 +21,9 @@ public sealed class RevisionDefaultDenyTests
     {
         var services = new ServiceCollection();
 
-        services.AddAccessControl();
         services.AddRevisionAuthorization();
+        services.AddRevisionAccessPolicies();
+        services.AddAccessControl();
         services.AddSingleton<IRevisionResourceReader>(new FakeResourceReader());
 
         // Test koristi pouzdanog fake citaca umjesto baze.
@@ -31,7 +32,6 @@ public sealed class RevisionDefaultDenyTests
 
         using var provider = services.BuildServiceProvider();
 
-        provider.RegisterRevisionPolicies();
 
         var decisionService =
             provider.GetRequiredService<IAccessDecision>();
@@ -50,8 +50,9 @@ public sealed class RevisionDefaultDenyTests
     {
    var services = new ServiceCollection();
 
-    services.AddAccessControl();
     services.AddRevisionAuthorization();
+    services.AddRevisionAccessPolicies();
+    services.AddAccessControl();
     services.AddSingleton<IRevisionResourceReader>(new FakeResourceReader());
 
     services.AddSingleton<IRevisionAuthorReader>(
@@ -59,7 +60,6 @@ public sealed class RevisionDefaultDenyTests
 
 using var provider = services.BuildServiceProvider();
 
-    provider.RegisterRevisionPolicies();
 
     var decisionService =
         provider.GetRequiredService<IAccessDecision>();
@@ -97,19 +97,18 @@ using var provider = services.BuildServiceProvider();
     [Test]
     public async Task KnownActionWithoutPolicy_IsDenied()
     {
+        // A deliberately policy-less action must be present when the frozen catalog is built.
+        // This test does not start a host (whose startup check would reject incomplete coverage).
         var services = new ServiceCollection();
-        services.AddAccessControl();
-
-        using var provider = services.BuildServiceProvider();
-
-        var catalog =
-            provider.GetRequiredService<InMemoryActionCatalog>();
-
-        catalog.Register(new ActionDefinition(
+        var catalog = new InMemoryActionCatalog([new ActionDefinition(
             RevisionActions.Submit,
             ActionScope.Course,
             "revision",
-            false));
+            false)], freezeAfterConstruction: true);
+        services.AddAccessControl();
+        services.AddSingleton(catalog);
+
+        using var provider = services.BuildServiceProvider();
 
         var decisionService =
             provider.GetRequiredService<IAccessDecision>();

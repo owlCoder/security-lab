@@ -15,8 +15,6 @@ public class ApiEndpointCoverageTests
     private static readonly HashSet<string> ApprovedPublicRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
         "/api/health",
-        // IDN-05: explicit public login; credentials and rate limits are checked by Identity.
-        "/api/auth/login",
         "/api/access/demo-deny",   
     };
 
@@ -26,8 +24,6 @@ public class ApiEndpointCoverageTests
     private static readonly HashSet<string> ApprovedDelegatedRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
         "/api/admin/accounts",
-        "/api/auth/logout",
-        "/api/auth/me",
         "/api/authoring/templates",
         "/api/authoring/templates/{templateId:guid}/drafts",
         "/api/laboratories/",
