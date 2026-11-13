@@ -114,9 +114,14 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         Assert.That((await UserTestData.GetAsync(Factory, other.Id))!.Status, Is.EqualTo(AccountStatus.Active));
-        var record = (await AuditRowsAsync(other.Id)).Single();
-        Assert.That(record.Outcome, Is.EqualTo("Denied"));
-        Assert.That(record.ActorId, Is.EqualTo(student.Id));
+
+        // ACC-05: the central Access middleware denies a non-administrator before the handler runs, so the
+        // denial is recorded as access.denied for the caller; ChangeAccountStatus never starts and writes no
+        // account.status.changed row (its own Denied record stays the second line, see ChangeAccountStatusTests).
+        Assert.That(await AuditRowsAsync(other.Id), Is.Empty);
+        var denial = (await AccessDeniedRowsAsync(student.Id)).Single();
+        Assert.That(denial.Outcome, Is.EqualTo("Denied"));
+        Assert.That(denial.Details, Does.Contain("account.status.change"));
     }
 
     [Test]
@@ -285,6 +290,23 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
             WHERE event_type = 'account.status.changed' AND resource_id = @id
             """, connection);
         command.Parameters.AddWithValue("id", accountId.ToString("D"));
+
+        var rows = new List<AuditRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(new AuditRow(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2)));
+        return rows;
+    }
+
+    private static async Task<List<AuditRow>> AccessDeniedRowsAsync(Guid actorId)
+    {
+        await using var connection = new NpgsqlConnection(TestDatabaseFixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT outcome, actor_id, details::text FROM audit.audit_events
+            WHERE event_type = 'access.denied' AND actor_id = @id
+            """, connection);
+        command.Parameters.AddWithValue("id", actorId);
 
         var rows = new List<AuditRow>();
         await using var reader = await command.ExecuteReaderAsync();

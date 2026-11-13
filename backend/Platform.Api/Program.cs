@@ -2,6 +2,7 @@ using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Security.AccessAudit;
 using Platform.Api.Security.AccessPolicies;
+using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
@@ -195,6 +196,9 @@ builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 
+// IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
+builder.Services.AddIdentitySessionAccess();
+
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
 
@@ -225,7 +229,6 @@ builder.Services.AddSingleton(new AccessConfigurationOptions
     ActionsWithoutPolicy = new HashSet<string>(StringComparer.Ordinal)
     {
         AccessActions.PublicCatalogRead.Id,
-        AccessActions.AccountStatusChange.Id,
         AccessActions.SystemConfigManage.Id,
         AccessActions.ResultsSensitiveRead.Id,
         AccessActions.EvaluationTaskProcess.Id
