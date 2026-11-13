@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import DraftsPage from './pages/DraftsPage'
 import LabVisibilitySection from './labs/LabVisibilitySection'
 
 function LoginRoute() {
@@ -97,6 +98,8 @@ export default function App() {
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          {/* AUT-01: nacrti zadataka, samo za prijavljene korisnike */}
+          <Route path="drafts" element={<DraftsPage />} />
         </Route>
       </Route>
     </Routes>
