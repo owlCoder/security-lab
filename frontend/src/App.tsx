@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import TeacherMetadataPage from './pages/TeacherMetadataPage'
 import LabVisibilitySection from './labs/LabVisibilitySection'
 
 function LoginRoute() {
@@ -94,6 +95,8 @@ export default function App() {
           <CoursesPage />
           <LabVisibilitySection />
         </>} />
+        <Route path="teacher/labs/new" element={<TeacherMetadataPage />} />
+        <Route path="teacher/labs/:labId/edit" element={<TeacherMetadataPage />} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
