@@ -43,7 +43,11 @@ export type ApiFailure =
   | { kind: 'conflict'; requestId?: string }
   | { kind: 'notImplemented'; requestId?: string }
   | { kind: 'error' }
-
+export interface LabStep {
+    sequenceOrder: number
+    title: string
+    instruction: string
+}
 export type CreateLabOutcome = { kind: 'created'; id: string } | ApiFailure
 
 /** Isti oblik kao LabContentView iz Platform.LabLocalization. */
@@ -53,7 +57,8 @@ export interface LabContent {
   language: Language
   title: string
   description: string
-  instructions: string
+    instructions: string
+    steps: LabStep[]
 }
 
 export type LabContentOutcome =
@@ -164,18 +169,26 @@ export function parseLanguage(value: unknown): Language | null {
 
 function parseContent(body: Record<string, unknown> | null): LabContent | null {
   if (!body) return null
-  const { revisionId, evaluatorVersion, language, title, description, instructions } = body
+  const { revisionId, evaluatorVersion, language, title, description, instructions, steps } = body
   const strings = [revisionId, evaluatorVersion, title, description, instructions]
   if (!strings.every(v => typeof v === 'string')) return null
   const lang = parseLanguage(language)
-  if (!lang) return null
+    if (!lang) return null
+    const parsedSteps: LabStep[] = Array.isArray(steps)
+        ? steps.map(s => ({
+            sequenceOrder: typeof (s as Record<string, unknown>)?.sequenceOrder === 'number' ? (s as Record<string, unknown>).sequenceOrder as number : 0,
+            title: typeof (s as Record<string, unknown>)?.title === 'string' ? (s as Record<string, unknown>).title as string : '',
+            instruction: typeof (s as Record<string, unknown>)?.instruction === 'string' ? (s as Record<string, unknown>).instruction as string : '',
+        }))
+        : []
   return {
     revisionId: revisionId as string,
     evaluatorVersion: evaluatorVersion as string,
     language: lang,
     title: title as string,
     description: description as string,
-    instructions: instructions as string,
+      instructions: instructions as string,
+      steps : parsedSteps,
   }
 }
 

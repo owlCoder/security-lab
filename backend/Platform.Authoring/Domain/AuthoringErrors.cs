@@ -18,4 +18,7 @@ public static class AuthoringErrorCodes
     public const string Forbidden = "FORBIDDEN";
     public const string NotFound = "NOT_FOUND";
     public const string Conflict = "CONFLICT";
+    public const string InvalidStepSequence = "INVALID_STEP_SEQUENCE";
+    public const string InvalidStepTitle = "INVALID_STEP_TITLE";
+    public const string InvalidStepInstruction = "INVALID_STEP_INSTRUCTION";
 }
