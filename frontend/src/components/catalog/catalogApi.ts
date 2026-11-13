@@ -14,7 +14,11 @@ export function accessPath(labId: string): string {
   return `/api/laboratories/${encodeURIComponent(labId)}/access`
 }
 
-export const USE_FAKE_CATALOG = import.meta.env.DEV
+export type CatalogEnv = { DEV: boolean; MODE: string }
+
+export function shouldUseFakeCatalog(env: CatalogEnv): boolean {
+  return env.DEV && env.MODE === 'mock'
+}
 
 export const UNKNOWN_PREREQUISITE_TITLE = 'Laboratorija koja vam trenutno nije dostupna'
 
@@ -104,8 +108,8 @@ export async function fetchCatalogFromServer(): Promise<CatalogOutcome> {
   return { ok: true, labs: resolveTitles(withAccess) }
 }
 
-export async function getCatalog(): Promise<CatalogOutcome> {
-  if (USE_FAKE_CATALOG) {
+export async function getCatalog(env: CatalogEnv = import.meta.env): Promise<CatalogOutcome> {
+  if (shouldUseFakeCatalog(env)) {
     const labs = parseCatalog(FAKE_CATALOG)
     return labs ? { ok: true, labs } : { ok: false, message: messageFor(500) }
   }
