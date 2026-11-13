@@ -27,6 +27,9 @@ using Platform.Identity.Persistence;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.Api.Modules.Membership;
+
+using Platform.Membership.Composition;
 using Platform.LabVisibility.Infrastructure.Persistence;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
@@ -50,6 +53,10 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
+// ACC-02: clanstvo u kursu (Platform.Membership)
+builder.Services.AddMembership(builder.Environment);
+
+// Access modul
 builder.Services.AddAccessControl();
 builder.Services.AddAccessAspNet();
 builder.Services.AddRevisionAuthorization();
@@ -161,6 +168,12 @@ if (kt1Enabled)
 app.Services.RegisterIdentityAccess();
 app.MapAccountEndpoints();
 
+
+// ACC-02-4: autorizacija upisa studenata
+app.Services.RegisterMembershipAccess();
+
+// ACC-02: upis studenta u kurs
+await app.MapMembershipAsync();
 // AUT-06: radnje i politike za sablone laboratorija, pa endpointi
 app.Services.RegisterAuthoringAccess();
 app.MapAuthoringEndpoints();

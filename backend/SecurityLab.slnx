@@ -10,6 +10,8 @@
   <Project Path="Platform.LabMetadata/Platform.LabMetadata.csproj" Id="90892a49-5843-4415-a14a-1d89b684646f" />
   <Project Path="Platform.Authoring.Tests/Platform.Authoring.Tests.csproj" />
   <Project Path="Platform.Authoring/Platform.Authoring.csproj" />
+  <Project Path="Platform.Membership/Platform.Membership.csproj" />
+  <Project Path="Platform.Membership.Tests/Platform.Membership.Tests.csproj" />
   <Project Path="Platform.Kt1.Tests/Platform.Kt1.Tests.csproj" />
   <Project Path="Platform.LabLocalization.Tests/Platform.LabLocalization.Tests.csproj" />
   <Project Path="Platform.LabLocalization/Platform.LabLocalization.csproj" />
