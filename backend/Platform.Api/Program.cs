@@ -116,6 +116,7 @@ builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
 {
@@ -217,9 +218,9 @@ app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
 app.MapLaboratories();
+app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();
 app.MapRevisionReviews();
-
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/api/access/demo-deny", async (
