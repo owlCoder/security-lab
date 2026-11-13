@@ -11,6 +11,11 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // ACC-05: Access denials are written by ITrustedAuditWriter, whose AuditDbContext reads the
+        // "Laboratories" connection string. Point it at the same Testcontainers database, so tests can
+        // read access.denied rows next to the identity data.
+        builder.UseSetting("ConnectionStrings:Laboratories", TestDatabaseFixture.ConnectionString);
+
         builder.ConfigureServices(services =>
         {
             // Pronađi i ukloni postojeću registraciju PlatformIdentityDbContext-a
