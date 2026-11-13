@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Platform.Identity.Entities;
+using Platform.Identity.Models;
 
 namespace Platform.Identity.Persistence;
 
@@ -10,6 +11,7 @@ public sealed class PlatformIdentityDbContext(DbContextOptions<PlatformIdentityD
 
     public DbSet<UserAccount> Accounts => Set<UserAccount>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
