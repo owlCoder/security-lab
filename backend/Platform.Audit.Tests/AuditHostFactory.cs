@@ -15,7 +15,9 @@ namespace Platform.Audit.Tests;
 
 internal sealed class AuditHostFactory(string runtimeConnectionString) : WebApplicationFactory<Program>
 {
-    internal const string ProbePath = "/__test/audit-events";
+    // The route carries the synthetic probe course, so the probe can declare RequireAccess (ACC-05).
+    internal const string ProbeRoute = "/__test/audit-events/courses/{courseId}";
+    internal const string ProbePath = "/__test/audit-events/courses/" + AuditTestAccess.ProbeCourse;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -24,6 +26,7 @@ internal sealed class AuditHostFactory(string runtimeConnectionString) : WebAppl
         builder.ConfigureTestServices(services =>
         {
             services.AddControllers().AddApplicationPart(typeof(AuditTestProbeController).Assembly);
+            AuditTestAccess.AllowProbeCourse(services);
             services.AddDbContext<AuditDbContext>(options => options.UseNpgsql(runtimeConnectionString));
             services.AddScoped<IAuditEventStore, PostgresAuditEventStore>();
             services.AddScoped<AuditDraftValidator>();
@@ -44,10 +47,11 @@ public sealed class AuditTestProbeController : ControllerBase
 {
     // Only exists in the Testing application-part; its trusted synthetic context
     // performs the identity binding, with no route in production.
-    // AllowAnonymous: the IDN-02 session check is skipped too, as for the ACC-05 check above.
+    // ACC-05: a real Access check (audit.events.read on the probe course, S-08 policy, synthetic
+    // teacher from AuditTestAccess). AllowAnonymous only skips the IDN-02 session check.
     [AllowAnonymous]
-    [DelegatedAuthorization]
-    [HttpPost(AuditHostFactory.ProbePath)]
+    [RequireAccess("audit.events.read", ResourceType = "course", IdRouteParam = "courseId")]
+    [HttpPost(AuditHostFactory.ProbeRoute)]
     public async Task<IActionResult> Write(
         [FromBody] AuditEventDraft draft,
         [FromServices] IAuditWriter writer,

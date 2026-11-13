@@ -25,8 +25,8 @@ public sealed class CourseAuditAccessDecisionTests
     public void AddAudit_BindsExactlyOnePolicyToTheExistingCentralAction()
     {
         var services = new ServiceCollection();
-        services.AddAccessControl();
         services.AddAudit();
+        services.AddAccessControl();
         using var provider = services.BuildServiceProvider(StrictOptions);
         var catalog = provider.GetRequiredService<IActionCatalog>();
         var registry = provider.GetRequiredService<IAccessPolicyRegistry>();
@@ -53,8 +53,8 @@ public sealed class CourseAuditAccessDecisionTests
         memberships.Set(Membership());
         var services = new ServiceCollection();
         services.AddSingleton<IMembershipReader>(memberships);
-        services.AddAccessControl();
         services.AddAudit();
+        services.AddAccessControl();
         using var provider = services.BuildServiceProvider(StrictOptions);
         using var firstScope = provider.CreateScope();
         using var secondScope = provider.CreateScope();
@@ -72,8 +72,8 @@ public sealed class CourseAuditAccessDecisionTests
     {
         var services = new ServiceCollection();
         services.AddScoped<IMembershipReader, StubCourseAuditMemberships>();
-        services.AddAccessControl();
         services.AddAudit();
+        services.AddAccessControl();
         var exception = Assert.Catch<Exception>(() =>
         {
             using var provider = services.BuildServiceProvider(StrictOptions);
@@ -86,8 +86,8 @@ public sealed class CourseAuditAccessDecisionTests
     public async Task ProductionDefaultMembershipFallback_KeepsRegisteredAuditActionDenied()
     {
         var services = new ServiceCollection();
-        services.AddAccessControl();
         services.AddAudit();
+        services.AddAccessControl();
         using var provider = services.BuildServiceProvider(StrictOptions);
         var result = await provider.GetRequiredService<IAccessDecision>().DecideAsync(Request());
         Assert.Multiple(() =>
@@ -107,8 +107,8 @@ public sealed class CourseAuditAccessDecisionTests
         var audit = new RecordingAccessAuditWriter();
         var services = new ServiceCollection();
         services.AddSingleton<IMembershipReader>(memberships);
-        services.AddAccessControl();
         services.AddAudit();
+        services.AddAccessControl();
         // This replacement is test-only; it does not change production auditing.
         services.Replace(ServiceDescriptor.Singleton<IAccessAuditWriter>(audit));
         using var provider = services.BuildServiceProvider(StrictOptions);
@@ -146,8 +146,10 @@ public sealed class CourseAuditAccessDecisionTests
     [Test]
     public void DuplicatePolicyBinding_IsRejectedThroughThePublicHook()
     {
+        // Policies are registered before AddAccessControl() (ACC-05 composition rule), so the
+        // duplicate is attempted at that point: the rejection is about the duplicate, not about
+        // registering after the Access module was composed.
         var services = new ServiceCollection();
-        services.AddAccessControl();
         services.AddAudit();
         Assert.Throws<InvalidOperationException>(() =>
             services.AddAccessPolicy<CourseAuditReadPolicy>(CourseAuditReadPolicy.ActionId));
