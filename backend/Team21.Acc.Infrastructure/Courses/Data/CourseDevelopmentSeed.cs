@@ -3,7 +3,7 @@ using Team21.Acc.Core.Courses;
 
 namespace Team21.Acc.Infrastructure.Courses.Data;
 
-/// <summary>Opt-in sample data. Never called automatically by migrations or application startup.</summary>
+/// <summary>Sample data. Only the Development demo seed calls it, migrations never do.</summary>
 public static class CourseDevelopmentSeed
 {
     private static readonly Guid SampleActor = Guid.Parse("00000000-0000-0000-0000-000000000001");

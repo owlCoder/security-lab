@@ -1,5 +1,8 @@
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
+using Team21.Acc.Core.Interfaces;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Platform.Api.Modules.Team21.Integration;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
@@ -110,6 +113,8 @@ builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
+builder.Services.Replace(
+    ServiceDescriptor.Scoped<ICurrentActor, SessionCurrentActor>());
 
 
 builder.Services.AddScoped<LabCaller>();
@@ -134,6 +139,7 @@ else
 
 // Kreiranje aplikacije
 builder.Services.AddRevisionRequestIdentity();
+builder.Services.AddTeam21SessionAccess();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
@@ -145,6 +151,7 @@ app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+app.UseTeam21SessionBeforeAccess();
 app.UseAccessControl();
 
 
@@ -213,7 +220,7 @@ app.MapGet("/api/health", () => Results.Ok(new
 .AllowAnonymous()   // IDN-02 SessionCheckMiddleware
 .AllowPublic();     // ACC-05 AccessControlMiddleware
 
-app.UseMiddleware<SessionCheckMiddleware>();
+app.UseSessionForOtherEndpoints();
 
 app.MapControllers();
 app.MapLaboratories();
