@@ -11,6 +11,10 @@ public static class AuditEventTypes
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
     public const string AuthLoginThrottled = "auth.login.throttled";
+    public const string AuthMfaBackupCodesGenerated = "auth.mfa.backup_codes.generated";
+    public const string AuthMfaBackupCodeRedeemed = "auth.mfa.backup_code.redeemed";
+    public const string AuthMfaBackupCodeRejected = "auth.mfa.backup_code.rejected";
+    public const string AuthMfaBackupCodesRevoked = "auth.mfa.backup_codes.revoked";
     public const string AccountStatusChanged = "account.status.changed";
     public const string CourseMemberRoleChanged = "course.member.role.changed";
     public const string CourseDelegationGranted = "course.delegation.granted";
