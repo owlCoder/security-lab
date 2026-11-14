@@ -6,7 +6,6 @@ using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
-
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
@@ -22,8 +21,9 @@ using Platform.Api.Services.Identity;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
 using Platform.Identity;
-using Platform.Identity.Entities;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
@@ -108,6 +108,7 @@ builder.Services.AddScoped<ChangeAccountStatus>();
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IMfaService, MfaService>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -197,21 +198,23 @@ if (app.Environment.IsDevelopment())
 
         await app.SeedDevelopmentAccountsAsync();
     }
+
     // LAB-03 drugi demo kurs: 3333 je student samo ovde, ne na prvom kursu.
     // Primer: X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher pravi laboratoriju na prvom kursu.
     var secondDemoCourse = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-    membership.Set(secondDemoCourse, Guid.Parse("33333333-3333-3333-3333-333333333333"), LabVisibilityCourseRole.Student);
+    membership.Set(secondDemoCourse, Guid.Parse("33333333-3333-3333-3333-333333333333"),
+        LabVisibilityCourseRole.Student);
 }
 
 // Health endpoint
 app.MapGet("/api/health", () => Results.Ok(new
-{
-    status = "ok",
-    service = "security-lab-api",
-    note = "Initial scaffold; not a production-ready laboratory platform"
-}))
-.AllowAnonymous()   // IDN-02 SessionCheckMiddleware
-.AllowPublic();     // ACC-05 AccessControlMiddleware
+    {
+        status = "ok",
+        service = "security-lab-api",
+        note = "Initial scaffold; not a production-ready laboratory platform"
+    }))
+    .AllowAnonymous() // IDN-02 SessionCheckMiddleware
+    .AllowPublic(); // ACC-05 AccessControlMiddleware
 
 app.UseMiddleware<SessionCheckMiddleware>();
 
@@ -223,28 +226,31 @@ app.MapRevisionReviews();
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/api/access/demo-deny", async (
-        PlatformAccessDecision accessDecision,
-        CancellationToken cancellationToken) =>
-    {
-        var decision = await accessDecision.DecideAsync(
-            new AccessRequest(
-                new SubjectRef("demo-student", AccountState.Active),
-                "demo.unknown",
-                null,
-                Guid.NewGuid().ToString("N")),
-            cancellationToken);
+            PlatformAccessDecision accessDecision,
+            CancellationToken cancellationToken) =>
+        {
+            var decision = await accessDecision.DecideAsync(
+                new AccessRequest(
+                    new SubjectRef("demo-student", AccountState.Active),
+                    "demo.unknown",
+                    null,
+                    Guid.NewGuid().ToString("N")),
+                cancellationToken);
 
-        // This DEVELOPMENT-ONLY diagnostic reports the engine's denial as data.
-        // It never grants access to a resource; clients receive no secret data.
-        return Results.Ok(new {
-            outcome = decision.Outcome == AccessOutcome.Allow ? "allow" : "deny",
-            denialReason = decision.DenialReason.ToString(),
-            decision.CorrelationId
-        });
-    })
-    .AllowPublic();
+            // This DEVELOPMENT-ONLY diagnostic reports the engine's denial as data.
+            // It never grants access to a resource; clients receive no secret data.
+            return Results.Ok(new
+            {
+                outcome = decision.Outcome == AccessOutcome.Allow ? "allow" : "deny",
+                denialReason = decision.DenialReason.ToString(),
+                decision.CorrelationId
+            });
+        })
+        .AllowPublic();
 }
 
 app.Run();
 
-public partial class Program { }
+public partial class Program
+{
+}
