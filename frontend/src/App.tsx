@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { apiRequest } from './api/http'
 import { getMyRevisions, getPendingReviews } from './api/revisions'
+import Acc06 from './components/acc06/Acc06'
 import AppShell from './components/AppShell'
 import LandingPage from './components/LandingPage'
 import CourseworkKt1 from './components/CourseworkKt1'
@@ -92,6 +93,7 @@ export default function App() {
           
           <CourseworkKt1 />
           <LabsSection />
+          <Acc06 />
           <CoursesPage />
           <LabVisibilitySection />
           

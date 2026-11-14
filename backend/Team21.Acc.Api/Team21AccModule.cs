@@ -50,15 +50,16 @@ public static class Team21AccModule
 
         services.AddTeam21AccessPolicies();
         services.AddCourses();
-        services.AddGroups();
+        services.AddGroups(builder.Environment);
 
         return builder;
     }
 
     public static IEndpointRouteBuilder MapTeam21Acc(this IEndpointRouteBuilder app)
     {
-        app.MapCourses();
-        app.MapGroups();
+        var endpoints = app.MapGroup("").WithMetadata(new Team21SessionRequiredMetadata());
+        endpoints.MapCourses();
+        endpoints.MapGroups();
 
         return app;
     }
