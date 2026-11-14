@@ -16,6 +16,9 @@ jobs:
       - name: Test backend solution with isolated Audit PostgreSQL
         shell: pwsh
         run: ./scripts/audit/test-postgres.ps1 -NoBuild
+      - name: Test ADM-08 persistence with isolated PostgreSQL
+        shell: pwsh
+        run: ./scripts/test-coursework-postgres.ps1
       - name: Verify tests were discovered and executed
         shell: bash
         run: |
