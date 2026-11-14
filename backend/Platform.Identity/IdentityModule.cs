@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 
 namespace Platform.Identity;
@@ -40,6 +42,7 @@ public static class IdentityModule
         services.AddScoped<IAccountStatusReader, EfAccountStatusReader>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
+        services.AddScoped<IMfaCredentialsStore, EfMfaCredentialsStore>();
 
         return services;
     }
