@@ -15,9 +15,8 @@ public class ApiEndpointCoverageTests
     private static readonly HashSet<string> ApprovedPublicRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
         "/api/health",
-        // IDN-05: explicit public login; credentials and rate limits are checked by Identity.
+        "/api/access/demo-deny",
         "/api/auth/login",
-        "/api/access/demo-deny",   
     };
 
     // Each of these existing routes has an independently tested authorization
@@ -27,6 +26,7 @@ public class ApiEndpointCoverageTests
     {
         "/api/admin/accounts",
         "/api/admin/accounts/{id:guid}/status",
+        "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/me",
         "/api/authoring/templates",
@@ -37,12 +37,16 @@ public class ApiEndpointCoverageTests
         "/api/labs/",
         "/api/labs/{id:guid}",
         "/api/labs/{id:guid}/title",
-        // AUT-07: PreviewStudentView poziva IAccessDecision (lab.preview + LabPreviewPolicy).
+
+        // AUT-07: PreviewStudentView poziva AccessDecision (lab.preview + LabPreviewPolicy).
         "/api/labs/{id:guid}/preview",
         // AUT-04: session identity and account status are checked by LabCaller.
         // GetStudentLabView calls IAccessDecision before returning public content.
         // HTTP access boundaries are covered by StudentLabViewTests.
         "/api/labs/{id:guid}/student-view",
+        "/api/laboratories/{laboratoryId:guid}/prerequisites",
+        "/api/laboratories/{laboratoryId:guid}/prerequisites/{requiredLaboratoryId:guid}",
+
     };
 
     [Test]
@@ -58,7 +62,7 @@ public class ApiEndpointCoverageTests
         var violations = new List<string>();
         foreach (var e in endpoints)
         {
-            var route = "/" + e.RoutePattern.RawText?.TrimStart('/');
+            var route = ("/" + e.RoutePattern.RawText?.TrimStart('/')).TrimEnd('/');
             var hasReq = e.Metadata.GetMetadata<IAccessRequirementMetadata>() is not null;
             var isPublic = e.Metadata.GetMetadata<PublicEndpointMetadata>() is not null
                            || e.Metadata.GetMetadata<AllowPublicAttribute>() is not null;
