@@ -137,6 +137,7 @@ builder.Services.AddRevisionRequestIdentity();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
+AuthoringAccessSubjectProvider.Register(builder.Services);
 
 var app = builder.Build();
 app.UseRouting();
@@ -145,6 +146,10 @@ app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+
+//AUT-06: Access needs the validated session to identify the Authoring caller
+app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
+
 app.UseAccessControl();
 
 
@@ -213,7 +218,7 @@ app.MapGet("/api/health", () => Results.Ok(new
 .AllowAnonymous()   // IDN-02 SessionCheckMiddleware
 .AllowPublic();     // ACC-05 AccessControlMiddleware
 
-app.UseMiddleware<SessionCheckMiddleware>();
+app.UseWhen(context => !AuthoringAccessSubjectProvider.AppliesTo(context), otherRoutes => otherRoutes.UseMiddleware<SessionCheckMiddleware>());
 
 app.MapControllers();
 app.MapLaboratories();
