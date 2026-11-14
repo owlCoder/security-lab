@@ -7,6 +7,7 @@ using Platform.Api.Modules.Laboratories.Domain;
 namespace Platform.Api.Modules.Laboratories.Api;
 
 // LAB-01 HTTP sloj. Redosled za svaki zahtev:
+//   0. RequireAccess       - centralni ACC-05 middleware (#185): LaboratoryAccessPolicy, ista LAB provera
 //   1. SafeErrors          - neocekivana greska postaje genericki 500, bez stack trace-a
 //   2. RequireLabAccess    - identitet (401) i uloga/poznata radnja (403), pre citanja tela
 //   3. citanje i provera tela zahteva (400)
@@ -33,14 +34,13 @@ public static class LaboratoriesEndpoints
 
     private static void MapRoutes(RouteGroupBuilder group)
     {
-        // Every handler below has the existing RequireLabAccess filter, executed
-        // before its body, and LaboratoryService additionally checks ownership.
+        // Svaka ruta ima tacno jedan RequireAccess (ACC-05) i postojeci RequireLabAccess filter
+        // sa istom radnjom; LaboratoryService dodatno proverava kurs i vlasnistvo.
         group.WithTags("Laboratories")
-            .DelegatesToLegacyAuthorization()
             .AddEndpointFilter(SafeErrors);
 
         group.MapGet("/", () => Results.Ok(Array.Empty<object>()))
-            .RequireLabAccess(LabActions.List);
+            .RequireAccess(LabActions.List).RequireLabAccess(LabActions.List);
 
         // POST /api/laboratories  ->  201 Created + Location + telo sa serverskim Id-em
         group.MapPost("/", async (HttpContext http, [FromServices] LaboratoryService service, [FromServices] IIdentityContext caller) =>
@@ -58,7 +58,7 @@ public static class LaboratoriesEndpoints
                     $"{BasePath}/{result.Laboratory!.Id}", ToResponse(result.Laboratory)),
                 _ => ToFailure(result.Status),
             };
-        }).RequireLabAccess(LabActions.Create);
+        }).RequireAccess(LabActions.Create).RequireLabAccess(LabActions.Create);
 
         // GET /api/laboratories/{id}  ->  200 ili 404 (nepostojeca ili tudja, isti odgovor)
         group.MapGet("/{id:guid}", async (Guid id, HttpContext http, [FromServices] LaboratoryService service, [FromServices] IIdentityContext caller) =>
@@ -67,7 +67,7 @@ public static class LaboratoriesEndpoints
             return result.Status == LabResultStatus.Ok
                 ? Results.Ok(ToResponse(result.Laboratory!))
                 : ToFailure(result.Status);
-        }).RequireLabAccess(LabActions.Read);
+        }).RequireAccess(LabActions.Read).RequireLabAccess(LabActions.Read);
 
         // PATCH /api/laboratories/{id}/title  ->  200 sa istim Id-em i novim naslovom
         group.MapPatch("/{id:guid}/title", async (Guid id, HttpContext http, [FromServices] LaboratoryService service, [FromServices] IIdentityContext caller) =>
@@ -82,7 +82,7 @@ public static class LaboratoriesEndpoints
             return result.Status == LabResultStatus.Ok
                 ? Results.Ok(ToResponse(result.Laboratory!))
                 : ToFailure(result.Status);
-        }).RequireLabAccess(LabActions.Rename);
+        }).RequireAccess(LabActions.Rename).RequireLabAccess(LabActions.Rename);
     }
 
     private static LaboratoryResponse ToResponse(Laboratory lab) =>

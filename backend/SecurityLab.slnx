@@ -19,6 +19,7 @@
   <Project Path="Platform.Prerequisites.Tests/Platform.Prerequisites.Tests.csproj" />
   <Project Path="Platform.Prerequisites/Platform.Prerequisites.csproj" />
   <Project Path="Platform.RateLimiting.Tests/Platform.RateLimiting.Tests.csproj" />
+  <Project Path="Platform.SessionSecurity/Platform.SessionSecurity.csproj" />
   <Project Path="Platform.Tests/Platform.Tests.csproj" />
   <Project Path="Platform.Identity.Tests/Platform.Identity.Tests.csproj" />
   <Project Path="Platform.Identity/Platform.Identity.csproj" />

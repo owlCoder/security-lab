@@ -56,6 +56,37 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             null,
             Fields()),
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodesGenerated,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodeRedeemed,
+            Outcomes((AuditOutcome.Success, UserOrAnonymous)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodeRejected,
+            Outcomes((AuditOutcome.Denied, UserOrAnonymous)),
+            AuditPresence.Forbidden,
+            AuditPresence.Optional,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodesRevoked,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
 
         new AuditEventSchema(
             AuditEventTypes.AccountStatusChanged,

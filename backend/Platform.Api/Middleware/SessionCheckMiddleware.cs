@@ -8,6 +8,7 @@ namespace Platform.Api.Middleware;
 public class SessionCheckMiddleware
 {
     public const string SessionItemKey = "session";
+    public const string InvalidSessionCode = "session_invalid";
 
     private readonly RequestDelegate _next;
     public SessionCheckMiddleware(RequestDelegate next)
@@ -43,7 +44,10 @@ public class SessionCheckMiddleware
         if (context.RequestServices is not null
             && context.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() == true
             && (context.Request.Path.StartsWithSegments("/api/laboratories")
-                || context.Request.Path.StartsWithSegments("/api/labs")
+                || (context.Request.Path.StartsWithSegments("/api/labs")
+                && context.Request.Path.Value?.TrimEnd('/').EndsWith("/student-view", StringComparison.OrdinalIgnoreCase) != true
+                // AUT-07: pregled pre objave takođe traži pravu sesiju (LabCaller), i u Developmentu.
+                && context.Request.Path.Value?.TrimEnd('/').EndsWith("/preview", StringComparison.OrdinalIgnoreCase) != true)
                 || context.Request.Path.StartsWithSegments("/api/kt1")
                 || context.Request.Path.StartsWithSegments("/api/courses")
                 || context.Request.Path.StartsWithSegments("/api/materials")
@@ -56,18 +60,32 @@ public class SessionCheckMiddleware
         if (string.IsNullOrEmpty(token))
         {
             context.Response.StatusCode = 401;
+            await WriteInvalidSessionResponse(context, clearCookie: false);
             return;
         }
 
-        ValidateSession? validate = await sessionManager.ValidateAsync(token);
+        ValidateSession? validate = await sessionManager.ValidateAsync(token, context.RequestAborted);
 
         if (validate == null)
         {
             context.Response.StatusCode = 401;
+            await WriteInvalidSessionResponse(context, clearCookie: true);
             return;
         }
 
-        context.Items.Add(SessionItemKey, validate);
+        context.Items[SessionItemKey] = validate;
         await _next(context);
+    }
+
+    // IDN-07: the client gets a stable code to send the user to the login page,
+    // and the rejected cookie is removed so no tab sends it again.
+    private static async Task WriteInvalidSessionResponse(HttpContext context, bool clearCookie)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+
+        if (clearCookie)
+            context.Response.Cookies.Delete(SessionCookie.Name, SessionCookie.Options(DateTimeOffset.UnixEpoch));
+
+        await context.Response.WriteAsJsonAsync(new { code = InvalidSessionCode });
     }
 }

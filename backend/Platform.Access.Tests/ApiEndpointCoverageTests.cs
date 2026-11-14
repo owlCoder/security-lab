@@ -15,6 +15,8 @@ public class ApiEndpointCoverageTests
     private static readonly HashSet<string> ApprovedPublicRoutes = new(StringComparer.OrdinalIgnoreCase)
     {
         "/api/health",
+        // IDN-05: explicit public login; credentials and rate limits are checked by Identity.
+        "/api/auth/login",
         "/api/access/demo-deny",   
     };
 
@@ -25,9 +27,10 @@ public class ApiEndpointCoverageTests
     {
         "/api/admin/accounts",
         "/api/admin/accounts/{id:guid}/status",
-        "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/me",
+        "/api/auth/sessions",
+        "/api/auth/sessions/{handle:guid}",
         "/api/authoring/templates",
         "/api/authoring/templates/{templateId:guid}/drafts",
         "/api/laboratories/",
@@ -36,6 +39,12 @@ public class ApiEndpointCoverageTests
         "/api/labs/",
         "/api/labs/{id:guid}",
         "/api/labs/{id:guid}/title",
+        // AUT-07: PreviewStudentView poziva IAccessDecision (lab.preview + LabPreviewPolicy).
+        "/api/labs/{id:guid}/preview",
+        // AUT-04: session identity and account status are checked by LabCaller.
+        // GetStudentLabView calls IAccessDecision before returning public content.
+        // HTTP access boundaries are covered by StudentLabViewTests.
+        "/api/labs/{id:guid}/student-view",
     };
 
     [Test]
