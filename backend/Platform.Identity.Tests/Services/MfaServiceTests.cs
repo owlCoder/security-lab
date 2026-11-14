@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.DataProtection;
 using Moq;
+using OtpNet;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
@@ -85,6 +86,28 @@ public sealed class MfaServiceTests
     }
 
     [Test]
+    public async Task Enroll_WithActiveSession_CreatesPendingEnrollment_AndReturnsTotpUri()
+    {
+        SetupSession();
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MfaCredentials?)null);
+        _credentials.Setup(store => store.GetEmailAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("student@example.test");
+        _credentials.Setup(store => store.CreatePendingAsync(
+                UserId, It.IsAny<string>(), 1, _now.AddMinutes(10), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _service.EnrollAsync(Token, "corr-success", CancellationToken.None);
+
+        Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Success));
+        Assert.That(result.Uri, Does.StartWith("otpauth://totp/"));
+        Assert.That(result.Uri, Does.Contain("student%40example.test"));
+        _credentials.Verify(store => store.CreatePendingAsync(
+            UserId, It.Is<string>(ciphertext => !string.IsNullOrWhiteSpace(ciphertext)),
+            1, _now.AddMinutes(10), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
     public async Task Enroll_WithUnexpiredPendingEnrollment_IsRejected()
     {
         SetupSession();
@@ -125,6 +148,25 @@ public sealed class MfaServiceTests
     }
 
     [Test]
+    public async Task Confirm_WithCurrentCode_EnablesMfa()
+    {
+        var current = DateTimeOffset.UtcNow;
+        _clock.Setup(clock => clock.GetUtcNow()).Returns(current);
+        SetupSession(now: current);
+        var secret = TotpHelpers.GenerateSecret();
+        SetupPendingCredentials(_protector.Protect(secret), current.AddMinutes(5));
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+        _credentials.Setup(store => store.ConfirmAsync(UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _service.ConfirmEnrollAsync(Token, code, "corr-confirm", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Success));
+        _credentials.Verify(store => store.ConfirmAsync(
+            UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
     public async Task Confirm_WithExpiredEnrollment_DoesNotEnableMfa()
     {
         SetupSession();
@@ -150,11 +192,12 @@ public sealed class MfaServiceTests
             It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    private void SetupSession(AuthLevel authLevel = AuthLevel.Active)
+    private void SetupSession(AuthLevel authLevel = AuthLevel.Active, DateTimeOffset? now = null)
     {
+        var sessionNow = now ?? _now;
         var session = new Session(
             Guid.NewGuid(), UserId, new byte[32], Guid.NewGuid(),
-            authLevel, _now.AddHours(-1), _now.AddHours(8));
+            authLevel, sessionNow.AddHours(-1), sessionNow.AddHours(8));
         _sessions.Setup(store => store.FindByTokenAsync(Token, It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
     }
