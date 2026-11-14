@@ -167,6 +167,58 @@ public sealed class MfaServiceTests
     }
 
     [Test]
+    public async Task Confirm_WithPreviousTotpPeriod_EnablesMfa()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupConfirmation(secret, current);
+        var code = new Totp(Base32Encoding.ToBytes(secret))
+            .ComputeTotp(current.UtcDateTime.AddSeconds(-30));
+        _credentials.Setup(store => store.ConfirmAsync(UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _service.ConfirmEnrollAsync(Token, code, "corr-previous-period", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Success));
+        _credentials.Verify(store => store.ConfirmAsync(
+            UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task Confirm_WithNextTotpPeriod_EnablesMfa()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupConfirmation(secret, current);
+        var code = new Totp(Base32Encoding.ToBytes(secret))
+            .ComputeTotp(current.UtcDateTime.AddSeconds(30));
+        _credentials.Setup(store => store.ConfirmAsync(UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var result = await _service.ConfirmEnrollAsync(Token, code, "corr-next-period", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Success));
+        _credentials.Verify(store => store.ConfirmAsync(
+            UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task Confirm_WithCodeOutsideTotpWindow_DoesNotEnableMfa()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupConfirmation(secret, current);
+        var code = new Totp(Base32Encoding.ToBytes(secret))
+            .ComputeTotp(current.UtcDateTime.AddSeconds(-60));
+
+        var result = await _service.ConfirmEnrollAsync(Token, code, "corr-outside-window", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
+        _credentials.Verify(store => store.ConfirmAsync(
+            It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
     public async Task Confirm_WithExpiredEnrollment_DoesNotEnableMfa()
     {
         SetupSession();
@@ -211,6 +263,13 @@ public sealed class MfaServiceTests
                 PendingTotpSecretKeyVersion = 1,
                 PendingEnrollmentExpiresAt = expiresAt ?? _now.AddMinutes(5)
             });
+    }
+
+    private void SetupConfirmation(string secret, DateTimeOffset now)
+    {
+        _clock.Setup(clock => clock.GetUtcNow()).Returns(now);
+        SetupSession(now: now);
+        SetupPendingCredentials(_protector.Protect(secret), now.AddMinutes(5));
     }
 
     private void VerifyAuditDoesNotContainSecret(string expectedDetail)
