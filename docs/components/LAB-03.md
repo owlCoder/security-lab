@@ -295,6 +295,34 @@ U Development podacima nema nastavnika drugog kursa, pa se u koracima 3 i 4 kori
 - `backend/Laboratories.Tests/LabOpenPolicyTests.cs` (nov)
 - `backend/Laboratories.Tests/LaboratoryServiceTests.cs`, `LaboratoriesHttpTests.cs` (nove sekcije, postojeci testovi nisu menjani)
 
+## Rute i centralni ACC-05 middleware (issue #185)
+
+Svaka ruta modula ima tacno jedan `RequireAccess` (ACC-05) i, kao i ranije, `RequireLabAccess` sa istom radnjom. `DelegatesToLegacyAuthorization()` je uklonjen sa grupe ruta (to je bila oznaka, ne provera; ACC-05 je odbija). `Platform.Access` nije menjan.
+
+| Ruta (i alias `/api/labs`) | Radnja | Scope / resurs | Politika |
+| --- | --- | --- | --- |
+| `GET /api/laboratories/` | `laboratory.list` | Authenticated / — | `LaboratoryAccessPolicy` |
+| `POST /api/laboratories/` | `laboratory.create` | Authenticated / — | `LaboratoryAccessPolicy` |
+| `GET /api/laboratories/{id}` | `laboratory.read` | Authenticated / — | `LaboratoryAccessPolicy` |
+| `PATCH /api/laboratories/{id}/title` | `laboratory.rename` | Authenticated / — | `LaboratoryAccessPolicy` |
+
+- `LaboratoryAccessPolicy` ponavlja postojecu LAB proveru: pita isti `IAccessDecision` koji koristi `RequireLabAccess` (`FakeAccessDecision` u Development-u, `DenyAllAccessDecision` van njega). Centralna odluka zato ne olabavljuje pravila: student i dalje ne kreira, ne cita i ne preimenuje laboratorije preko HTTP-a.
+- `LaboratorySubjectProvider` daje centralnom middleware-u subjekat iz istog identiteta modula (`IIdentityContext`: `X-Test-User` u Development-u, niko van njega). Vazi samo za rute ciji je `RequireAccess` jedna od cetiri `laboratory.*` radnje (po metapodatku rute, ne po putanji); ostale rute, i LabVisibility rute pod `/api/labs`, idu originalnom provajderu.
+- Radnje, politika i dekorator se registruju u `AddLaboratories()`, bez izmena `Program.cs`. Na grani ACC-05 `AddLaboratories()` se poziva pre `AddAccessControl()`.
+
+Redosled provera za jedan zahtev:
+
+```mermaid
+flowchart LR
+  R["Zahtev"] --> M["AccessControlMiddleware (ACC-05)<br/>LaboratorySubjectProvider → DefaultDenyAccessDecision<br/>→ LaboratoryAccessPolicy → IAccessDecision modula"]
+  M -->|"401 bez identiteta / 403 bez dozvole"| X["Odbijeno"]
+  M --> F["RequireLabAccess<br/>(ista provera, ostaje)"]
+  F --> B["Citanje tela (400)"]
+  B --> S["LaboratoryService<br/>LabCoursePolicy (kreiranje), LabOpenPolicy + vlasnistvo (citanje), vlasnistvo (preimenovanje)"]
+```
+
+Ishodi su isti kao pre: bez identiteta 401, student na create/read/rename 403, student na listu 200, van Development-a 401. Telo 401/403 sada pise ACC-05 middleware (`ProblemDetails` sa `correlationId`), bez podataka o laboratoriji. Testovi: `LaboratoriesAccessTests` (metapodaci svake rute, 401/403 kroz centralni middleware, politika i dekorator); svi postojeci `Laboratories.Tests` prolaze bez izmene ocekivanih ishoda.
+
 ## Bezbednosni zahtevi
 
 - **Provere na serveru:** dve provere, redom:

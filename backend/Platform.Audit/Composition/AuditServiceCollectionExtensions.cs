@@ -21,9 +21,19 @@ public static class AuditServiceCollectionExtensions
         services.AddScoped<CorrelationContext>();
         services.AddScoped<ICorrelationContext>(provider => provider.GetRequiredService<CorrelationContext>());
 
-        // Access owns the central action catalog and singleton policy registry. Audit supplies
-        // the course-scoped read policy through the public composition hook.
+        // PR #109 declares this central action. Access owns the catalog and singleton
+        // lifetime; Audit supplies only its policy through the public composition hook.
         services.AddAccessPolicy<CourseAuditReadPolicy>(AccessActions.AuditEventsRead.Id);
+
+        return services;
+    }
+
+    public static IServiceCollection AddMfaBackupCodeAudit(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IMfaBackupCodeAuditService, MfaBackupCodeAuditService>();
 
         return services;
     }
