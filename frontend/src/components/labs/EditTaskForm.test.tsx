@@ -82,4 +82,64 @@ describe('AUT-01 EditTaskForm', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/authoring/tasks/task-42')
   })
+
+  it('odbija odgovor bez obaveznih polja i ne dozvoljava čuvanje', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EditTaskForm taskId={task.id} />)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('neispravne podatke')
+    fireEvent.click(screen.getByRole('button', { name: 'Sačuvaj izmene' }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('odbija odgovor sa pogrešnim ID-em zadatka', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'other-task',
+      title: 'Valid title',
+      description: 'Valid description',
+      type: 'AccessControl',
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EditTaskForm taskId={task.id} />)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('neispravne podatke')
+    fireEvent.click(screen.getByRole('button', { name: 'Sačuvaj izmene' }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('odbija odgovor sa nedozvoljenim tipom zadatka', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      id: task.id,
+      title: 'Valid title',
+      description: 'Valid description',
+      type: 'UnknownType',
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EditTaskForm taskId={task.id} />)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('neispravne podatke')
+    fireEvent.click(screen.getByRole('button', { name: 'Sačuvaj izmene' }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('ne dozvoljava PUT ako server vrati nepotpun odgovor iako je GET uspeo', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: task.id,
+        title: 'Valid title',
+        description: '',
+        type: 'AccessControl',
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<EditTaskForm taskId={task.id} />)
+
+    expect((await screen.findByRole('alert')).textContent).toContain('neispravne podatke')
+    fireEvent.click(screen.getByRole('button', { name: 'Sačuvaj izmene' }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

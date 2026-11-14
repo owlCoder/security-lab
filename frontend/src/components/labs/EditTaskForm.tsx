@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 
 interface TaskData {
   id: string
@@ -36,9 +36,40 @@ export interface EditTaskFormProps {
   taskId: string
 }
 
+function isValidLabType(value: unknown): value is typeof LAB_TYPES[number] {
+  return typeof value === 'string' && LAB_TYPES.includes(value as typeof LAB_TYPES[number])
+}
+
+function validateServerTask(taskId: string, data: unknown): TaskData {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Server je vratio neispravne podatke o zadatku.')
+  }
+
+  const raw = data as Partial<TaskData>
+
+  if (typeof raw.id !== 'string' || raw.id !== taskId) {
+    throw new Error('Server je vratio neispravne podatke o zadatku.')
+  }
+
+  if (typeof raw.title !== 'string' || raw.title.trim() === '') {
+    throw new Error('Server je vratio neispravne podatke o zadatku.')
+  }
+
+  const description = typeof raw.description === 'string' ? raw.description : typeof raw.goal === 'string' ? raw.goal : ''
+  if (description.trim() === '') {
+    throw new Error('Server je vratio neispravne podatke o zadatku.')
+  }
+
+  if (!isValidLabType(raw.type)) {
+    throw new Error('Server je vratio neispravne podatke o zadatku.')
+  }
+
+  return normalizeTask(taskId, raw)
+}
+
 function normalizeTask(taskId: string, data: Partial<TaskData>): TaskData {
   const description = typeof data.description === 'string' ? data.description : typeof data.goal === 'string' ? data.goal : ''
-  const type = typeof data.type === 'string' ? data.type : DEFAULT_TYPE
+  const type = isValidLabType(data.type) ? data.type : DEFAULT_TYPE
 
   return {
     id: typeof data.id === 'string' ? data.id : taskId,
@@ -76,10 +107,8 @@ export function EditTaskForm({ taskId }: EditTaskFormProps) {
       credentials: 'same-origin',
     }).then(async response => {
       if (!response.ok) throw new Error(`Učitavanje zadatka nije uspelo (HTTP ${response.status}).`)
-      const data: Partial<TaskData> = await response.json()
-      const normalized = normalizeTask(taskId, data)
-      if (normalized.id !== taskId || typeof normalized.title !== 'string')
-        throw new Error('Server je vratio neispravne podatke o zadatku.')
+      const data: unknown = await response.json()
+      const normalized = validateServerTask(taskId, data)
       if (!controller.signal.aborted) {
         setTask(normalized)
         setLoaded(true)
@@ -97,7 +126,7 @@ export function EditTaskForm({ taskId }: EditTaskFormProps) {
     return () => controller.abort()
   }, [taskId])
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!task || saving) return
 
