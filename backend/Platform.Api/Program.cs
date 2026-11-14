@@ -1,38 +1,39 @@
-using Team21.Acc.Api;
-using Platform.Api.Security.RevisionAuthorization;
-using Platform.Api.Modules.Kt1;
-using Platform.Api.Modules.RevisionReviews;
-using Platform.Api.Modules.Laboratories.Application;
-using Platform.Api.Modules.Laboratories.Infrastructure;
-using Platform.LaboratoryPersistence.Composition;
-using Platform.Api.Modules.Laboratories;
-
+using Platform.Access.AspNet;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.AspNet;
+using Platform.Api.Authorization;
 using Platform.Api.Development;
 using Platform.Api.Endpoints;
 using Platform.Api.Endpoints.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
+using Platform.Api.Modules.Kt1;
+using Platform.Api.Modules.Laboratories;
+using Platform.Api.Modules.Laboratories.Application;
+using Platform.Api.Modules.Laboratories.Infrastructure;
+using Platform.Api.Modules.RevisionReviews;
+using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
 using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
+using Platform.LaboratoryPersistence.Composition;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Persistence;
-
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
+using Team21.Acc.Api;
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
-using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
+using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddTeam21Acc();
@@ -92,9 +93,10 @@ builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IPrerequisiteRepository, InMemoryPrerequisiteRepository>();
 
 builder.Services.AddLaboratoriesPersistence(
-    builder.Configuration.GetConnectionString("Laboratories"));
+builder.Configuration.GetConnectionString("Laboratories"));
 builder.Services.AddRevisionReviews();
 builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
@@ -137,6 +139,28 @@ builder.Services.AddRevisionRequestIdentity();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
+
+// LAB-06: registracija akcija i politike autorizacije
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.add",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.remove",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.read",
+        ActionScope.Course,
+        "laboratory",
+        true));
 
 var app = builder.Build();
 app.UseRouting();
