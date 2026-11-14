@@ -18,6 +18,8 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Services.Audit;
+using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
 using Platform.Identity;
@@ -84,8 +86,8 @@ else
     builder.Services.AddSingleton<IRequestSubjectResolver, UnauthenticatedSubjectResolver>();
 }
 
-builder.Services.AddAudit();
-builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+builder.Services.AddAudit(builder.Configuration);
+builder.Services.AddScoped<IAuditContextProvider, ServerAuditContextProvider>();
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -109,6 +111,7 @@ builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 builder.Services.AddScoped<IMfaService, MfaService>();
+builder.Services.AddScoped<IdentityAuditProducer>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -117,6 +120,7 @@ builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
 {
@@ -220,9 +224,9 @@ app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
 app.MapLaboratories();
+app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();
 app.MapRevisionReviews();
-
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/api/access/demo-deny", async (

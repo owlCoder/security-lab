@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
 
 function LoginRoute() {
@@ -88,11 +89,13 @@ export default function App() {
         <Route index element={<>
           <LandingPage />
           <HealthStatus />
-          {/* Komponente drugih timova sa main grane (ACC-04/ADM-08 i LAB-07) */}
+          
           <CourseworkKt1 />
           <LabsSection />
           <CoursesPage />
           <LabVisibilitySection />
+          
+          <AuthoringSection />
         </>} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
