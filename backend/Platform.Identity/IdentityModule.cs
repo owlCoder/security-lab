@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -19,6 +20,12 @@ public static class IdentityModule
         var connectionString = configuration.GetConnectionString(ConnectionStringName);
 
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
+        services.AddDataProtection()
+            .SetApplicationName("SecurityLab");
+        services.AddSingleton<IDataProtector>(serviceProvider =>
+            serviceProvider
+                .GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector("SecurityLab", "Identity", "MfaTotpSecret", "v1"));
 
         // IDN-05: an invalid lockout setting stops the service from starting.
         services.AddOptions<IdentityLockoutOptions>()
@@ -37,7 +44,8 @@ public static class IdentityModule
         return services;
     }
 
-    internal static DbContextOptionsBuilder UseIdentityNpgsql(this DbContextOptionsBuilder options, string? connectionString) =>
+    internal static DbContextOptionsBuilder UseIdentityNpgsql(this DbContextOptionsBuilder options,
+        string? connectionString) =>
         options.UseNpgsql(connectionString, npgsql =>
             npgsql.MigrationsHistoryTable("__EFMigrationsHistory", PlatformIdentityDbContext.SchemaName));
 }
