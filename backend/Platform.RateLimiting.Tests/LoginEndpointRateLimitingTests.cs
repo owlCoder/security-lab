@@ -238,6 +238,9 @@ public sealed class LoginEndpointRateLimitingTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            // WebApplicationFactory runs the real Program registrations: central audit,
+            // authentication action policies, session subject provider and strict Access middleware.
+            // Do not add a second Access stack or replace its decisions in this factory.
             builder.UseEnvironment("Production");
             builder.ConfigureLogging(logging =>
             {

@@ -32,6 +32,8 @@ public sealed class LockoutEndpointTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            // The real Program supplies the same strict Access policies as production.
+            // Only database/configuration are isolated here; authorization is not replaced.
             builder.UseEnvironment("Testing");
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting("ConnectionStrings:Identity", connectionString);
