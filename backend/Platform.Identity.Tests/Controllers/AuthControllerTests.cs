@@ -7,6 +7,8 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Moq;
+using Platform.Identity.Interfaces;
+using IIdentityContext = Platform.Api.Interfaces.Identity.IIdentityContext;
 
 namespace Platform.Identity.Tests.Controllers;
 
@@ -17,6 +19,7 @@ public class AuthControllerTests
     private Mock<ILoginService> _login = null!;
     private Mock<ILogoutService> _logout = null!;
     private Mock<IIdentityContext> _identity = null!;
+    private Mock<IMfaService> _mfa = null!;
     private AuthController _controller = null!;
 
     [SetUp]
@@ -25,7 +28,8 @@ public class AuthControllerTests
         _login = new Mock<ILoginService>();
         _logout = new Mock<ILogoutService>();
         _identity = new Mock<IIdentityContext>();
-        _controller = new AuthController(_login.Object, _logout.Object, _identity.Object)
+        _mfa = new Mock<IMfaService>();
+        _controller = new AuthController(_login.Object, _logout.Object, _identity.Object, _mfa.Object)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
