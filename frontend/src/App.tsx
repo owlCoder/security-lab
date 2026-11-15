@@ -98,8 +98,11 @@ export default function App() {
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
-          {/* AUT-01: nacrti zadataka, samo za prijavljene korisnike */}
-          <Route path="drafts" element={<DraftsPage />} />
+          {/*
+            AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).
+            Ruta postoji samo u razvojnom režimu, ne i u produkcionom buildu.
+          */}
+          {import.meta.env.DEV && <Route path="drafts" element={<DraftsPage />} />}
         </Route>
       </Route>
     </Routes>

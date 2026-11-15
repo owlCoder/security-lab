@@ -20,6 +20,16 @@
   color: #5c6b80;
 }
 
+.drafts .drafts-demo {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  color: #4a3a00;
+  background: #fff8e1;
+  border: 1px solid #f0d58a;
+  border-left: 4px solid #c58b00;
+  border-radius: 8px;
+}
+
 .drafts .drafts-form {
   max-width: 560px;
   margin-bottom: 24px;

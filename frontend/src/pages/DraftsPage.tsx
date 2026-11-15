@@ -5,6 +5,8 @@ import DraftList from '../components/drafts/DraftList'
 import { labTypeLabel } from '../components/drafts/DraftTypes'
 import type { CreateDraftData, Draft } from '../components/drafts/DraftTypes'
 
+// DEMO: nacrti postoje samo u stanju stranice, ništa se ne šalje serveru.
+// ID i status zapravo dodeljuje server, pa ova funkcija nestaje kad se stranica poveže.
 function createLocalDraft(data: CreateDraftData): Draft {
   return {
     ...data,
@@ -43,6 +45,11 @@ export default function DraftsPage() {
           {showCreateForm ? 'Zatvori formu' : 'Novi nacrt'}
         </button>
       </div>
+
+      <p className="drafts-demo" role="status">
+        <strong>Demo režim:</strong> nacrti se ne čuvaju na serveru i nestaju
+        nakon osvežavanja stranice.
+      </p>
 
       {showCreateForm && (
         <CreateDraftForm onCreate={handleCreate} />
