@@ -3,6 +3,7 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Services;
 
 namespace Platform.Api.Services.Identity;
@@ -15,6 +16,7 @@ internal sealed class LoginService(
     ICredentialVerifier credentials,
     ISessionCreator sessions,
     ISessionManager sessionManager,
+    IMfaCredentialsStore mfaCredentials,
     IdentityAuditProducer audit) : ILoginService
 {
     public async Task<LoginResult> ExecuteAsync(
@@ -47,11 +49,14 @@ internal sealed class LoginService(
                 ct,
                 actorConfirmed: true);
 
-        // MFA (IDN-06) is not implemented yet: until an MFA policy exists every login is Active.
+        var authenticationLevel = (await mfaCredentials.GetAsync(check.AccountId, ct))?.MfaEnabled == true
+            ? AuthenticationLevel.MfaPending
+            : AuthenticationLevel.Active;
+
         IssuedSession? session;
         try
         {
-            session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
+            session = await sessions.CreateAsync(check.AccountId, authenticationLevel, ct);
         }
         catch (AccountNotActiveException)
         {

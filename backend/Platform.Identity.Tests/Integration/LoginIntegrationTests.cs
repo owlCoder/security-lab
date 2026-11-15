@@ -31,6 +31,7 @@ public class LoginIntegrationTests : IntegrationTestBase
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
     }
 
+
     [Test]
     public async Task Login_WithMissingFields_ShouldReturnBadRequest()
     {
@@ -179,5 +180,25 @@ public class LoginIntegrationTests : IntegrationTestBase
         Assert.That(allCookies, Does.Contain("path=/"));
         // Response ne sadrzi sifru
         Assert.That(responseBody.ToString(), Does.Not.Contain(rawPassword));
+    }
+
+    [Test]
+    public async Task Login_WithMfaEnabledAccount_CreatesPendingSessionWithoutActiveAccess()
+    {
+        const string rawPassword = "SecurePassword123!";
+        var testUser = await UserTestData.AddAsync(Factory, "mfa-login@platform.com", rawPassword);
+        await InsertAsync(new MfaCredentials(testUser.Id) { MfaEnabled = true });
+
+        var login = await Client.PostAsJsonAsync("/api/auth/login", new
+        {
+            Email = "mfa-login@platform.com",
+            Password = rawPassword
+        });
+
+        Assert.That(login.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var me = await Client.GetAsync("/api/auth/me");
+
+        Assert.That(me.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
     }
 }
