@@ -35,3 +35,20 @@ A request message alone is not an accepted contract. A local simulator alone doe
 Review `Modules/Access/Contracts.cs` together with `AttemptService` and the simulator: metadata contains Id, OwnerId, CourseId, State and Version, not the answer. An authorized read is bound to that exact snapshot. A draft mutation checks InProgress state, the same snapshot and expected version atomically; exactly one concurrent same-version write succeeds. Provider replies distinguish found/missing/unavailable internally while unauthorized public replies are normalized. The client never supplies authoritative ownership or membership.
 
 Ask the actual provider owner to confirm: ownership of the real adapter; version/snapshot binding; treatment of transient failure; historical-state protection; and current-identity/revocation consistency at integration. The delivered test double and contract tests can be reviewed without implementing the neighboring module. Record the actual acknowledgement and its reviewed commit/version. See `CLOSURE.md` for evidence commands.
+
+
+## KT2 increment 2 — Identity consumption
+
+The ADM-08 API now consumes the published `ISessionManager.ValidateAsync` and
+`Platform.Identity.Interfaces.IAccountStatusReader.FindAsync` contracts through
+fresh scopes. Real PostgreSQL Identity/session/Audit services and normal
+`/api/auth/login` are used by `AdministrationHttpTests`; neither credentials nor
+identity are supplied by a test header. The production request identity decorator
+is restricted to `AdministrationEndpointMetadata`; other module providers remain
+in the chain. The four administrative actions register through central Access.
+
+This is technical integration evidence against the current repository contracts,
+not a fabricated neighboring-team acknowledgement. External review status above
+remains pending until a real reference is recorded. Root provisioning/course
+existence/archive rules, ACC-04 ATT/membership adapters and delivery of the
+administrative producer outbox still need their corresponding provider agreements.

@@ -137,11 +137,11 @@ public sealed class AdministrationPostgresTests
     public async Task CachedGrantCannotReadOrWriteAfterRevocationCommits()
     {
         var grant = await Delegate();
-        using var earlierRequest = new PostgresAdministrationSession(connectionString, accounts);
-        var captured = earlierRequest.FindAuthority(DemoStore.DelegateUser, DemoStore.Course).Value!;
+        await using var earlierRequest = await PostgresAdministrationSession.OpenAsync(connectionString, accounts);
+        var captured = (await earlierRequest.FindAuthorityAsync(DemoStore.DelegateUser, DemoStore.Course)).Value!;
         await Run(DemoStore.Admin, AdministrationPolicy.Revoke, grantId: grant.Id, revoke: new(1));
-        Assert.That(earlierRequest.ReadAdministration(captured).Status, Is.EqualTo(PortStatus.NotFound));
-        Assert.That(earlierRequest.Rename(captured, new("forbidden", 1)).Status, Is.EqualTo(WriteStatus.Denied));
+        Assert.That((await earlierRequest.ReadAdministrationAsync(captured)).Status, Is.EqualTo(PortStatus.NotFound));
+        Assert.That((await earlierRequest.RenameAsync(captured, new("forbidden", 1))).Status, Is.EqualTo(WriteStatus.Denied));
     }
 
     [Test]
@@ -193,12 +193,12 @@ public sealed class AdministrationPostgresTests
     [Test]
     public async Task MissingOrMismatchedProducerAuditCannotCommitAMutation()
     {
-        using (var session = new PostgresAdministrationSession(connectionString, accounts))
+        await using (var session = await PostgresAdministrationSession.OpenAsync(connectionString, accounts))
         {
-            var authority = session.FindAuthority(DemoStore.Admin, DemoStore.Course).Value!;
-            Assert.That(session.Rename(authority, new("cannot commit", 1)).Status, Is.EqualTo(WriteStatus.Updated));
-            Assert.Throws<InvalidOperationException>(() => session.Commit());
-            Assert.Throws<InvalidOperationException>(() => session.Write(new(DateTimeOffset.UtcNow, "wrong-target", DemoStore.Admin,
+            var authority = (await session.FindAuthorityAsync(DemoStore.Admin, DemoStore.Course)).Value!;
+            Assert.That((await session.RenameAsync(authority, new("cannot commit", 1))).Status, Is.EqualTo(WriteStatus.Updated));
+            Assert.ThrowsAsync<InvalidOperationException>(() => session.CommitAsync());
+            Assert.ThrowsAsync<InvalidOperationException>(async () => await session.WriteAsync(new(DateTimeOffset.UtcNow, "wrong-target", DemoStore.Admin,
                 AdministrationPolicy.Rename, DemoStore.OtherCourse, DemoStore.Course, "ALLOW", "ADMIN_CHANGE", "adm08:v1", 1, 2)));
         }
         Assert.That(await Sql("SELECT version FROM coursework_admin.course_settings WHERE course_id = @id", ("id", DemoStore.Course)), Is.EqualTo(1));
@@ -272,8 +272,8 @@ public sealed class AdministrationPostgresTests
     public async Task AdministrativeGrantDoesNotGrantTeachingOrStudentAnswerAccess()
     {
         await Delegate();
-        using var snapshot = new PostgresAdministrationSession(connectionString, accounts);
-        Assert.That(snapshot.FindAuthority(DemoStore.DelegateUser, DemoStore.Course).Status, Is.EqualTo(PortStatus.Ok));
+        await using var snapshot = await PostgresAdministrationSession.OpenAsync(connectionString, accounts);
+        Assert.That((await snapshot.FindAuthorityAsync(DemoStore.DelegateUser, DemoStore.Course)).Status, Is.EqualTo(PortStatus.Ok));
         Assert.That(accounts.FindMembership(DemoStore.DelegateUser, DemoStore.Course).Status, Is.EqualTo(PortStatus.NotFound));
         var attempts = new AttemptPolicy(accounts, accounts, accounts);
         var decision = await attempts.EvaluateAsync(new(new(DemoStore.DelegateUser.ToString(), AccountState.Active),
@@ -332,7 +332,7 @@ public sealed class AdministrationPostgresTests
     }
 
     [Test]
-    public async Task CancellationBeforeCommitRollsBackAlreadyStagedChangeAndAudit()
+    public async Task CancellationPreventsCommitOfChangeAndAudit()
     {
         using var cancellation = new CancellationTokenSource();
         service = NewService(new CancelDuringDecision(cancellation));

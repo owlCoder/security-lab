@@ -18,7 +18,7 @@ public sealed class PersistentAdministrationPolicy(AdministrationDatabase databa
     public async ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var session = new PostgresAdministrationSession(database.ConnectionString, accounts);
+        await using var session = await PostgresAdministrationSession.OpenAsync(database.ConnectionString, accounts, cancellationToken);
         return await new AdministrationPolicy(accounts, session).EvaluateAsync(request, cancellationToken);
     }
 }

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$UseExistingServer)
+param([switch]$UseExistingServer, [switch]$Demonstrate)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
@@ -65,7 +65,21 @@ try {
     if ([int]$counters.total -lt 1 -or [int]$counters.passed -ne [int]$counters.total) {
         throw 'Some PostgreSQL tests were not executed successfully (including skipped cases).'
     }
+    foreach ($fixture in @('Platform.Coursework.Tests.AdministrationPostgresTests', 'Platform.Coursework.Tests.AdministrationHttpTests')) {
+        $discovered = @($trx.TestRun.TestDefinitions.UnitTest | Where-Object {
+            ($_.TestMethod.className -split ',', 2)[0] -eq $fixture
+        })
+        if ($discovered.Count -eq 0) { throw "Required integration fixture was not discovered: $fixture" }
+    }
     Write-Host "ADM-08 PostgreSQL PASS: $($counters.passed)/$($counters.total). Results: $report"
+    if ($Demonstrate) {
+        # A separate, fresh fixture demonstrates the complete HTTP lifecycle.
+        dotnet test backend/Platform.Coursework.Tests/Platform.Coursework.Tests.csproj --configuration Release --no-build `
+            --filter 'FullyQualifiedName~RealLoginDelegationSettingsRevocationRejectsTheExactPreviouslyIssuedCookie' `
+            --logger 'console;verbosity=detailed'
+        if ($LASTEXITCODE -ne 0) { throw 'The real-session HTTP demonstration failed.' }
+    }
+
 }
 finally {
     try {

@@ -13,17 +13,28 @@ public sealed class PersistentAdministrationService(string connectionString, IAc
 {
     public async Task<OperationResult> Execute(Guid? actor, Guid course, string action, string correlation,
         RenameCourseRequest? rename = null, DelegateRequest? delegation = null,
-        Guid? grantId = null, RevokeRequest? revoke = null, CancellationToken ct = default)
+        Guid? grantId = null, RevokeRequest? revoke = null, CancellationToken ct = default, Func<CancellationToken, Task<bool>>? validateSession = null)
     {
         ct.ThrowIfCancellationRequested();
         try
         {
-            using var session = new PostgresAdministrationSession(connectionString, accounts);
+            await using var session = await PostgresAdministrationSession.OpenAsync(connectionString, accounts, ct);
             var service = new AdministrationService(accounts, session, decisions, session, clock);
             var result = await service.Execute(actor, course, action, correlation, rename, delegation, grantId, revoke, ct);
             // A result is returned only AFTER both the change and its producer audit commit.
             ct.ThrowIfCancellationRequested();
-            session.Commit();
+            if (validateSession is not null && !await validateSession(ct))
+            {
+                await session.RollbackAsync(ct);
+                await session.DisposeAsync();
+                // Preserve the rejection after rolling back the attempted change and its success event.
+                await using var denied = await PostgresAdministrationSession.OpenAsync(connectionString, accounts, ct);
+                await denied.WriteAsync(new(clock.GetUtcNow(), correlation, actor, action, grantId ?? course, course,
+                    "DENY", "SESSION_INVALIDATED", "adm08:v1"), ct);
+                await denied.CommitAsync(ct);
+                return new(401);
+            }
+            await session.CommitAsync(ct);
             return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

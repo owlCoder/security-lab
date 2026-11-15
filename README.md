@@ -151,12 +151,18 @@ The synthetic login is enabled only in Development with `Kt1Demo:Enabled=true`; 
 
 ## ACC-04 and ADM-08 KT2 work in progress
 
-The first KT2 increment adds a PostgreSQL adapter for ADM-08 settings/delegations,
-database concurrency checks and a transactional producer audit. It is not yet wired
-to the production API; the KT1 screen still uses its explicit simulator. Real
-Identity/membership/ATT composition and central audit delivery remain open.
+ADM-08 has a PostgreSQL adapter with transactional producer audit and a real-session
+API at `/api/course-administration/{courseId}`. Enable it explicitly with
+`CourseworkAdministration:Enabled=true` and configure the Identity/administration
+connections. It consumes the existing Identity login/session and shared Access
+contracts. The existing KT1 React screen remains its separate simulator.
 
-Run its isolated database checks with Docker Desktop running:
+Run the isolated database and real-session HTTP checks with Docker Desktop running:
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-coursework-postgres.ps1`.
-See [KT2 scope, limitations and next steps](docs/components/coursework/KT2.md) and
-[the actual local verification](docs/components/coursework/KT2-VALIDATION.md).
+Add `-Demonstrate` to display the full login/delegation/update/revocation lifecycle.
+Operator migration and local HTTPS startup are documented in
+[KT2 scope, setup and remaining work](docs/components/coursework/KT2.md).
+See [the actual verification](docs/components/coursework/KT2-VALIDATION.md) and
+[current ADM-08 architecture/DFD](docs/components/coursework/diagrams/README.md).
+ACC-04 real ATT/membership adapters, trusted course/root provisioning and central
+delivery of administrative outbox events remain open.
