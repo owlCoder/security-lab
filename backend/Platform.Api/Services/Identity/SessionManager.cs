@@ -9,8 +9,10 @@ using Platform.Identity.Persistence;
 
 namespace Platform.Api.Services.Identity;
 
-public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManager
+public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? timeProvider = null) : ISessionManager
 {
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+
     public async Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)
     {
         if (userId == Guid.Empty) throw new ArgumentException("userId is required", nameof(userId));
@@ -54,8 +56,8 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
             candidate => candidate.TokenHash == tokenHash,
             ct);
 
-        var now = DateTimeOffset.UtcNow;
-        if (session is null || session.RevokedAt is not null || session.ExpiresAt <= now)
+        var now = clock.GetUtcNow();
+        if (session is null || !session.IsActiveAt(now))
             return null;
 
         // SEC-03 / IDN-03: a blocked or archived account is refused on its very next request, even if a session
@@ -94,9 +96,11 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
         var now = DateTimeOffset.UtcNow;
         return await db.Sessions
             .Where(session =>
-                session.UserId == userId &&
+                session.UserId == userId && 
                 session.RevokedAt == null &&
-                session.ExpiresAt > now)
+                    session.ExpiresAt > now)     // TODO: Once the MFA/session state model is finalized (IDN-06 / TYP-05),
+                                                 // consider whether only fully authenticated sessions (AuthLevel.Active)
+                                                 // should be included in this list
             .Select(session => new SessionInfo(
                 session.SessionHandle,
                 session.CreatedAt,

@@ -38,7 +38,11 @@ public sealed class AuditProductionIsolationTests
         request.Headers.Add("X-Stub-User", UserId.ToString());
         using var response = await client.SendAsync(request);
 
-        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+        // The point is that the development header grants nothing in Production. The exact
+        // refusal depends on how the Identity route is migrated to ACC-05 (its owner with Team 3):
+        // 401 from the session check today, 403 from Access while the route still carries the
+        // retired delegation marker.
+        Assert.That(response.StatusCode, Is.AnyOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden));
     }
 
     private sealed class ProductionHostFactory : WebApplicationFactory<Program>

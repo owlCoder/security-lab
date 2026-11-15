@@ -186,6 +186,78 @@ public class SessionCheckMiddlewareTests
         Assert.That(context.Response.StatusCode, Is.EqualTo(401));
     }
 
+    [Test]
+    public async Task ProtectedEndpoint_RejectedToken_Returns401WithCode_AndClearsTheCookie()
+    {
+        var context = ProtectedRequest("/api/auth/me", Environments.Production);
+        SessionReturns("revoked-token", null);
+        context.Request.Headers.Cookie = $"{SessionCookie.Name}=revoked-token";
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(context.Response.StatusCode, Is.EqualTo(401));
+        Assert.That(context.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
+        Assert.That(context.Response.Headers.SetCookie.ToString(), Does.Contain($"{SessionCookie.Name}=;"));
+        Assert.That(ReadBody(context), Does.Contain(SessionCheckMiddleware.InvalidSessionCode));
+    }
+
+    [Test]
+    public async Task ProtectedEndpoint_NoCookie_Returns401WithCode_WithoutAskingTheSessionManager()
+    {
+        var context = ProtectedRequest("/api/auth/me", Environments.Production);
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(context.Response.StatusCode, Is.EqualTo(401));
+        Assert.That(context.Response.Headers.SetCookie.ToString(), Is.Empty);
+        Assert.That(ReadBody(context), Does.Contain(SessionCheckMiddleware.InvalidSessionCode));
+        _sessions.Verify(s => s.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Test]
+    public async Task ProtectedEndpoint_ValidToken_TwoRequestsOnTheSameContext_DoNotFail()
+    {
+        var context = ProtectedRequest("/api/auth/me", Environments.Production);
+        SessionReturns("valid-token", new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthenticationLevel.Active));
+        context.Request.Headers.Cookie = $"{SessionCookie.Name}=valid-token";
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(() => _middleware.Invoke(context, _sessions.Object), Throws.Nothing);
+    }
+
+    [Test]
+    public async Task ProtectedEndpoint_ValidToken_PassesTheRequestAbortedTokenToTheSessionManager()
+    {
+        using var cts = new CancellationTokenSource();
+        var context = ProtectedRequest("/api/auth/me", Environments.Production);
+        context.RequestAborted = cts.Token;
+        context.Request.Headers.Cookie = $"{SessionCookie.Name}=valid-token";
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        _sessions.Verify(s => s.ValidateAsync("valid-token", cts.Token), Times.Once());
+    }
+
+    [Test]
+    public async Task ProtectedEndpoint_EmptyCookieValue_Returns401_WithoutAskingTheSessionManager()
+    {
+        var context = ProtectedRequest("/api/auth/me", Environments.Production);
+        context.Request.Headers.Cookie = $"{SessionCookie.Name}=";
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(_nextCalled, Is.False);
+        Assert.That(context.Response.StatusCode, Is.EqualTo(401));
+        _sessions.Verify(s => s.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    private static string ReadBody(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        return new StreamReader(context.Response.Body).ReadToEnd();
+    }
+
     private static DefaultHttpContext ProtectedRequest(string path, string environment)
     {
         var host = new Mock<IHostEnvironment>();
@@ -193,6 +265,7 @@ public class SessionCheckMiddlewareTests
         var services = new ServiceCollection().AddSingleton(host.Object).BuildServiceProvider();
 
         var context = new DefaultHttpContext { RequestServices = services };
+        context.Response.Body = new MemoryStream();
         context.Request.Path = path;
         context.SetEndpoint(new Endpoint(null, null, "protected"));
         return context;

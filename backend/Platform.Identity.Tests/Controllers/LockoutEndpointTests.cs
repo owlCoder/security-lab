@@ -8,18 +8,22 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Persistence;
+using Platform.Identity.Tests.Helpers;
 using Platform.Api.Services.Identity;
 using Testcontainers.PostgreSql;
 
 namespace Platform.Identity.Tests.Controllers;
 
-// IDN-05 through the real Platform.Api host: real login, real sessions, real Postgres.
-// Nothing is replaced. The database is a throwaway Testcontainers Postgres.
+// IDN-05 through the real Platform.Api host: real login, real sessions and real Postgres.
+// Only the mandatory Audit writer is replaced because this fixture isolates lockout behavior
+// and does not provision a separate Audit database.
 [TestFixture]
 [Category("IDN-05")]
 public sealed class LockoutEndpointTests
@@ -38,6 +42,11 @@ public sealed class LockoutEndpointTests
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);
             // These tests exercise account lockout independently of the IP limiter.
             builder.UseSetting("RateLimiting:Login:PermitLimit", "1000");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ITrustedAuditWriter>();
+                services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
+            });
         }
     }
 
