@@ -34,6 +34,16 @@ public static class IdentityModule
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
 
+        services.AddScoped<BackupCodeStore>();
+
+        services.AddScoped<IBackupCodeStore>(serviceProvider => serviceProvider.GetRequiredService<BackupCodeStore>());
+
+        services.AddScoped<IBackupCodeConsumption>(serviceProvider => serviceProvider.GetRequiredService<BackupCodeStore>());
+
+        services.AddSingleton<IBackupCodeGenerator, BackupCodeGenerator>();
+
+        services.AddScoped<IBackupCodeRedemptionService, BackupCodeRedemptionService>();
+
         return services;
     }
 

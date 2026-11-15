@@ -130,7 +130,55 @@ namespace Platform.Identity.Migrations
                     b.ToTable("accounts", "identity");
                 });
 
+            modelBuilder.Entity("Platform.Identity.Persistence.BackupCodeStorageEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsUsed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_used");
+
+                    b.Property<DateTimeOffset>("UsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("used_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CodeHash")
+                        .IsUnique();
+
+                    b.ToTable("backup_codes", "identity");
+                });
+
             modelBuilder.Entity("Platform.Identity.Entities.Session", b =>
+                {
+                    b.HasOne("Platform.Identity.Entities.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Platform.Identity.Persistence.BackupCodeStorageEntry", b =>
                 {
                     b.HasOne("Platform.Identity.Entities.UserAccount", null)
                         .WithMany()
