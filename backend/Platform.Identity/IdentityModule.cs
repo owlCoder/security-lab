@@ -40,6 +40,10 @@ public static class IdentityModule
 
         services.AddScoped<IBackupCodeConsumption>(serviceProvider => serviceProvider.GetRequiredService<BackupCodeStore>());
 
+        services.AddSingleton<IBackupCodeGenerator, BackupCodeGenerator>();
+
+        services.AddScoped<IBackupCodeRedemptionService, BackupCodeRedemptionService>();
+
         return services;
     }
 
