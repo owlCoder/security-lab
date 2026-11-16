@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Contracts;
@@ -29,6 +30,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
     private const string Password = "Strong-password!2026";
 
     private PostgreSqlContainer database = null!;
+    private string auditRuntimeConnection = null!;
     private DbContextOptions<PlatformIdentityDbContext> identityOptions = null!;
     private DbContextOptions<AuditDbContext> auditOptions = null!;
 
@@ -53,6 +55,21 @@ public sealed class IdentityAuditPostgresIntegrationTests
         await identity.Database.MigrateAsync();
         await using var audit = new AuditDbContext(auditOptions);
         await audit.Database.MigrateAsync();
+        var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        await using var connection = new NpgsqlConnection(database.GetConnectionString());
+        await connection.OpenAsync();
+        // The generated password is hexadecimal; this role exists only in the disposable container.
+        await using var command = new NpgsqlCommand($"""
+            CREATE ROLE s16_audit_runtime LOGIN PASSWORD '{password}'
+                NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+            GRANT USAGE ON SCHEMA audit TO s16_audit_runtime;
+            GRANT SELECT, INSERT ON audit.audit_events TO s16_audit_runtime;
+            """, connection);
+        await command.ExecuteNonQueryAsync();
+        auditRuntimeConnection = new NpgsqlConnectionStringBuilder(database.GetConnectionString())
+        {
+            Username = "s16_audit_runtime", Password = password, Pooling = false
+        }.ConnectionString;
     }
 
     [OneTimeTearDown]
@@ -72,7 +89,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:Identity"] = database.GetConnectionString(),
-                    ["ConnectionStrings:Audit"] = database.GetConnectionString()
+                    ["ConnectionStrings:Audit"] = auditRuntimeConnection
                 }));
             builder.ConfigureTestServices(services =>
             {
@@ -87,7 +104,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
                 services.RemoveAll<AuditDbContext>();
                 services.RemoveAll<DbContextOptions<AuditDbContext>>();
                 services.AddDbContext<AuditDbContext>(options =>
-                    options.UseNpgsql(database.GetConnectionString(), postgres =>
+                    options.UseNpgsql(auditRuntimeConnection, postgres =>
                         postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
             });
         });
