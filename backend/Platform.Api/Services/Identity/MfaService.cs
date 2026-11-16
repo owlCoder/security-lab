@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
@@ -8,6 +9,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
+using Platform.Identity;
 
 namespace Platform.Api.Services.Identity;
 
@@ -16,7 +18,8 @@ public sealed class MfaService(
     ISessionStore sessionStore,
     IAuditWriter audit,
     TimeProvider clock,
-    IDataProtector secretProtector) : IMfaService
+    IDataProtector secretProtector,
+    IOptions<IdentityLockoutOptions> lockout) : IMfaService
 {
     private const int SecretKeyVersion = 1;
     private static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
@@ -26,6 +29,7 @@ public sealed class MfaService(
     private readonly IAuditWriter _audit = audit;
     private readonly TimeProvider _clock = clock;
     private readonly IDataProtector _secretProtector = secretProtector;
+    private readonly IdentityLockoutOptions _lockout = lockout.Value;
 
     public async Task<(MfaOutcome Outcome, string? Uri)> EnrollAsync(
         string? rawToken,
@@ -127,12 +131,64 @@ public sealed class MfaService(
         return MfaOutcome.Success;
     }
 
-    public Task<MfaOutcome> VerifyAsync(
+    public async Task<MfaOutcome> VerifyAsync(
         string? rawToken,
         string? code,
         string correlationId,
-        CancellationToken ct) =>
-        Task.FromResult(MfaOutcome.Unavailable);
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return MfaOutcome.InvalidRequest;
+        if (string.IsNullOrWhiteSpace(rawToken))
+            return MfaOutcome.Unauthorized;
+
+        var session = await _sessionStore.FindByTokenAsync(rawToken, ct);
+        if (session is null || !session.IsActiveAt(_clock.GetUtcNow()) || session.AuthLevel != AuthLevel.MfaPending)
+            return MfaOutcome.Unauthorized;
+
+        var credentials = await _mfaCredentialsStore.GetAsync(session.UserId, ct);
+        if (credentials is null || !credentials.MfaEnabled)
+            return MfaOutcome.Unauthorized;
+        if (credentials.TotpSecretCiphertext is null
+            || credentials.TotpSecretKeyVersion != SecretKeyVersion)
+            return MfaOutcome.Unavailable;
+
+        string secret;
+        try
+        {
+            secret = _secretProtector.Unprotect(credentials.TotpSecretCiphertext);
+        }
+        catch (CryptographicException)
+        {
+            WriteAudit(session.UserId, "auth.mfa.verify", "failure", correlationId, "invalid_secret");
+            return MfaOutcome.Unavailable;
+        }
+
+        var result = TotpHelpers.Verify(code, secret);
+        if (!result.success || credentials.LastTotpTimeStep == result.timeStepMatched)
+        {
+            var locked = await _mfaCredentialsStore.RecordFailedAttemptAsync(
+                session.UserId,
+                _lockout.MaxFailedAccessAttempts,
+                _clock.GetUtcNow().AddMinutes(_lockout.LockoutMinutes),
+                ct);
+            if (locked)
+                await _sessionStore.RevokeByTokenAsync(rawToken, ct);
+
+            WriteAudit(session.UserId, "auth.mfa.verify", "failure", correlationId,
+                locked ? "locked" : "invalid_code");
+            return MfaOutcome.InvalidCode;
+        }
+
+        if (!await _mfaCredentialsStore.CompleteVerificationAsync(
+                session.UserId, result.timeStepMatched, ct))
+            return MfaOutcome.Unavailable;
+        if (!await _sessionStore.PromoteToActiveAsync(session, ct))
+            return MfaOutcome.Unauthorized;
+
+        WriteAudit(session.UserId, "auth.mfa.verify", "success", correlationId, null);
+        return MfaOutcome.Success;
+    }
 
     private bool IsActiveSession(Session session) =>
         session.RevokedAt is null
