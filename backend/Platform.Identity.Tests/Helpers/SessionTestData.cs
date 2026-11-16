@@ -35,4 +35,14 @@ public static class SessionTestData
         var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
         return await db.Set<Session>().FirstOrDefaultAsync(session => session.Id == id, ct);
     }
+
+    public static async Task<Session?> FindByTokenAsync(
+        CustomWebApplicationFactory<Program> factory,
+        string rawToken,
+        CancellationToken ct = default)
+    {
+        using var scope = factory.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<ISessionStore>();
+        return await sessions.FindByTokenAsync(rawToken, ct);
+    }
 }

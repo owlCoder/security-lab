@@ -39,4 +39,14 @@ public static class UserTestData
         var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
         return await db.Accounts.FirstOrDefaultAsync(user => user.Id == id, ct);
     }
+
+    public static async Task<UserAccount?> GetByEmailAsync(
+        CustomWebApplicationFactory<Program> factory,
+        string email,
+        CancellationToken ct = default)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        return await db.Accounts.FirstOrDefaultAsync(user => user.Email == email, ct);
+    }
 }
