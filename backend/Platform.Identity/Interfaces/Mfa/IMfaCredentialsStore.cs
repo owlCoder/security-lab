@@ -15,4 +15,12 @@ public interface IMfaCredentialsStore
         CancellationToken ct);
 
     Task<bool> ConfirmAsync(Guid userId, long timeStepMatched, CancellationToken ct);
+
+    Task<bool> CompleteVerificationAsync(Guid userId, long timeStepMatched, CancellationToken ct);
+
+    Task<bool> RecordFailedAttemptAsync(
+        Guid userId,
+        int maxAttempts,
+        DateTimeOffset lockedUntil,
+        CancellationToken ct);
 }

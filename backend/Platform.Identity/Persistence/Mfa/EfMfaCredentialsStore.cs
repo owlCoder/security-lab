@@ -69,4 +69,35 @@ public class EfMfaCredentialsStore(
         await _db.SaveChangesAsync(ct);
         return true;
     }
+
+    public async Task<bool> CompleteVerificationAsync(Guid userId, long timeStepMatched, CancellationToken ct)
+    {
+        var credentials = await GetAsync(userId, ct);
+        if (credentials is null || !credentials.MfaEnabled)
+            return false;
+
+        credentials.LastTotpTimeStep = timeStepMatched;
+        credentials.MfaFailedAttempts = 0;
+        credentials.MfaLockedUntil = null;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> RecordFailedAttemptAsync(
+        Guid userId,
+        int maxAttempts,
+        DateTimeOffset lockedUntil,
+        CancellationToken ct)
+    {
+        var credentials = await GetAsync(userId, ct);
+        if (credentials is null || !credentials.MfaEnabled)
+            return false;
+
+        credentials.MfaFailedAttempts++;
+        if (credentials.MfaFailedAttempts >= maxAttempts)
+            credentials.MfaLockedUntil = lockedUntil;
+
+        await _db.SaveChangesAsync(ct);
+        return credentials.MfaFailedAttempts >= maxAttempts;
+    }
 }

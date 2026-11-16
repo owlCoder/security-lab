@@ -71,6 +71,24 @@ internal sealed class SessionStore(PlatformIdentityDbContext db, TimeProvider ti
         return await db.Sessions.FirstOrDefaultAsync(s => s.TokenHash == hash, ct);
     }
 
+    public async Task<bool> PromoteToActiveAsync(Session session, CancellationToken ct)
+    {
+        if (session.AuthLevel != AuthLevel.MfaPending || !session.IsActiveAt(time.GetUtcNow()))
+            return false;
+
+        session.PromoteToActive();
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            db.Entry(session).State = EntityState.Detached;
+            return false;
+        }
+    }
+
     public async Task TouchAsync(Session session, DateTimeOffset now, CancellationToken ct)
     {
         session.Touch(now);
