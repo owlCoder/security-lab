@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
 using Moq;
 using OtpNet;
 using Platform.Api.Enums.Identity;
@@ -38,7 +39,8 @@ public sealed class MfaServiceTests
         _audit.Setup(writer => writer.Write(It.IsAny<AuditEvent>()));
         _protector = new EphemeralDataProtectionProvider()
             .CreateProtector("SecurityLab", "Identity", "MfaTotpSecret", "v1");
-        _service = new MfaService(_credentials.Object, _sessions.Object, _audit.Object, _clock.Object, _protector);
+        _service = new MfaService(_credentials.Object, _sessions.Object, _audit.Object, _clock.Object, _protector,
+            Options.Create(new IdentityLockoutOptions()));
     }
 
     [Test]
@@ -244,6 +246,82 @@ public sealed class MfaServiceTests
             It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Test]
+    public async Task Verify_WithCurrentCode_PromotesPendingSession()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupVerification(secret, current);
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+        _credentials.Setup(store => store.CompleteVerificationAsync(
+                UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _sessions.Setup(store => store.PromoteToActiveAsync(
+                It.IsAny<Session>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var result = await _service.VerifyAsync(Token, code, "corr-verify", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Success));
+        _credentials.Verify(store => store.CompleteVerificationAsync(
+            UserId, It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
+        _sessions.Verify(store => store.PromoteToActiveAsync(
+            It.Is<Session>(session => session.AuthLevel == AuthLevel.MfaPending),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task Verify_WithWrongCode_RecordsFailureWithoutPromotingSession()
+    {
+        var current = DateTimeOffset.UtcNow;
+        SetupVerification(TotpHelpers.GenerateSecret(), current);
+        _credentials.Setup(store => store.RecordFailedAttemptAsync(
+                UserId, 5, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _service.VerifyAsync(Token, "000000", "corr-wrong", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
+        _credentials.Verify(store => store.RecordFailedAttemptAsync(
+            UserId, 5, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once);
+        _sessions.Verify(store => store.PromoteToActiveAsync(
+            It.IsAny<Session>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task Verify_WithReplay_IsRejected()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+        var matched = TotpHelpers.Verify(code, secret).timeStepMatched;
+        SetupVerification(secret, current, currentStep: matched);
+        _credentials.Setup(store => store.RecordFailedAttemptAsync(
+                UserId, 5, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _service.VerifyAsync(Token, code, "corr-replay", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
+        _credentials.Verify(store => store.CompleteVerificationAsync(
+            It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Test]
+    public async Task Verify_OnThreshold_RevokesPendingSession()
+    {
+        SetupVerification(TotpHelpers.GenerateSecret(), _now);
+        _credentials.Setup(store => store.RecordFailedAttemptAsync(
+                UserId, 5, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _sessions.Setup(store => store.RevokeByTokenAsync(Token, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Session?)null);
+
+        var result = await _service.VerifyAsync(Token, "000000", "corr-lock", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
+        _sessions.Verify(store => store.RevokeByTokenAsync(Token, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     private void SetupSession(AuthLevel authLevel = AuthLevel.Active, DateTimeOffset? now = null)
     {
         var sessionNow = now ?? _now;
@@ -262,6 +340,20 @@ public sealed class MfaServiceTests
                 PendingTotpSecretCiphertext = ciphertext,
                 PendingTotpSecretKeyVersion = 1,
                 PendingEnrollmentExpiresAt = expiresAt ?? _now.AddMinutes(5)
+            });
+    }
+
+    private void SetupVerification(string secret, DateTimeOffset now, long? currentStep = null)
+    {
+        _clock.Setup(clock => clock.GetUtcNow()).Returns(now);
+        SetupSession(AuthLevel.MfaPending, now);
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MfaCredentials(UserId)
+            {
+                MfaEnabled = true,
+                TotpSecretCiphertext = _protector.Protect(secret),
+                TotpSecretKeyVersion = 1,
+                LastTotpTimeStep = currentStep
             });
     }
 

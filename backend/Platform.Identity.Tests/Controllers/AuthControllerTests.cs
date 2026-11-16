@@ -204,6 +204,34 @@ public class AuthControllerTests
         Assert.That(http.Response.Headers.ContainsKey("Set-Cookie"), Is.False);
     }
 
+    [TestCase(MfaOutcome.Success, 200)]
+    [TestCase(MfaOutcome.InvalidRequest, 400)]
+    [TestCase(MfaOutcome.Unavailable, 503)]
+    [TestCase(MfaOutcome.InvalidCode, 401)]
+    public async Task MfaVerify_MapsServiceOutcome(
+        MfaOutcome outcome,
+        int expectedStatusCode)
+    {
+        const string token = "pending-session-token";
+        var http = HttpContextWithCookie(token);
+        _controller.ControllerContext.HttpContext = http;
+        var request = new MfaVerifyRequest("123456");
+        _mfa.Setup(service => service.VerifyAsync(
+                token, request.Code, http.TraceIdentifier, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(outcome);
+
+        var response = await _controller.MfaVerify(request, CancellationToken.None);
+
+        var statusCode = response switch
+        {
+            ObjectResult objectResult => objectResult.StatusCode,
+            StatusCodeResult statusResult => statusResult.StatusCode,
+            _ => 200
+        };
+        Assert.That(statusCode, Is.EqualTo(expectedStatusCode));
+        Assert.That(http.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
+    }
+
     private static DefaultHttpContext HttpContextWithCookie(string? token)
     {
         var http = new DefaultHttpContext();
