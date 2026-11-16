@@ -8,6 +8,7 @@ namespace Platform.Api.Middleware;
 public class SessionCheckMiddleware
 {
     public const string SessionItemKey = "session";
+    public const string InvalidSessionCode = "session_invalid";
 
     private readonly RequestDelegate _next;
     public SessionCheckMiddleware(RequestDelegate next)
@@ -59,18 +60,32 @@ public class SessionCheckMiddleware
         if (string.IsNullOrEmpty(token))
         {
             context.Response.StatusCode = 401;
+            await WriteInvalidSessionResponse(context, clearCookie: false);
             return;
         }
 
-        ValidateSession? validate = await sessionManager.ValidateAsync(token);
+        ValidateSession? validate = await sessionManager.ValidateAsync(token, context.RequestAborted);
 
         if (validate == null)
         {
             context.Response.StatusCode = 401;
+            await WriteInvalidSessionResponse(context, clearCookie: true);
             return;
         }
 
-        context.Items.Add(SessionItemKey, validate);
+        context.Items[SessionItemKey] = validate;
         await _next(context);
+    }
+
+    // IDN-07: the client gets a stable code to send the user to the login page,
+    // and the rejected cookie is removed so no tab sends it again.
+    private static async Task WriteInvalidSessionResponse(HttpContext context, bool clearCookie)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+
+        if (clearCookie)
+            context.Response.Cookies.Delete(SessionCookie.Name, SessionCookie.Options(DateTimeOffset.UnixEpoch));
+
+        await context.Response.WriteAsJsonAsync(new { code = InvalidSessionCode });
     }
 }

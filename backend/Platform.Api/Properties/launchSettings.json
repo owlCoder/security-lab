@@ -5,6 +5,15 @@
       "applicationUrl": "http://localhost:5080",
       "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
     },
+    "AdministrationKt2": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "applicationUrl": "https://localhost:7188",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "CourseworkAdministration__Enabled": "true"
+      }
+    },
     "AccessKt1": {
       "commandName": "Project",
       "launchBrowser": false,
