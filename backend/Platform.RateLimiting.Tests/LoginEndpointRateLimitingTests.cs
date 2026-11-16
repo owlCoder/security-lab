@@ -309,6 +309,16 @@ internal sealed class NoMfaCredentialsStore : IMfaCredentialsStore
 
     public Task<bool> ConfirmAsync(Guid userId, long timeStepMatched, CancellationToken ct) =>
         Task.FromResult(false);
+
+    public Task<bool> CompleteVerificationAsync(Guid userId, long timeStepMatched, CancellationToken ct) =>
+        Task.FromResult(false);
+
+    public Task<bool> RecordFailedAttemptAsync(
+        Guid userId,
+        int maxAttempts,
+        DateTimeOffset lockedUntil,
+        CancellationToken ct) =>
+        Task.FromResult(false);
 }
 
 internal sealed class SuccessfulAuditWriter : ITrustedAuditWriter
