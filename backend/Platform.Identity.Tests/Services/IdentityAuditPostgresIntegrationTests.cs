@@ -169,6 +169,124 @@ public sealed class IdentityAuditPostgresIntegrationTests
         Assert.That(storedSession.RevokedAt, Is.Not.Null);
     }
 
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task ThrottledLogin_PersistsOneAnonymousDeniedEvent_WithNoCredentials(bool knownAccount)
+    {
+        var userId = Guid.NewGuid();
+        var email = $"throttled-{userId:N}@example.com";
+        if (knownAccount) await SeedAccountAsync(userId, email);
+        await using var factory = CreateThrottledHost();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"), HandleCookies = true
+        });
+        using var first = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        Assert.That(first.StatusCode, Is.EqualTo(knownAccount ? HttpStatusCode.OK : HttpStatusCode.Unauthorized));
+
+        // Even a previously issued cookie and forged headers cannot assign an actor to throttling.
+        client.DefaultRequestHeaders.Add("X-Correlation-ID", "client-correlation");
+        client.DefaultRequestHeaders.Add("X-Test-User", userId.ToString());
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        using var blocked = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        var correlation = blocked.Headers.GetValues("X-Correlation-ID").Single();
+        var body = await blocked.Content.ReadAsStringAsync();
+
+        await using var freshAudit = new AuditDbContext(auditOptions);
+        var records = await freshAudit.Events.AsNoTracking().Where(row => row.CorrelationId == correlation).ToListAsync();
+        Assert.That(records, Has.Count.EqualTo(1));
+        var record = records.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(blocked.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests));
+            Assert.That(blocked.Headers.CacheControl?.NoStore, Is.True);
+            Assert.That(int.TryParse(blocked.Headers.RetryAfter?.ToString(), out var seconds), Is.True);
+            Assert.That(seconds, Is.InRange(1, 60));
+            Assert.That(blocked.Headers.Contains("Set-Cookie"), Is.False);
+            Assert.That(body, Does.Contain("rate_limited").And.Not.Contain(email).And.Not.Contain(Password));
+            Assert.That(correlation, Is.Not.EqualTo("client-correlation"));
+            Assert.That(record.EventType, Is.EqualTo(AuditEventTypes.AuthLoginThrottled));
+            Assert.That(record.Outcome, Is.EqualTo(AuditOutcome.Denied));
+            Assert.That(record.ActorKind, Is.EqualTo(AuditActorKind.Anonymous));
+            Assert.That(record.ActorId, Is.Null);
+            Assert.That(record.CourseId, Is.Null);
+            Assert.That(record.ResourceId, Is.Null);
+            Assert.That(record.ResourceType, Is.Null);
+            Assert.That(record.DetailsJson, Is.EqualTo("{}"));
+            Assert.That(record.OccurredAt, Is.InRange(before, DateTimeOffset.UtcNow));
+        });
+        await using var freshIdentity = new PlatformIdentityDbContext(identityOptions);
+        Assert.That(await freshIdentity.Sessions.CountAsync(session => session.UserId == userId),
+            Is.EqualTo(knownAccount ? 1 : 0), "The rejected request must never issue another session.");
+    }
+
+    [Test]
+    public async Task ThrottledLogin_WhenDatabaseRejectsInsert_StillReturns429WithoutSession()
+    {
+        var email = $"no-audit-{Guid.NewGuid():N}@example.com";
+        await using var factory = CreateThrottledHost();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost")
+        });
+        using var first = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+        Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+
+        await ExecuteAuditSqlAsync("REVOKE INSERT ON audit.audit_events FROM s16_audit_runtime");
+        try
+        {
+            using var blocked = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
+            var correlation = blocked.Headers.GetValues("X-Correlation-ID").Single();
+            Assert.Multiple(() =>
+            {
+                Assert.That(blocked.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests));
+                Assert.That(blocked.Headers.RetryAfter, Is.Not.Null);
+                Assert.That(blocked.Headers.CacheControl?.NoStore, Is.True);
+                Assert.That(blocked.Headers.Contains("Set-Cookie"), Is.False);
+            });
+            await using var audit = new AuditDbContext(auditOptions);
+            Assert.That(await audit.Events.AnyAsync(row => row.CorrelationId == correlation), Is.False);
+            Assert.That(await blocked.Content.ReadAsStringAsync(), Does.Contain("rate_limited"));
+        }
+        finally
+        {
+            await ExecuteAuditSqlAsync("GRANT INSERT ON audit.audit_events TO s16_audit_runtime");
+        }
+    }
+
+    private async Task ExecuteAuditSqlAsync(string sql)
+    {
+        await using var connection = new NpgsqlConnection(database.GetConnectionString());
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private WebApplicationFactory<Program> CreateThrottledHost() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.UseSetting("RateLimiting:Login:PermitLimit", "1");
+            builder.UseSetting("RateLimiting:Login:WindowSeconds", "60");
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Identity"] = database.GetConnectionString(),
+                    ["ConnectionStrings:Audit"] = auditRuntimeConnection
+                }));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<PlatformIdentityDbContext>();
+                services.RemoveAll<DbContextOptions<PlatformIdentityDbContext>>();
+                services.AddDbContext<PlatformIdentityDbContext>(options => options.UseNpgsql(database.GetConnectionString(),
+                    postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", PlatformIdentityDbContext.SchemaName)));
+                services.RemoveAll<AuditDbContext>();
+                services.RemoveAll<DbContextOptions<AuditDbContext>>();
+                services.AddDbContext<AuditDbContext>(options => options.UseNpgsql(auditRuntimeConnection,
+                    postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
+            });
+        });
+
     private async Task SeedAccountAsync(Guid userId, string email)
     {
         var account = new UserAccount(userId, CredentialVerifier.NormalizeEmail(email));

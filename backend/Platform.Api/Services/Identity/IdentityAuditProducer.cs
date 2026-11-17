@@ -13,6 +13,14 @@ public sealed class IdentityAuditProducer(
     ITrustedAuditWriter writer,
     ILogger<IdentityAuditProducer> logger)
 {
+    public ValueTask<AuditWriteResult> LoginThrottledAsync(
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
+            AnonymousContext(correlationId),
+            cancellationToken);
+
     public ValueTask<AuditWriteResult> LoginSucceededAsync(
         Guid userId,
         string correlationId,

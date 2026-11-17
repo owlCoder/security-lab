@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Security.Cryptography;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -201,11 +202,113 @@ public sealed class LoginEndpointRateLimitingTests
     // Account-level lockout uses the real credential store and PostgreSQL in
     // Platform.Identity.Tests.Controllers.LockoutEndpointTests.
 
+    [Test]
+    public async Task ThrottledAttempt_WritesOneAnonymousAudit_WithServerCorrelationAndNoSecrets()
+    {
+        var audit = new ThrottleAuditWriter();
+        using var api = new LoginApiFactory(Limit, audit);
+        for (var i = 0; i < Limit; i++) await Login(api, ClientA, KnownEmail, WrongPassword);
+        var calls = api.Credentials.Calls;
+
+        var blocked = await Login(api, ClientA, KnownEmail, CorrectPassword,
+            correlation: "client-correlation", cookie: "sensitive-session-cookie");
+        var write = audit.Writes.Single(value => value.Draft.EventType == AuditEventTypes.AuthLoginThrottled);
+        var serialized = JsonSerializer.Serialize(new { write.Draft, write.Context });
+        Assert.Multiple(() =>
+        {
+            Assert.That(blocked.Response.StatusCode, Is.EqualTo(StatusCodes.Status429TooManyRequests));
+            Assert.That(api.Credentials.Calls, Is.EqualTo(calls));
+            Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Denied));
+            Assert.That(write.Draft.Resource, Is.Null);
+            Assert.That(write.Draft.CourseId, Is.Null);
+            Assert.That(write.Draft.Details, Is.Null);
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.Anonymous));
+            Assert.That(write.Context.CorrelationId, Is.EqualTo(blocked.Response.Headers["X-Correlation-ID"].ToString()));
+            Assert.That(write.Context.CorrelationId, Is.Not.EqualTo("client-correlation"));
+            Assert.That(serialized, Does.Not.Contain(KnownEmail).And.Not.Contain(CorrectPassword)
+                .And.Not.Contain("sensitive-session-cookie"));
+        });
+    }
+
+    [TestCase("unavailable")]
+    [TestCase("rejected")]
+    [TestCase("throws")]
+    public async Task ThrottledAuditFailure_Keeps429AndDoesNotCheckPassword(string failure)
+    {
+        var audit = new ThrottleAuditWriter(failure);
+        using var api = new LoginApiFactory(Limit, audit);
+        for (var i = 0; i < Limit; i++) await Login(api, ClientA, KnownEmail, WrongPassword);
+        var calls = api.Credentials.Calls;
+
+        var blocked = await Login(api, ClientA, KnownEmail, CorrectPassword);
+        Assert.Multiple(() =>
+        {
+            Assert.That(blocked.Response.StatusCode, Is.EqualTo(StatusCodes.Status429TooManyRequests));
+            Assert.That(blocked.Response.Headers.RetryAfter.ToString(), Is.Not.Empty);
+            Assert.That(blocked.Response.Headers.CacheControl.ToString(), Does.Contain("no-store"));
+            Assert.That(blocked.Response.Headers.SetCookie.ToString(), Does.Not.Contain(SessionCookie.Name));
+            Assert.That(api.Credentials.Calls, Is.EqualTo(calls));
+            Assert.That(audit.Writes.Count(value => value.Draft.EventType == AuditEventTypes.AuthLoginThrottled), Is.EqualTo(1));
+            Assert.That(api.Logs.Messages.Any(message => message.Contains("Audit write")), Is.True);
+            Assert.That(string.Join('\n', api.Logs.Messages), Does.Not.Contain("sensitive-writer-diagnostic"));
+        });
+        Assert.That(await BodyCode(blocked), Is.EqualTo("rate_limited"));
+    }
+
+    [Test]
+    public async Task ClientDisconnect_DoesNotCancelAnAuditAlreadyStartedForTheRejection()
+    {
+        var audit = new ThrottleAuditWriter("pending");
+        using var api = new LoginApiFactory(Limit, audit);
+        using var disconnect = new CancellationTokenSource();
+        for (var i = 0; i < Limit; i++) await Login(api, ClientA, KnownEmail, WrongPassword);
+        var blocked = Login(api, ClientA, KnownEmail, CorrectPassword, requestAborted: disconnect.Token);
+        try
+        {
+            await audit.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            disconnect.Cancel();
+            Assert.That(audit.Token.IsCancellationRequested, Is.False);
+        }
+        finally
+        {
+            audit.Pending.TrySetResult(AuditWriteResult.Recorded(Guid.NewGuid()));
+            try { await blocked.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) { /* The disconnected client need not receive a body. */ }
+        }
+        Assert.That(audit.Writes.Count(value => value.Draft.EventType == AuditEventTypes.AuthLoginThrottled), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task AuditWriterIgnoringCancellation_DoesNotHoldThe429Response()
+    {
+        var audit = new ThrottleAuditWriter("pending");
+        using var api = new LoginApiFactory(Limit, audit);
+        for (var i = 0; i < Limit; i++) await Login(api, ClientA, KnownEmail, WrongPassword);
+        var calls = api.Credentials.Calls;
+        try
+        {
+            var blocked = await Login(api, ClientA, KnownEmail, CorrectPassword).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Multiple(() =>
+            {
+                Assert.That(blocked.Response.StatusCode, Is.EqualTo(StatusCodes.Status429TooManyRequests));
+                Assert.That(audit.Token.IsCancellationRequested, Is.True);
+                Assert.That(api.Credentials.Calls, Is.EqualTo(calls));
+                Assert.That(api.Logs.Messages.Any(message => message.Contains("Throttled login audit timed out")), Is.True);
+            });
+        }
+        finally
+        {
+            audit.Pending.TrySetException(new InvalidOperationException("sensitive-writer-diagnostic"));
+            await audit.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     // ---------------------------------------------------------------- pomocno
 
     /// <summary>Salje zahtev direktno u pipeline (kao RateLimitHost): jedino tako test bira IP adresu klijenta.</summary>
     private static Task<HttpContext> Login(LoginApiFactory api, string remoteIp, string email, string password,
-        string? forwardedFor = null)
+        string? forwardedFor = null, string? correlation = null, string? cookie = null,
+        CancellationToken requestAborted = default)
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { email, password }));
         return api.Server.SendAsync(ctx =>
@@ -214,6 +317,9 @@ public sealed class LoginEndpointRateLimitingTests
             ctx.Request.Path = LoginPath;
             ctx.Connection.RemoteIpAddress = IPAddress.Parse(remoteIp);
             if (forwardedFor is not null) ctx.Request.Headers["X-Forwarded-For"] = forwardedFor;
+            if (correlation is not null) ctx.Request.Headers["X-Correlation-ID"] = correlation;
+            if (cookie is not null) ctx.Request.Headers.Cookie = $"{SessionCookie.Name}={cookie}";
+            if (requestAborted.CanBeCanceled) ctx.RequestAborted = requestAborted;
             ctx.Request.ContentType = "application/json";
             ctx.Request.ContentLength = bytes.Length;
             ctx.Request.Body = new MemoryStream(bytes);
@@ -232,7 +338,7 @@ public sealed class LoginEndpointRateLimitingTests
         return json.RootElement.GetProperty("code").GetString();
     }
 
-    private sealed class LoginApiFactory(int permitLimit) : WebApplicationFactory<Program>
+    private sealed class LoginApiFactory(int permitLimit, ITrustedAuditWriter? auditWriter = null) : WebApplicationFactory<Program>
     {
         public FakeCredentialVerifier Credentials { get; } = new();
         public CapturingLoggerProvider Logs { get; } = new();
@@ -256,8 +362,39 @@ public sealed class LoginEndpointRateLimitingTests
                 // This fixture isolates IDN-05 throttling and has no Audit database. Successful
                 // login still needs the mandatory writer contract to report a durable record.
                 services.RemoveAll<ITrustedAuditWriter>();
-                services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
+                services.AddSingleton<ITrustedAuditWriter>(auditWriter ?? new SuccessfulAuditWriter());
             });
+        }
+    }
+
+    private sealed class ThrottleAuditWriter(string? failure = null) : ITrustedAuditWriter
+    {
+        public ConcurrentQueue<(AuditEventDraft Draft, AuditContext Context)> Writes { get; } = new();
+        public TaskCompletionSource<AuditWriteResult> Pending { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public CancellationToken Token { get; private set; }
+
+        public async ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Enqueue((draft, context));
+            if (draft.EventType != AuditEventTypes.AuthLoginThrottled)
+                return AuditWriteResult.Recorded(Guid.NewGuid());
+            Token = cancellationToken;
+            Started.TrySetResult();
+            try
+            {
+                return failure switch
+                {
+                    "unavailable" => AuditWriteResult.Unavailable(),
+                    "rejected" => AuditWriteResult.Rejected(AuditRejectionCode.InvalidContext),
+                    "throws" => throw new InvalidOperationException("sensitive-writer-diagnostic"),
+                    "pending" => await Pending.Task,
+                    _ => AuditWriteResult.Recorded(Guid.NewGuid())
+                };
+            }
+            finally { Finished.TrySetResult(); }
         }
     }
 }
