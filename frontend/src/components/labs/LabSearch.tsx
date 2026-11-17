@@ -107,35 +107,33 @@ function LabSearchForm({ user }: Props) {
   const filtersDisabled = !options?.metadataAvailable
 
   return (
-    <div className="labs-view">
+    <div className="labs-view labs-search">
       <form className="labs-form" role="search" onSubmit={handleSubmit} noValidate aria-busy={loading} aria-labelledby="labs-search-heading">
-        <div className="labs-panel-head">
-          <h3 id="labs-search-heading">Pretraga laboratorija</h3>
-          <span className="labs-tag">LAB-05</span>
-        </div>
-        <div className="labs-search-access" role="note" aria-labelledby="labs-search-access-title">
-          <svg className="labs-search-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-            <path d="M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Z" />
-            <path d="m8 12 3 3 5-6" />
-          </svg>
-          <div>
-            <p id="labs-search-access-title" className="labs-search-access-title">Samo laboratorije kojima imate pristup</p>
-            <p>Rezultati se prilagođavaju vašim pravima pristupa. Laboratorije koje vam nisu dostupne neće biti prikazane.</p>
+        <div className="labs-search-heading">
+          <div className="labs-panel-head">
+            <h3 id="labs-search-heading">Pretraga laboratorija</h3>
+            <span className="labs-tag">LAB-05</span>
           </div>
+          <p className="hint">
+            Pretražite po nazivu ili kombinujte postojeće osobine. Rezultat mora da odgovara svim izabranim filterima i oznakama.
+          </p>
         </div>
-        <p className="hint">
-          Pretražite po nazivu ili kombinujte postojeće osobine. Rezultat mora da odgovara svim izabranim filterima i oznakama.
-        </p>
-        <div className="labs-search-row">
-          <div className="labs-field">
-            <label htmlFor="labs-search-query">Naziv ili deo naziva</label>
+        <div className="labs-search-query">
+          <label htmlFor="labs-search-query">Naziv ili deo naziva</label>
+          <div className="labs-search-row">
             <input id="labs-search-query" type="search" value={query} maxLength={MAX_SEARCH_LENGTH} autoComplete="off" spellCheck={false}
               onChange={e => { clearPreviousResult(); setQuery(e.target.value) }} aria-describedby="labs-search-hint" aria-invalid={queryError} />
-            <p id="labs-search-hint" className="hint labs-counter">
-              Naziv je opcion. Najviše {MAX_SEARCH_LENGTH} znakova ({query.length}/{MAX_SEARCH_LENGTH}).
-            </p>
+            <button type="submit" disabled={loading}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m16 16 4.5 4.5" />
+              </svg>
+              {loading ? 'Pretraga…' : 'Pretraži'}
+            </button>
           </div>
-          <button type="submit" disabled={loading}>{loading ? 'Pretraga…' : 'Pretraži'}</button>
+          <p id="labs-search-hint" className="hint labs-counter">
+            Naziv je opcion. Najviše {MAX_SEARCH_LENGTH} znakova ({query.length}/{MAX_SEARCH_LENGTH}).
+          </p>
         </div>
 
         <fieldset className="labs-search-filters" disabled={filtersDisabled}>
@@ -168,15 +166,18 @@ function LabSearchForm({ user }: Props) {
           </fieldset>
         </fieldset>
 
-        {!options && !optionsFailure && <p className="hint">Učitavanje dostupnih filtera…</p>}
-        {options && !options.metadataAvailable && <p className="hint">Filteri po osobinama trenutno nisu dostupni. Možete da pretražujete po nazivu ili prikažete sve dostupne laboratorije.</p>}
-        {optionsFailure && <div>
+        {!options && !optionsFailure && <p className="labs-search-notice">Učitavanje dostupnih filtera…</p>}
+        {options && !options.metadataAvailable && <p className="labs-search-notice labs-search-warning">Filteri po osobinama trenutno nisu dostupni. Možete da pretražujete po nazivu ili prikažete sve dostupne laboratorije.</p>}
+        {optionsFailure && <div className="labs-search-options-failure">
           <ResultMessage tone="error" lines={['Dostupni filteri nisu učitani.', ...optionsFailure.lines]} status={optionsFailure.status} requestId={optionsFailure.requestId} />
-          <button type="button" onClick={() => setOptionsAttempt(value => value + 1)}>Učitaj filtere ponovo</button>
+          <button type="button" className="labs-search-secondary" onClick={() => setOptionsAttempt(value => value + 1)}>Učitaj filtere ponovo</button>
         </div>}
 
         {hasFilters && <div className="labs-selected-filters" aria-label="Izabrani filteri">
-          <p>Izabrani filteri:</p>
+          <div className="labs-selected-filters-head">
+            <p>Izabrani filteri:</p>
+            <button type="button" className="labs-search-secondary" onClick={() => removeFilter({ tags: [] })}>Resetuj sve filtere</button>
+          </div>
           <div className="labs-filter-chips">
             {filters.difficulty && <button type="button" className="labs-filter-chip" aria-label={`Ukloni filter težine: ${DIFFICULTY_NAMES[filters.difficulty] ?? filters.difficulty}`} onClick={() => removeFilter({ ...filters, difficulty: undefined })}>
               Težina: {DIFFICULTY_NAMES[filters.difficulty] ?? filters.difficulty} <span aria-hidden="true">×</span>
@@ -188,9 +189,19 @@ function LabSearchForm({ user }: Props) {
               Oznaka: {tag} <span aria-hidden="true">×</span>
             </button>)}
           </div>
-          <button type="button" onClick={() => removeFilter({ tags: [] })}>Resetuj sve filtere</button>
           <p className="hint">Uklanjanje filtera odmah osvežava rezultate. Resetovanje zadržava uneti naziv.</p>
         </div>}
+
+        <div className="labs-search-access" role="note" aria-labelledby="labs-search-access-title">
+          <svg className="labs-search-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+            <path d="M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6l-8-3Z" />
+            <path d="m8 12 3 3 5-6" />
+          </svg>
+          <div>
+            <p id="labs-search-access-title" className="labs-search-access-title">Samo laboratorije kojima imate pristup</p>
+            <p>Rezultati se prilagođavaju vašim pravima pristupa. Laboratorije koje vam nisu dostupne neće biti prikazane.</p>
+          </div>
+        </div>
       </form>
 
       {failure && <div className="labs-search-denial">
@@ -200,10 +211,12 @@ function LabSearchForm({ user }: Props) {
         <ResultMessage tone="error" lines={failure.lines} status={failure.status} requestId={failure.requestId} />
       </div>}
       {found && <div className="labs-search-results" role="region" aria-labelledby="labs-search-results-heading">
-        <h4 id="labs-search-results-heading">Dostupne laboratorije</h4>
-        <p id="labs-search-count" role="status" className="labs-search-count">
-          {found.items.length === 0 ? 'Nijedna dostupna laboratorija ne odgovara pretrazi.' : `Pronađeno laboratorija: ${found.items.length}`}
-        </p>
+        <div className="labs-search-results-head">
+          <h4 id="labs-search-results-heading">Dostupne laboratorije</h4>
+          <p id="labs-search-count" role="status" className="labs-search-count">
+            {found.items.length === 0 ? 'Nijedna dostupna laboratorija ne odgovara pretrazi.' : `Pronađeno laboratorija: ${found.items.length}`}
+          </p>
+        </div>
         {found.items.length === 0 && <div className="labs-search-empty">
           <p>Pokušajte sa drugim nazivom ili uklonite neki od filtera.</p>
           <p className="hint">Pretraga obuhvata samo laboratorije koje smete da pregledate.</p>
