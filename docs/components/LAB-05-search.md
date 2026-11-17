@@ -39,6 +39,29 @@ Zajednički zahtevi koje deo pokriva: SEC-01 (serverska autorizacija, nema IDOR-
 
 - **Stanje implementacije:** endpoint, servis, pravila upita, frontend panel i testovi su implementirani. Pretraga se radi u servisu nad `ListAsync` (dovoljno za KT1). Spuštanje upita u bazu je naredni korak koji zahteva dogovor sa timom za skladište, a provera prava po laboratoriji ostaje u servisu.
 
+## Razvojni demo pretrage
+
+Standardni `Platform.Api` launch profil uključuje `LabSearchDemo:Enabled`. Kada se koristi postojeće memorijsko `ILaboratoryRepository` skladište u Development okruženju, LAB-05 dodaje dva demo nacrta:
+
+- `55555555-5555-5555-5555-555555555555` — „Provera integriteta preuzetog fajla”, sa istim ID-em, kursom, autorom i naslovom kao postojeći LabVisibility demo nacrt.
+- `66666666-6666-6666-6666-666666666666` — „LAB-05: Pretraga i kontrola pristupa”, zaseban primer za LAB-05.
+
+Oba pripadaju postojećem demo kursu `aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa` i nastavniku `11111111-1111-1111-1111-111111111111`. Izbor „marko – Nastavnik” sada šalje taj identifikator, a „ana – Student” identifikator postojećeg demo studenta `22222222-2222-2222-2222-222222222222`. Ne dodaju se nova članstva niti menjaju politike pristupa.
+
+Pokretanje API-ja iz korena repozitorijuma:
+
+```powershell
+dotnet run --project backend/Platform.Api --configuration Release --launch-profile Platform.Api
+```
+
+Frontend se pokreće u drugom terminalu iz `frontend` direktorijuma komandom `npm run dev`. U panelu „Pretraga laboratorija” izabrati nastavnika i pretražiti prazan naziv, `integriteta` ili `LAB-05`. Nastavnik nalazi dva nacrta bez upita; student ih ne vidi prema postojećem `laboratory.read` pravilu; anonimni zahtev dobija 401. Promena korisnika uklanja prethodne rezultate.
+
+Demo se može isključiti sa `LabSearchDemo:Enabled=false` (npr. argument `--LabSearchDemo:Enabled=false`). Bez launch profila zastavica je podrazumevano isključena, pa test hostovi i CI ne dobijaju nenaručene demo podatke. Seed ne prepisuje postojeće laboratorije sa istim ID-em, ne koristi PostgreSQL i nikada ne radi van Development okruženja.
+
+Objavljena LabVisibility laboratorija `4444…` nije kopirana kao nacrt: postojeći LAB-01 `LabStatus` podržava samo `Draft` i `Archived`, pa bi takvo mapiranje bilo netačno. Ovde nisu prošireni životni ciklus, prava pristupa ni metadata skladište LAB-02; bez metadata konfiguracije filteri po osobinama i dalje ostaju nedostupni.
+
+Nesklad starog `marko`/`ana` identifikatora i GUID članstava je razvojna integraciona zavisnost postojećih komponenti. LAB-05 je usklađuje radi demonstracije pretrage. Zaseban problem forme za kreiranje koja još ne šalje `courseId` već je evidentiran u [LAB-03 dokumentaciji](LAB-03.md); ovaj zahvat ne menja LAB-01/LAB-03 kreiranje.
+
 ## Matrica odluka o pristupu (Subject – Action – Resource)
 
 | Subjekat | Radnja | Resurs | Odluka |

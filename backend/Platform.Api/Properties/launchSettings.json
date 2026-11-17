@@ -3,7 +3,10 @@
     "Platform.Api": {
       "commandName": "Project",
       "applicationUrl": "http://localhost:5080",
-      "environmentVariables": { "ASPNETCORE_ENVIRONMENT": "Development" }
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "LabSearchDemo__Enabled": "true"
+      }
     },
     "AdministrationKt2": {
       "commandName": "Project",

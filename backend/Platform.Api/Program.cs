@@ -188,6 +188,7 @@ if (app.Environment.IsDevelopment())
 
     // AUT-04: demo laboratorije 4444 (objavljena) i 5555 (nacrt); sa ConnectionStrings:LabVisibility idu u PostgreSQL.
     await app.Services.SeedLabVisibilityDemoAsync();
+    await app.Services.SeedLaboratorySearchDemoAsync();
 
     // US-02 and US-09: migrate and seed the identity database (skipped without a connection string).
     if (await app.ApplyIdentityMigrationsAsync())
