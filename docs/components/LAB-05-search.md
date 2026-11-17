@@ -6,6 +6,8 @@
 
 **Student:** Zorana Jošić PR57/2023
 
+**Kanonski PR:** [#147](https://github.com/owlCoder/security-lab/pull/147), grana `feature/search-filter`, po odluci tima. Osnovnu pretragu po nazivu i bezbedne rezultate iz [#101](https://github.com/owlCoder/security-lab/pull/101) implementirala je Zorana Jošić (`@zoranajosic`); kombinovanje/reset filtera i dalju integraciju Milija Jovanović (`@milijajovanovic`). Sva četiri commita iz #101 već su sačuvana u istoriji #147, uključujući `59cbb4d` i `1ae3229`, pa nije potreban novi cherry-pick. Istorija obuhvata i doprinose `@AlexandarsForce`, `@ivanaradovanovic912-pixel` i `@igorcizik`.
+
 **Zahtevi iz specifikacije:** LAB-05 (Pretraga i filtriranje, nivo J). Kriterijum prihvatanja: *„Rezultati poštuju prava pristupa korisnika.”* Ovaj deo pokriva dve korisničke priče iz LAB-05:
 
 - *„Kao korisnik, želim da pretražujem laboratorije po nazivu ili delu naziva, kako bih lakše pronašao vežbu.”*
