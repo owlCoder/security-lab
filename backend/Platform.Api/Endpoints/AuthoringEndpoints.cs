@@ -46,7 +46,8 @@ public static class AuthoringEndpoints
 
     public static async Task<IResult> ListTemplatesAsync(
         HttpContext context,
-        IRequestSubjectResolver subjectResolver,
+        //IRequestSubjectResolver subjectResolver,
+        [FromKeyedServices("AuthoringSession")] IRequestSubjectResolver subjectResolver,
         AuthoringAccessDecision accessDecision,
         [FromServices] TemplateCatalogService catalog,
         CancellationToken cancellationToken)
@@ -73,7 +74,8 @@ public static class AuthoringEndpoints
     public static async Task<IResult> CopyTemplateAsync(
         Guid templateId,
         HttpContext context,
-        IRequestSubjectResolver subjectResolver,
+        //IRequestSubjectResolver subjectResolver,
+        [FromKeyedServices("AuthoringSession")] IRequestSubjectResolver subjectResolver,
         AuthoringAccessDecision accessDecision,
         [FromServices] DraftService drafts,
         CancellationToken cancellationToken)

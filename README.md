@@ -148,3 +148,21 @@ Build/test: `dotnet test backend/SecurityLab.slnx --configuration Release`. The 
 See [the KT1 checklist](docs/components/coursework/KT1.md), [startup and demonstration](docs/components/coursework/DEMO.md), [architecture and DFD diagrams](docs/components/coursework/diagrams), [domain/access matrix](docs/components/coursework/DOMAIN_MODEL.md), [threat model](docs/components/coursework/THREAT_MODEL.md), [provider contracts](docs/components/coursework/CONTRACTS.md), [backlog](docs/components/coursework/BACKLOG.md) and [actual local validation](docs/components/coursework/VALIDATION.md) and [external closure steps](docs/components/coursework/CLOSURE.md).
 
 The synthetic login is enabled only in Development with `Kt1Demo:Enabled=true`; no production authentication, persistent database or actual external contract acceptance is claimed. Other teams' shared components are preserved.
+
+## ACC-04 and ADM-08 KT2 work in progress
+
+ADM-08 has a PostgreSQL adapter with transactional producer audit and a real-session
+API at `/api/course-administration/{courseId}`. Enable it explicitly with
+`CourseworkAdministration:Enabled=true` and configure the Identity/administration
+connections. It consumes the existing Identity login/session and shared Access
+contracts. The existing KT1 React screen remains its separate simulator.
+
+Run the isolated database and real-session HTTP checks with Docker Desktop running:
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-coursework-postgres.ps1`.
+Add `-Demonstrate` to display the full login/delegation/update/revocation lifecycle.
+Operator migration and local HTTPS startup are documented in
+[KT2 scope, setup and remaining work](docs/components/coursework/KT2.md).
+See [the actual verification](docs/components/coursework/KT2-VALIDATION.md) and
+[current ADM-08 architecture/DFD](docs/components/coursework/diagrams/README.md).
+ACC-04 real ATT/membership adapters, trusted course/root provisioning and central
+delivery of administrative outbox events remain open.

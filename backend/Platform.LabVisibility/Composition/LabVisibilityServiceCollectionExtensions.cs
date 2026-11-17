@@ -5,6 +5,8 @@ using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Policies;
 using Platform.LabVisibility.Application.EvaluatorKeys;
+using Platform.LabVisibility.Application.Preview;
+using Platform.LabVisibility.Application.StudentView;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Auditing;
 using Platform.LabVisibility.Infrastructure.Membership;
@@ -15,11 +17,11 @@ namespace Platform.LabVisibility.Composition;
 
 public static class LabVisibilityServiceCollectionExtensions
 {
-    // Poziva se posle AddAccessControl(). Svako dodaje svoju liniju ovde.
-    public static IServiceCollection AddLabVisibility(this IServiceCollection services)
+    public static IServiceCollection AddLabVisibility(
+        this IServiceCollection services)
     {
-        // AUT-04 (Antonić): PostgreSQL kad postoji ConnectionStrings:LabVisibility, inače InMemory.
-        // Reader i store su singletoni (koriste ih singleton politike), pa EF ide preko fabrike DbContext-a.
+        // PostgreSQL se koristi kada je podešena konekcija.
+        // EF reader i store koriste fabriku DbContext-a.
         services.AddSingleton<InMemoryLabPublicContentReader>();
         services.AddSingleton<InMemoryEvaluatorKeyStore>();
 
@@ -27,48 +29,89 @@ public static class LabVisibilityServiceCollectionExtensions
             options.UseNpgsql(
                 LabVisibilityDatabase.GetConnectionString(sp),
                 LabVisibilityDesignTimeDbContextFactory.Configure));
+
         services.AddSingleton<EfLabPublicContentReader>();
         services.AddSingleton<EfEvaluatorKeyStore>();
 
-        services.AddSingleton<ILabPublicContentReader>(sp => LabVisibilityDatabase.IsConfigured(sp)
-            ? sp.GetRequiredService<EfLabPublicContentReader>()
-            : sp.GetRequiredService<InMemoryLabPublicContentReader>());
-        services.AddSingleton<IEvaluatorKeyStore>(sp => LabVisibilityDatabase.IsConfigured(sp)
-            ? sp.GetRequiredService<EfEvaluatorKeyStore>()
-            : sp.GetRequiredService<InMemoryEvaluatorKeyStore>());
+        services.AddSingleton<ILabPublicContentReader>(sp =>
+        {
+            if (LabVisibilityDatabase.IsConfigured(sp))
+            {
+                return sp.GetRequiredService<EfLabPublicContentReader>();
+            }
+
+            return sp.GetRequiredService<InMemoryLabPublicContentReader>();
+        });
+
+        services.AddSingleton<IEvaluatorKeyStore>(sp =>
+        {
+            if (LabVisibilityDatabase.IsConfigured(sp))
+            {
+                return sp.GetRequiredService<EfEvaluatorKeyStore>();
+            }
+
+            return sp.GetRequiredService<InMemoryEvaluatorKeyStore>();
+        });
 
         services.AddSingleton<InMemoryCourseMembership>();
-        services.AddSingleton<ICourseMembership>(sp => sp.GetRequiredService<InMemoryCourseMembership>());
+        services.AddSingleton<ICourseMembership>(
+            sp => sp.GetRequiredService<InMemoryCourseMembership>());
 
-        services.AddLogging(); // bezbedno i ako je logging već registrovan; audit piše u log
+        services.AddLogging();
         services.AddSingleton<ILabVisibilityAudit, LoggerLabVisibilityAudit>();
         services.AddSingleton<EvaluatorKeyReader>();
+
+        services.AddScoped<GetStudentLabView>();
+
+        // AUT-07: pregled pre objave (Cvetojević)
+        services.AddScoped<PreviewStudentView>();
 
         return services;
     }
 
-    // Poziva se jednom, posle builder.Build(). Radnje bez politike tim 3 odbija (NoPolicy).
-    public static IServiceProvider RegisterLabVisibilityAccess(this IServiceProvider services)
+    public static IServiceProvider RegisterLabVisibilityAccess(
+        this IServiceProvider services)
     {
         var catalog = services.GetRequiredService<InMemoryActionCatalog>();
+
         foreach (var action in LabVisibilityActions.All)
         {
-            // The evaluator key request contains a lab resource; other actions
-            // do not carry a resource in the current LabVisibility contracts.
-            var isKeyRead = action == LabVisibilityActions.KeyRead;
+            var scope = ActionScope.Authenticated;
+            string? resourceType = null;
+            var requiresResource = false;
+
+            // lab.key.read, lab.student-view i lab.preview (AUT-07) nose resurs "lab" (labId iz rute).
+            if (action == LabVisibilityActions.KeyRead ||
+                action == LabVisibilityActions.StudentView ||
+                action == LabVisibilityActions.Preview)
+            {
+                scope = ActionScope.Course;
+                resourceType = "lab";
+                requiresResource = true;
+            }
+
             catalog.Register(new ActionDefinition(
                 action,
-                isKeyRead ? ActionScope.Course : ActionScope.Authenticated,
-                isKeyRead ? "lab" : null,
-                isKeyRead));
+                scope,
+                resourceType,
+                requiresResource));
         }
 
-        // Politike se dodaju ovde, svako svoju, istim obrascem.
         var policies = services.GetRequiredService<InMemoryAccessPolicyRegistry>();
+
         policies.Register(
             LabVisibilityActions.KeyRead,
             ActivatorUtilities.CreateInstance<EvaluatorKeyPolicy>(services));
 
+        policies.Register(
+            LabVisibilityActions.StudentView,
+            ActivatorUtilities.CreateInstance<StudentViewPolicy>(services));
+
+        // AUT-07: pregled pre objave samo za nastavnika kursa (Cvetojević)
+        policies.Register(
+            LabVisibilityActions.Preview,
+            ActivatorUtilities.CreateInstance<LabPreviewPolicy>(services));
+
         return services;
     }
-}
+}

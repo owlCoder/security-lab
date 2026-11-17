@@ -140,7 +140,7 @@ public sealed class LaboratorySearchAuthorizationTests
             Assert.That(body, Does.Not.Contain(factory.Repository.Laboratory.Title));
             Assert.That(body, Does.Not.Contain(factory.Repository.Laboratory.Id.ToString()));
             Assert.That(body, Does.Not.Contain(MetadataStore.Tag));
-            Assert.That(factory.Access.SearchChecks, Is.EqualTo(2));
+            Assert.That(factory.Access.SearchChecks, Is.EqualTo(3));
             Assert.That(factory.Repository.ListCalls, Is.Zero);
             Assert.That(factory.Metadata.ReadCalls, Is.Zero);
         });
@@ -172,7 +172,8 @@ public sealed class LaboratorySearchAuthorizationTests
         public int SearchChecks { get; private set; }
 
         public AccessResult Decide(IIdentityContext subject, string action, string? resourceId = null) =>
-            action == LabActions.Search && ++SearchChecks > 1
+            // Centralni ACC-05 middleware i endpoint filter prolaze; servis ponovo proverava pravo.
+            action == LabActions.Search && ++SearchChecks > 2
                 ? AccessResult.Deny(reason)
                 : AccessResult.Allow();
     }

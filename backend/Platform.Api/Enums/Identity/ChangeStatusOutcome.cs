@@ -8,5 +8,6 @@ public enum ChangeStatusOutcome
     NotFound,
     InvalidStatus,
     InvalidTransition,
-    SelfChangeNotAllowed
+    SelfChangeNotAllowed,
+    Unavailable
 }

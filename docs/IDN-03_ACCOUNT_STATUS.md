@@ -4,195 +4,135 @@
 
 **Student:** Igor Cvijić / PR 21/2023
 
-**Specification requirements:** IDN-03 (primary), ADM-01, AUD-01, AUD-04, ACC-05, SEC-01, UC-05. Depends on IDN-02 (sessions) and ADM-02 (database migrations), see [Status](#implementation-status).
+**Specification requirements:** IDN-03 (primary), ADM-01, AUD-01, AUD-03, ACC-05, SEC-01, SEC-03, UC-05. Depends on IDN-02 (sessions), ADM-02 (database) and the Audit module (`ITransactionalAuditWriter`).
 
 **User story:** As an administrator, I want blocked and archived accounts to be unable to sign in, so that unauthorized access is prevented.
 
-The administrator status-change endpoint described below sets `ACTIVE`, `BLOCKED`
-or `ARCHIVED`. The login flow enforces that only `ACTIVE` accounts proceed to
-session issuance.
+An administrator sets the status of another account to `ACTIVE`, `BLOCKED` or `ARCHIVED`
+(`PUT /api/admin/accounts/{id}/status`). The status is written to `identity.accounts`, the same table login reads,
+so the next login and the next request of an existing session see it.
 
 ## Responsibilities and boundaries
 
-* Processes and user scenarios:
+* Owned by Team 2: the use-case `ChangeAccountStatus`, the store `EfAccountStatusStore`, the session check. Team 12 (Audit) owns the Audit contract; we only call it.
+* One successful change is **one database transaction**: new status, revocation of all sessions (for `BLOCKED` and `ARCHIVED`) and the Audit record. If any step fails, nothing is stored.
+* Refusals (unauthenticated, not an administrator, invalid status, self-change, unknown account, same status) change nothing and are recorded in Audit in their own short transaction. A failed Audit write does not change the answer to a refusal.
+* If the Audit record of a successful change cannot be written, the change is rolled back and the endpoint returns `503 unavailable`.
 
-  * An administrator sets the status of another account to `ACTIVE`, `BLOCKED` or `ARCHIVED` (`PUT /api/admin/accounts/{id}/status`).
-  * Blocking or archiving revokes all active sessions of that account (UC-05, IDN-03).
-  * Every attempt (success, denial, failure) is written as an audit event with actor, action, target, time, outcome and correlation ID.
-* Contracts with other modules:
-
-|Contract|Direction|State|
-|-|-|-|
-|`IIdentityContext`|needs caller identity from IDN-01/IDN-02|**stub** (dev header `X-Stub-User`)|
-|`IAccessDecision`|decides who may change status|implemented (administrator only, deny by default)|
-|`IAccountRepository`|persistence of accounts|**in-memory**, PostgreSQL pending|
-|`ISessionRevoker`|revokes sessions, owned by IDN-02|**no-op stub**|
-|`ICredentialAuthenticator`|verifies login credentials, owned by IDN-02|safe unavailable stub|
-|`ISessionIssuer`|creates a session for an active account, owned by IDN-02|safe unavailable stub|
-|`IAuditWriter`|structured security record|implemented (writes to application log)|
-
-* Implementation status: see [Implementation status](#implementation-status).
+|Contract|Implementation|
+|-|-|
+|`IIdentityContext`|`SessionIdentityContext` (server-side session, IDN-02)|
+|`IAccessDecision`|`AdminOnlyAccessDecision`, administrator only, deny by default|
+|`IAccountStatusStore`|`EfAccountStatusStore` over `PlatformIdentityDbContext` (`identity.accounts`, `identity.sessions`)|
+|`ISessionManager`|`SessionManager` (single registration; revocation runs inside the status transaction)|
+|`ITransactionalAuditWriter`|Audit module, receives the open `DbTransaction`; event type `account.status.changed`|
 
 ## Component architecture
 
 ```mermaid
 flowchart LR
-  Client\[Admin client] -->|PUT status| Ctrl\[AdminAccountsController]
-  Ctrl --> UC\[ChangeAccountStatus use-case]
-  UC --> Ctx\[IIdentityContext]
-  UC --> Acc\[IAccessDecision]
-  UC --> Repo\[IAccountRepository]
-  UC --> Rev\[ISessionRevoker]
-  UC --> Aud\[IAuditWriter]
-  UC --> Dom\[UserAccount / AccountStatus]
-  Login\[LoginController] --> LoginUC\[LoginAccount]
-  LoginUC --> Cred\[ICredentialAuthenticator]
-  LoginUC --> Repo
-  LoginUC --> Issue\[ISessionIssuer]
-  Ctx -. stub, IDN-02 .-> Ident\[Identity module]
-  Rev -. no-op, IDN-02 .-> Ident
-  Repo -. in-memory, ADM-02 .-> DB\[(PostgreSQL, planned)]
-  Aud --> Log\[(Application log)]
+  Client[Admin client] -->|PUT status| Ctrl[AdminAccountsController]
+  Ctrl --> UC[ChangeAccountStatus]
+  UC --> Ctx[IIdentityContext]
+  UC --> Acc[IAccessDecision]
+  UC --> Store[IAccountStatusStore]
+  UC --> Aud[ITransactionalAuditWriter]
+  Store --> DB[(PostgreSQL: identity.accounts, identity.sessions)]
+  Aud -->|same DbTransaction| AuditDB[(PostgreSQL: audit.audit_events)]
+  Login[Login] --> Cred[ICredentialVerifier]
+  Cred --> DB
+  Mw[SessionCheckMiddleware] --> SM[SessionManager]
+  SM --> DB
 ```
 
-Login status gate: credentials are verified first; the server then reads the
-account status. `BLOCKED` and `ARCHIVED` return 403 with specific messages.
-`ACTIVE` proceeds to session issuance. See the login flow in
-[the platform data-flow diagram](DATA_FLOW.md#identity-login-flow-idn-02--idn-03).
-
-Layers: `Controllers/Identity` only translates the result into an HTTP code. `Services/Identity` holds the use-case and the contracts. `Domain/Identity` holds the enum and the entity. Adapters (`Adapters.cs`) are the replaceable technical parts.
+`identity` and `audit` schemas must be in the same database, otherwise the Audit record cannot join the
+identity transaction. In local development both live in the `securitylab` database (see `docker-compose.yml`);
+`Program.cs` migrates the audit schema into the identity database at startup in Development.
 
 ## Data flow diagram
 
 ```mermaid
 flowchart LR
-  subgraph untrusted\[Untrusted zone]
-    A\[Administrator or other caller]
+  subgraph untrusted[Untrusted zone]
+    A[Administrator or other caller]
   end
-  subgraph app\[Application zone: server enforces every check]
+  subgraph app[Application zone: server enforces every check]
     P1((1 Identify caller))
     P2((2 Authorize: administrator only))
     P3((3 Validate status value))
-    P4((4 Apply change))
+    P4((4 Lock account, apply status))
     P5((5 Revoke sessions))
-    P6((6 Write audit event))
+    P6((6 Write Audit record))
   end
-  subgraph data\[Data zone]
-    D1\[(Accounts)]
-    D2\[(Audit log)]
-    D3\[(Sessions, IDN-02)]
+  subgraph data[Data zone, one PostgreSQL database]
+    D1[(identity.accounts)]
+    D2[(audit.audit_events)]
+    D3[(identity.sessions)]
   end
-  A -->|"id, status, reason"| P1
-  P1 -->|caller| P2
-  P2 -->|allowed| P3
-  P3 -->|valid| P4
-  P4 -->|read / write status| D1
+  A -->|"id, status"| P1
+  P1 --> P2 --> P3 --> P4
+  P4 -->|"FOR UPDATE, write status"| D1
   P4 -->|Blocked or Archived| P5
   P5 -->|revoke all| D3
-  P4 -->|result| P6
-  P2 -->|denied| P6
-  P3 -->|rejected| P6
-  P6 --> D2
+  P5 --> P6
+  P6 -->|same transaction| D2
   P1 -->|401| A
   P2 -->|403| A
-  P4 -->|"200 / 404 / 409"| A
+  P4 -->|"200 / 404 / 409 / 503"| A
 ```
 
-Trust boundary: everything coming from the client (id, status, reason, headers) is untrusted input. Identity and permissions are decided only on the server. The response never reveals whether an account exists to a caller who is not an administrator.
-
-Order of checks in the use-case: authenticated, then administrator, then status value valid, then account exists, then not self-change, then not the same status. Authorization comes before the account lookup on purpose.
+Order of checks: authenticated, then administrator, then status value valid, then not self-change, then account exists, then not the same status.
+Authorization comes before the account lookup on purpose, so a non-administrator cannot learn which accounts exist.
 
 ## Security requirements
 
-* Server-side access checks:
-
-  * `IAccessDecision` allows only administrators, everything else is denied (ACC-05, SEC-01).
-  * The check runs inside the use-case, not only in the controller, so any future caller of the use-case is protected too.
-  * Outside the Development environment there is no caller at all, so every request returns 401 until real authentication (IDN-02) exists.
-* Input validation and sensitive data:
-
-  * The status is accepted only by name (`ACTIVE`, `BLOCKED`, `ARCHIVED`, any letter case). Numbers such as `1` or `99` are rejected, because `Enum.TryParse` would otherwise accept them.
-  * The reason is optional, control characters (new lines) are removed and the length is limited to 200, so nobody can forge extra lines in the audit log.
-  * The audit event contains no passwords, tokens or session ids (AUD-03).
-  * An administrator cannot change their own status, to prevent locking out the last administrator.
-* Negative scenarios (misuse, control, test):
+* Server-side access checks: `IAccessDecision` runs inside the use-case, not only in the controller (ACC-05, SEC-01).
+* Session check on every request (SEC-03): `SessionManager.ValidateAsync` refuses a revoked or expired session and also a session whose account is not `ACTIVE`. This is defense in depth only: it is not enough alone, because a session stored behind the revocation would work again after reactivation.
+* Session issuing (SEC-03): `ISessionStore.CreateForActiveAccountAsync` locks the account row with `SELECT ... FOR SHARE` in the same transaction that stores the session. A login that passed its status check before a block either waits for the block and stores nothing (`AccountNotActiveException`, login answers like any refused login), or commits first and is then revoked by the block. No token can outlive a block, so reactivation never revives one.
+* The status is accepted only by name (`ACTIVE`, `BLOCKED`, `ARCHIVED`, any letter case). Numbers such as `1` or `99` are rejected.
+* Audit record (AUD-01, AUD-03): actor, event type, resource, time, outcome and correlation ID, details only `oldStatus`/`newStatus` or a `reasonCode`. No free text, tokens, cookies or session ids. The `reason` field of the request body is accepted for compatibility but **not stored**, because the Audit contract allows no free text.
+* An administrator cannot change their own status, to avoid locking out the last administrator.
+* Concurrent changes of the same account are serialized with `SELECT ... FOR UPDATE`.
 
 |Misuse|Control|Test|
 |-|-|-|
-|A student or non-admin blocks an account|`IAccessDecision`, 403, denial audited|`NonAdmin\_IsForbidden\_StatusUnchanged\_DenialAudited`|
-|Probing which account ids exist|authorization before lookup, same 403 for existing and missing ids|`NonAdmin\_CannotLearnWhetherAccountExists`|
-|Request without a caller|401, status unchanged|`NoCaller\_IsUnauthenticated\_StatusUnchanged`|
-|Caller flagged unauthenticated but with an admin id|`IsAuthenticated` is checked first|`CallerMarkedNotAuthenticated\_IsUnauthenticated\_EvenIfIdIsAdmin`|
-|Invalid or numeric status (`SUPERUSER`, `1`, `99`, empty)|strict parsing, 400|`InvalidStatusValue\_IsRejected\_StatusUnchanged` (6 cases)|
-|Unknown account|404, failure audited|`UnknownAccount\_ReturnsNotFound`|
-|Administrator blocks themselves|409, denied and audited|`Admin\_CannotChangeOwnStatus`|
-|Setting the status it already has|409, no session revocation|`SettingSameStatus\_IsInvalidTransition\_NoRevocation`|
-|Forged audit lines through the reason|control characters removed|`Reason\_CannotInjectFakeAuditLines`|
-|Blocked or archived account keeps sessions|`ISessionRevoker` called|`Admin\_CanBlockAccount\_...`, `Admin\_CanArchiveAccount\_SessionsRevoked`|
-|Reactivation wrongly revokes sessions|revoke only for Blocked and Archived|`Admin\_CanActivateBlockedAccount\_SessionsNotRevoked`|
-|Valid credentials for a blocked account|status gate rejects before session issuance|Automated test pending; expected `account_blocked`, 403, Serbian message|
-|Valid credentials for an archived account|status gate rejects before session issuance|Automated test pending; expected `account_archived`, 403, Serbian message|
+|Student or non-admin blocks an account|403, nothing changes, denial audited|`Student_IsForbidden_NothingChanges_DenialIsAudited`, `Student_CannotChangeStatus_NothingChanges_DenialIsAudited` (integration)|
+|Request without a caller|401, nothing changes|`Anonymous_IsUnauthenticated_NothingChanges_DenialIsAuditedWithoutActor`|
+|Invalid or numeric status|strict parsing, 400|`InvalidStatusValue_IsRejected_NothingChanges` (7 cases)|
+|Unknown account|404, failure audited|`UnknownAccount_ReturnsNotFound_AndIsAudited`, `UnknownAccount_ReturnsNotFound_AndLeavesNoOtherRows`|
+|Administrator blocks themselves|409, audited|`Admin_CannotChangeOwnStatus`|
+|Same status again|409, sessions stay|`SameStatus_IsInvalidTransition_SessionsStay`|
+|Blocked account keeps a session|sessions revoked in the same transaction|`Block_RevokesActiveSession_RefusesNextRequestAndLogin_AndRecordsAudit`, `Archive_RevokesAllSessionsOfTheAccount`|
+|Blocked account signs in|login reads `identity.accounts`|same integration test (login returns 401)|
+|Session created behind the revocation|refused at issue (row lock), and status checked on every request|`LoginThatStartedBeforeTheBlock_IsRefusedAtIssue_SoReactivationCannotRevive_ItsToken`, `LoginsRacingWithABlock_NeverLeaveATokenThatWorksAfterReactivation`, `SessionOfAccountBlockedBehindTheRevocation_IsStillRefused`, `AccountBlockedAfterTheStatusCheck_IsRefused_LikeAnyBlockedLogin_AndNoSuccessIsAudited`|
+|Audit unavailable|whole change rolled back, 503|`AuditNotRecorded_RollsBackStatusAndSessions`, `AuditUnavailable_RollsBackStatusAndSessionRevocation`|
+|Database failure|nothing stored, 503|`DatabaseFailure_ReturnsUnavailable_AndStoresNothing`|
+|Secrets or session ids in the Audit record|details limited to status names|`AuditRecord_HasNoFreeTextOrIdentifiersOfSessions`|
+|Reactivation wrongly revokes sessions|revoke only for Blocked and Archived|`Admin_ActivatesBlockedAccount_DoesNotTouchSessions`|
 
 ## Evidence of work
 
-* Changed files / commit / pull request: branch `feature/IDN-03-account-status`, commit `413a53d` (IDN-03: status change with access check and audit record). Pull request: \[link].
-
-  * `backend/Platform.Api/Domain/Identity/`: `AccountStatus.cs`, `UserAccount.cs`
-  * `backend/Platform.Api/Services/Identity/`: `ChangeAccountStatus.cs`, interfaces, `Adapters.cs`
-  * `backend/Platform.Api/Controllers/Identity/AdminAccountsController.cs`
-  * `backend/Platform.Api/Program.cs`, `appsettings.Development.json`
-  * `backend/Platform.Tests/Identity/ChangeAccountStatusTests.cs`
-* Run instructions (PowerShell, from the repository root):
-
-```powershell
-  dotnet build backend\\Platform.Api\\Platform.Api.csproj
-  dotnet test backend\\Platform.Tests\\Platform.Tests.csproj
-
-  cd backend\\Platform.Api
-  $env:ASPNETCORE\_ENVIRONMENT = "Development"
-  dotnet run --urls http://localhost:5080
-  ```
-
-  Development seeds three test accounts (`example.com` addresses). Ids: `1111...` administrator, `2222...` student, `3333...` other account. The caller is chosen with the header `X-Stub-User` (development only). Example, in a second terminal:
-
-```powershell
-  '{"status":"BLOCKED","reason":"test"}' | curl.exe -s -w " HTTP %{http\_code}`n" -X PUT "http://localhost:5080/api/admin/accounts/33333333-3333-3333-3333-333333333333/status" -H "Content-Type: application/json" -H "X-Stub-User: 11111111-1111-1111-1111-111111111111" --data-binary "@-"
-  ```
-
-  Expected: `200` and an `AUDIT` line in the API terminal. With `X-Stub-User: 2222...` the expected result is `403`.
-
-* Tests and results: 17 NUnit test cases in `Platform.Tests/Identity`. Result: \[fill in after running `dotnet test`, expected 17 passed].
-* Next steps: see below.
+* Branch: `fix/idn-03-persistent-status-change`.
+* Changed: `Services/Identity/ChangeAccountStatus.cs`, `EfAccountStatusStore.cs`, `SessionManager.cs`; `Interfaces/Identity/IAccountStatusStore.cs`; `Controllers/Identity/AdminAccountsController.cs`; `Program.cs`. Removed: `IAccountRepository`, `InMemoryAccountRepository`, the duplicate `ISessionManager` registration.
+* Tests: `Platform.Identity.Tests/Services/ChangeAccountStatusTests.cs` (unit, 23 cases) and `Platform.Identity.Tests/Integration/AccountStatusChangeIntegrationTests.cs` (real PostgreSQL, 6 cases).
+* Run (PowerShell, repository root): `dotnet test backend\Platform.Identity.Tests --filter "Category=IDN-03"`.
 
 ## Implementation status
 
 |Acceptance criterion|Status|
 |-|-|
-|Administrator can set `ACTIVE`, `BLOCKED` or `ARCHIVED`|Done, covered by tests|
-|`BLOCKED` account cannot log in|Status gate implemented; credential and session adapters remain IDN-02 placeholders|
-|`ARCHIVED` account cannot log in|Status gate implemented; credential and session adapters remain IDN-02 placeholders|
-|`ACTIVE` account can log in when other conditions pass|Status gate permits session issuance; actual authentication and session creation await IDN-02|
-|Rejected login displays an appropriate message|Implemented for invalid credentials and each account status|
-|System stores the new status in the database|**Partial.** Stored behind `IAccountRepository`, currently in memory, so data is lost on restart. PostgreSQL storage and migration (ADM-02) are a separate task|
-|Only an authorized administrator can change status|Done, server-side, covered by negative tests|
-|The change is recorded|Done, audit event with actor, target, time, outcome and correlation ID. Currently written to the application log|
-|Blocking revokes all sessions|**Partial.** The use-case calls `ISessionRevoker`, but the implementation is a no-op until IDN-02|
+|Administrator can set `ACTIVE`, `BLOCKED` or `ARCHIVED`|Done|
+|`BLOCKED` and `ARCHIVED` accounts cannot log in|Done, status stored where login reads it (integration test)|
+|System stores the new status in the database|Done, `identity.accounts`|
+|Only an authorized administrator can change status|Done, negative tests|
+|The change is recorded|Done, persistent Audit record in the same transaction|
+|Blocking revokes all sessions at once|Done, in the same transaction; next request with an old session returns 401|
 
 ## Known limitations and residual risk
 
-* In-memory storage, replace `InMemoryAccountRepository` with a PostgreSQL implementation. The use-case and tests stay unchanged.
-* `NoOpSessionRevoker` does not revoke anything yet. Until IDN-02 is done, a blocked account keeps working sessions.
-* `UnavailableCredentialAuthenticator` and `UnavailableSessionIssuer` fail closed. Until IDN-02 replaces them, login requests return 503 before real credential verification or session creation; the status gate is ready for those adapters.
-* The identity stub trusts the `X-Stub-User` header. It is registered only in the Development environment, and any other environment returns 401 for every request.
-* The audit event goes to the application log. A persistent audit store (shared `IAuditWriter` contract) is still to be agreed with the team that owns auditing.
-* There is no concurrency control, two administrators changing the same account at the same time result in the last write winning.
-* Any status can change to any other different status, including `ARCHIVED` back to `ACTIVE`. This is a conscious simplification, the acceptance criteria do not forbid it.
+* Deployment must create the `audit` schema in the identity database (`AuditPersistenceExtensions.MigrateAuditDatabaseAsync`); the web host migrates it only in Development. If the database user used by the identity module cannot write to `audit`, every status change returns `503`.
+* `identity` and `audit` must stay in one database. Moving Audit to a separate database requires an outbox or a different integration.
+* The `reason` text is not stored (see above). If a reason is required, ask Team 12 for an allowed structured field.
+* Any status can change to any other different status, including `ARCHIVED` back to `ACTIVE`. This is a conscious simplification.
 * No rate limiting on the administrative endpoint (SEC-04).
-
-## Next steps
-
-1. Agree with the owner of IDN-01 and the database task on a single user entity and `DbContext`, then add the PostgreSQL repository and migration.
-2. Replace the login and session placeholders, `NoOpSessionRevoker`, and the identity stub when IDN-02 is available, then verify the contract between authentication and account status.
-3. Move `IAuditWriter` to the shared audit contract when it is agreed.
-4. Add `dotnet test` to the CI workflow.
-
+* Selective revocation and listing of own sessions (IDN-07) is the next task; it reuses `SessionManager.RevokeSession` and `ListForUser`.

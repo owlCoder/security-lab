@@ -1,6 +1,7 @@
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Modules.Kt1;
+using Platform.Api.Modules.Administration.Api;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
@@ -19,6 +20,8 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Services.Audit;
+using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
 using Platform.Identity;
@@ -50,6 +53,7 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
+var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
 builder.Services.AddAccessControl();
 builder.Services.AddAccessAspNet();
 builder.Services.AddRevisionAuthorization();
@@ -84,8 +88,8 @@ else
     builder.Services.AddSingleton<IRequestSubjectResolver, UnauthenticatedSubjectResolver>();
 }
 
-builder.Services.AddAudit();
-builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+builder.Services.AddAudit(builder.Configuration);
+builder.Services.AddScoped<IAuditContextProvider, ServerAuditContextProvider>();
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -98,8 +102,8 @@ builder.Services.AddLaboratoriesPersistence(
 builder.Services.AddRevisionReviews();
 builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
-builder.Services.AddSingleton<IAccountRepository, InMemoryAccountRepository>(); // TODO: zameniti trajnim repozitorijumom (PostgreSQL)
-builder.Services.AddScoped<ISessionManager, StoreSessionManager>();   // zameniti kad IDN-02 bude gotov
+// IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
+builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
 builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
@@ -108,12 +112,16 @@ builder.Services.AddScoped<ChangeAccountStatus>();
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IdentityAuditProducer>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
 
+builder.Services.AddScoped<LabCaller>();
+
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
 {
@@ -132,6 +140,11 @@ else
 
 // Kreiranje aplikacije
 builder.Services.AddRevisionRequestIdentity();
+if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+
+//AUT-06: register the resolver that identifies the caller from the validated session
+builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
+
 var app = builder.Build();
 app.UseRouting();
 
@@ -139,7 +152,9 @@ app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 app.UseAccessControl();
+if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
 
 // Identity Rate Limiting
@@ -165,11 +180,6 @@ app.Services.RegisterLabVisibilityAccess();
 // Probni nalozi samo za lokalni razvoj
 if (app.Environment.IsDevelopment())
 {
-    var repo = app.Services.GetRequiredService<IAccountRepository>();
-    repo.Save(new UserAccount(Guid.Parse("11111111-1111-1111-1111-111111111111"), "admin@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("22222222-2222-2222-2222-222222222222"), "student@example.com"));
-    repo.Save(new UserAccount(Guid.Parse("33333333-3333-3333-3333-333333333333"), "other@example.com"));
-
     // AUT-04/AUT-07 demo kurs: 1111 je nastavnik, 2222 student, 3333 nije na kursu.
     var demoCourse = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     var membership = app.Services.GetRequiredService<InMemoryCourseMembership>();
@@ -181,7 +191,21 @@ if (app.Environment.IsDevelopment())
 
     // US-02 and US-09: migrate and seed the identity database (skipped without a connection string).
     if (await app.ApplyIdentityMigrationsAsync())
+    {
+        // IDN-03: the Audit record of a status change is written in the identity transaction,
+        // so the audit schema must exist in the same database.
+        try
+        {
+            await AuditPersistenceExtensions.MigrateAuditDatabaseAsync(
+                builder.Configuration.GetConnectionString(IdentityModule.ConnectionStringName)!);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning("The audit schema was not migrated: {Message}", ex.Message);
+        }
+
         await app.SeedDevelopmentAccountsAsync();
+    }
     // LAB-03 drugi demo kurs: 3333 je student samo ovde, ne na prvom kursu.
     // Primer: X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher pravi laboratoriju na prvom kursu.
     var secondDemoCourse = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
@@ -201,10 +225,11 @@ app.MapGet("/api/health", () => Results.Ok(new
 app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
+if (administrationEnabled) app.MapPersistentCourseAdministration();
 app.MapLaboratories();
+app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();
 app.MapRevisionReviews();
-
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/api/access/demo-deny", async (

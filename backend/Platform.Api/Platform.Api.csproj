@@ -30,4 +30,8 @@
     <ProjectReference Include="..\Platform.Laboratories.Domain\Platform.Laboratories.Domain.csproj" />
     <ProjectReference Include="..\Platform.Laboratories.Infrastructure\Platform.Laboratories.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Modules/Administration/Persistence/Migrations/*.sql" />
+    <EmbeddedResource Include="Modules/Administration/Persistence/runtime-permissions.sql" />
+  </ItemGroup>
 </Project>

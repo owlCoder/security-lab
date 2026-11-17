@@ -21,3 +21,26 @@ Trust boundaries: (1) untrusted browser ↔ server API; (2) application ↔ shar
 Residual limitations: simulator data and audit are process-local and reset on restart; no production credentials are accepted; all demo routes are off unless explicitly enabled in Development. HTTP 404 normalization does not claim timing equivalence. Database-level audit atomicity, cross-module transactions, production session security, operational monitoring and actual provider review remain KT2 integration work. No production-completeness claim is made.
 
 The HTTP revocation regression now explicitly sends the cookie issued before revocation, using separate administrator and delegate clients and no second delegate login. The live script verifies exactly one delegate sign-in and an unchanged cookie, records only proof booleans/counters, and never stores the cookie value in evidence. Both DFDs include provider/store return data and explicit denial/audit routes.
+
+
+## KT2 increment 2 — real-session administration boundary
+
+The browser-to-API trust boundary now precedes actual Identity session validation;
+the API-to-provider boundary includes separate Identity and administration
+transactions. `adm08-kt2-dfd.mmd/.svg` shows these boundaries and rejection paths.
+
+| Asset | Misuse/threat | Control | Regression evidence |
+|---|---|---|---|
+| Administrative identity | Forged development headers or synthetic KT1 cookie | Endpoint-specific real-session provider, full authentication level, current account | `ForgedHeadersAndSyntheticKt1CookieCannotAuthenticateProductionAdministration`; `MfaPendingSessionIsNotAnAdministrativeIdentity` |
+| Current permissions | Reuse pre-revocation cookie or captured grant | Fresh grant reads and serialized mutation recheck; fresh Identity session check before commit | `RealLoginDelegationSettingsRevocationRejectsTheExactPreviouslyIssuedCookie`; `SessionRevokedDuringOperationRollsBackBeforeCommit` |
+| Account lifecycle | Use a blocked/archived account or logged-out/expired session | Real current account/session provider on each request | `CurrentAccountStatusRejectsExistingCookie`; `LoggedOutOrExpiredSessionCannotBeReused` |
+| Settings and grants | Cross-origin write, oversized body or delegation escalation | Strict Secure cookie, required non-simple header, same-origin validation, body limit, capability allowlist | `WriteRequiresHeaderAndSameOrigin`; `OversizedRequestIsRejectedBeforeItCanChangeSettings`; `HttpDelegationCannotEscalateCapabilities` |
+| Course existence | Enumerate IDs during outage | Uniform public denials; dependency failures never grant access | `ForeignAndMissingCourseHaveTheSamePublicResponse`; `DependencyOutageIsFailClosedWithoutResourceEnumeration` |
+| Producer change evidence | Successful mutation without durable producer event | Single transaction, matching-event enforcement and rollback | `OwnAuditFailureRollsBackAnHttpMutation`; `HttpMutationAuditContainsServerActorAndCorrelationWithoutSecrets` |
+
+Central middleware denials retain the central Access audit path; the module does
+not add a second producer denial for a handler that was never entered. Successful
+administrative changes require their own durable producer event. Delivery of
+those outbox records to central Audit is still pending. Identity revocation and
+the final administration commit are not a distributed transaction; see the
+explicit consistency limit in `KT2.md`.

@@ -9,6 +9,8 @@ Kontroler (npr. `LoginController`):
 
 ```csharp
 [HttpPost("login")]
+[AllowAnonymous] // Identity: prijava ne zahteva postojecu sesiju.
+[AllowPublic]    // ACC-05: eksplicitno javna ruta, bez legacy delegata.
 [EnableRateLimiting(RateLimitPolicies.Login)]
 public async Task<IActionResult> Login(...)
 ```
@@ -49,4 +51,18 @@ IPv6 adrese se grupišu po /64 bloku.
 - **Sliding window** (6 segmenata): nema dvostrukog naleta zahteva na granici prozora.
 - **Brojači su u memoriji**: restart ih resetuje, a više instanci API-ja bi brojalo odvojeno.
   Za više instanci bio bi potreban deljeni store (npr. Redis).
-- **Distribuirani napad** sa mnogo IP adresa na jedan nalog ne zaustavlja se po IP-u, već po nalogu (IDN-02).
+- **Distribuirani napad** sa mnogo IP adresa na jedan nalog zaustavlja IDN-05 blokada u
+  `CredentialVerifier` / `EfCredentialStore`, sa brojacem i krajem blokade u `identity.accounts`.
+  Zakljucan nalog, pogresna lozinka i nepostojeci email vracaju isti `401 invalid_credentials`.
+  `429` i `Retry-After` pripadaju ogranicenju po IP adresi, pre provere lozinke.
+
+## Provera integracije
+
+`LoginEndpointRateLimitingTests` proverava pravi login endpoint: `401` pre IP limita,
+`429` sa `Retry-After` posle limita, `200` za uspesnu prijavu i odsustvo poziva
+credential verifier-a za odbijen zahtev. Verifier i izdavanje sesije su u tim testovima zamenjeni.
+
+`Platform.Identity.Tests.Controllers.LockoutEndpointTests` koristi pravi Identity modul,
+sesije i privremeni PostgreSQL. Testovi `ManyFailuresForOneAccount_FromDifferentClients_BlockEvenTheCorrectPassword`
+i `AccountBlock_AppliesToUnknownEmail_Identically` tamo proveravaju blokadu sa razlicitih IP adresa,
+neizdavanje sesije i jednak javni odgovor za nepostojeci nalog. Nemaju `[Ignore]`.
