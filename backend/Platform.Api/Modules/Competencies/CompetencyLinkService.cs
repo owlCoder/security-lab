@@ -1,10 +1,13 @@
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Api.Modules.Laboratories.Application;
+using Platform.Api.Modules.Laboratories.Domain;
 using Platform.Competencies.Contracts;
 using Platform.Competencies.Domain;
 using Platform.LabVisibility.Contracts;
+using Platform.LabVisibility.Domain;
 using AccessDecision = Platform.Access.Contracts.IAccessDecision;
+using CourseRole = Platform.LabVisibility.Contracts.CourseRole;
 
 namespace Platform.Api.Modules.Competencies;
 
@@ -13,6 +16,7 @@ namespace Platform.Api.Modules.Competencies;
 public sealed class CompetencyLinkService(
     ILaboratoryRepository laboratories,
     ICourseMembership memberships,
+    ILabPublicContentReader publicContent,
     AccessDecision access,
     IServiceProvider services)
 {
@@ -86,9 +90,23 @@ public sealed class CompetencyLinkService(
         if (!edit)
         {
             var role = await memberships.GetRoleAsync(laboratory.CourseId, userId, ct);
-            return LabOpenPolicy.DecideOpen(laboratory.CourseId, role,
-                laboratory.CreatedBy == userId).Allowed
-                ? null : new(CompetencyOperationStatus.LaboratoryNotFound);
+            if (!LabOpenPolicy.DecideOpen(laboratory.CourseId, role,
+                laboratory.CreatedBy == userId).Allowed)
+                return new(CompetencyOperationStatus.LaboratoryNotFound);
+
+            // Course membership alone must not expose links belonging to a draft
+            // or withdrawn laboratory. Publication belongs to the visibility module.
+            if (role == CourseRole.Student)
+            {
+                if (laboratory.Status == LabStatus.Archived)
+                    return new(CompetencyOperationStatus.LaboratoryNotFound);
+                var content = await publicContent.GetAsync(laboratoryId, ct);
+                if (content is null || content.LabId != laboratoryId ||
+                    content.CourseId != laboratory.CourseId || content.State != LabVisibilityState.Published)
+                    return new(CompetencyOperationStatus.LaboratoryNotFound);
+            }
+
+            return null;
         }
 
         // Read access is deliberately NOT reused as permission to edit.

@@ -23,6 +23,7 @@ using Platform.Competencies.Domain;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.LabVisibility.Contracts;
+using Platform.LabVisibility.Domain;
 using Platform.LabVisibility.Infrastructure.Membership;
 using AccountStatus = Platform.Identity.Enums.AccountStatus;
 
@@ -161,6 +162,74 @@ public sealed class CompetencyEndpointsTests
         Assert.That(denied.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
         Assert.That(factory.Store.MutationCalls, Is.Zero);
         Assert.That(factory.Store.HasLink(LabId, CompetencyId), Is.True);
+    }
+
+    [Test]
+    public async Task TwoCompetencies_CanBeAddedReadAndRemovedIndependentlyThroughHttp()
+    {
+        using var factory = new Prg04Factory();
+        using var client = factory.CreateClient();
+        using var first = await Send(client, "PUT", Link(LabId), "teacher");
+        using var second = await Send(client, "PUT", Link(LabId, SecondCompetencyId), "teacher");
+        using var read = await Send(client, "GET", Links(LabId), "student");
+
+        Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        Assert.That(second.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        Assert.That(read.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var links = await read.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>();
+        Assert.That(links!.Competencies.Select(x => x.Id),
+            Is.EquivalentTo(new[] { CompetencyId, SecondCompetencyId }));
+
+        using var delete = await Send(client, "DELETE", Link(LabId), "teacher");
+        using var remaining = await Send(client, "GET", Links(LabId), "student");
+        Assert.That(delete.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That(remaining.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var remainingLinks = await remaining.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>();
+        Assert.That(remainingLinks!.Competencies.Select(x => x.Id), Is.EqualTo(new[] { SecondCompetencyId }));
+    }
+
+    [TestCase("draft")]
+    [TestCase("archived")]
+    [TestCase("missing")]
+    [TestCase("foreign-course")]
+    [TestCase("wrong-laboratory")]
+    [TestCase("archived-laboratory")]
+    public async Task StudentCannotReadLinksWithoutMatchingPublishedLaboratory(string scenario)
+    {
+        using var factory = new Prg04Factory();
+        factory.Store.Seed(LabId, CompetencyId);
+        factory.PublicContent.Content = scenario == "missing" ? null : LabPublicContent.Create(
+            scenario == "wrong-laboratory" ? OtherLabId : LabId,
+            scenario == "foreign-course" ? ForeignCourse : Course, Teacher,
+            scenario == "draft" ? LabVisibilityState.Draft :
+            scenario == "archived" ? LabVisibilityState.Archived : LabVisibilityState.Published,
+            "Lab", "Goal", []);
+        if (scenario == "archived-laboratory")
+            await factory.Laboratories.UpdateAsync(Laboratory.Rehydrate(
+                LabId, Course, "Archived lab", LabStatus.Archived, Teacher, DateTimeOffset.UtcNow));
+        using var client = factory.CreateClient();
+        using var response = await Send(client, "GET", Links(LabId), "student");
+        using var missing = await Send(client, "GET", Links(MissingLabId), "student");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(await response.Content.ReadAsStringAsync(), Is.EqualTo(await missing.Content.ReadAsStringAsync()));
+        Assert.That(factory.Store.ReadCalls, Is.Zero);
+        Assert.That(factory.Store.MutationCalls, Is.Zero);
+        Assert.That(factory.Catalog.ReadCalls, Is.Zero);
+    }
+
+    [Test]
+    public async Task TeacherCanReadOwnDraftWithoutPublishedContent()
+    {
+        using var factory = new Prg04Factory();
+        factory.PublicContent.Content = null;
+        factory.Store.Seed(LabId, CompetencyId);
+        using var client = factory.CreateClient();
+        using var response = await Send(client, "GET", Links(LabId), "teacher");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var links = await response.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>();
+        Assert.That(links!.Competencies.Select(x => x.Id), Is.EqualTo(new[] { CompetencyId }));
     }
 
     [TestCase("GET", true)]
@@ -315,6 +384,7 @@ public sealed class CompetencyEndpointsTests
         public InMemoryCourseMembership Membership { get; } = new();
         public RecordingCatalog Catalog { get; } = new();
         public RecordingStore Store { get; } = new();
+        public TestPublicContentReader PublicContent { get; } = new();
 
         public Prg04Factory(string environment = "Production", bool includeCompetencyStores = true, bool hideManagePolicy = false)
         {
@@ -352,10 +422,12 @@ public sealed class CompetencyEndpointsTests
                 services.RemoveAll<ICourseMembership>();
                 services.RemoveAll<ICompetencyCatalog>();
                 services.RemoveAll<ILaboratoryCompetencyStore>();
+                services.RemoveAll<ILabPublicContentReader>();
                 services.AddSingleton<ISessionManager, TestSessions>();
                 services.AddSingleton<IAccountStatusReader, TestAccounts>();
                 services.AddSingleton<ILaboratoryRepository>(Laboratories);
                 services.AddSingleton<ICourseMembership>(Membership);
+                services.AddSingleton<ILabPublicContentReader>(PublicContent);
                 if (_hideManagePolicy)
                 {
                     // Keep startup's complete catalog, but make the real decision engine
@@ -408,7 +480,11 @@ public sealed class CompetencyEndpointsTests
             Task.FromResult(_laboratories.GetValueOrDefault(id));
         public Task<IReadOnlyList<Laboratory>> ListAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Laboratory>>(_laboratories.Values.ToArray());
-        public Task UpdateAsync(Laboratory laboratory, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task UpdateAsync(Laboratory laboratory, CancellationToken cancellationToken = default)
+        {
+            _laboratories[laboratory.Id] = laboratory;
+            return Task.CompletedTask;
+        }
         public Task<LabRevision> AddRevisionAsync(Guid laboratoryId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<LabRevision>> GetRevisionsAsync(Guid laboratoryId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
@@ -418,6 +494,15 @@ public sealed class CompetencyEndpointsTests
         public Task<AccountSnapshot?> FindAsync(Guid accountId, CancellationToken cancellationToken = default) =>
             Task.FromResult<AccountSnapshot?>(accountId == UnknownAccount ? null : new AccountSnapshot(accountId,
                 accountId == Blocked ? AccountStatus.Blocked : AccountStatus.Active));
+    }
+
+    private sealed class TestPublicContentReader : ILabPublicContentReader
+    {
+        public LabPublicContent? Content { get; set; } = LabPublicContent.Create(
+            LabId, Course, Teacher, LabVisibilityState.Published, "Published lab", "Goal", []);
+
+        public ValueTask<LabPublicContent?> GetAsync(Guid labId, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(Content);
     }
 
     private sealed class MissingManagePolicyRegistry(IAccessPolicyRegistry inner) : IAccessPolicyRegistry
