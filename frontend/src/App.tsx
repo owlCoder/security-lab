@@ -16,6 +16,9 @@ import RevisionListPage from './pages/RevisionListPage'
 import DraftsPage from './pages/DraftsPage'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
+import TeacherMetadataPage from './pages/TeacherMetadataPage'
+
+
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -95,9 +98,11 @@ export default function App() {
           <LabsSection />
           <CoursesPage />
           <LabVisibilitySection />
-          
           <AuthoringSection />
-        </>} />
+       
+              </>} />
+              <Route path="teacher/labs/new" element={<TeacherMetadataPage />} />
+              <Route path="teacher/labs/:labId/edit" element={<TeacherMetadataPage />} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
