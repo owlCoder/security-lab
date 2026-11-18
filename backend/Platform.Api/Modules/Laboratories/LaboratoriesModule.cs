@@ -6,6 +6,7 @@ using Platform.Access.Domain.Models;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
+using Platform.LabMetadata;
 
 namespace Platform.Api.Modules.Laboratories;
 
@@ -23,6 +24,13 @@ public static class LaboratoriesModule
         services.TryAddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
         services.AddScoped<LaboratoryService>();
         services.AddScoped<LaboratorySearchService>();
+
+        if (environment.IsDevelopment())
+        {
+            services.TryAddSingleton<
+                ILaboratoryMetadataRepository,
+                InMemoryLaboratoryMetadataRepository>();
+        }
 
         if (environment.IsDevelopment())
         {
@@ -77,6 +85,11 @@ public static class LaboratoriesModule
     public static IEndpointRouteBuilder MapLaboratories(this IEndpointRouteBuilder app)
     {
         app.MapLaboratoriesEndpoints();
+
+        app.MapLaboratoryMetadataEndpoints();
+
         return app;
     }
+
+
 }

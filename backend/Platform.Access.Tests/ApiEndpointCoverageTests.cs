@@ -37,6 +37,7 @@ public class ApiEndpointCoverageTests
         "/api/laboratories/",
         "/api/laboratories/{id:guid}",
         "/api/laboratories/{id:guid}/title",
+        "/api/laboratories/{id:guid}/metadata",
         "/api/laboratories/{laboratoryId:guid}/competencies",
         "/api/laboratories/{laboratoryId:guid}/competencies/{competencyId:guid}",
         "/api/labs/",
