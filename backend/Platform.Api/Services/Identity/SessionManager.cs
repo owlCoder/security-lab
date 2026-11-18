@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
@@ -9,9 +10,12 @@ using Platform.Identity.Persistence;
 
 namespace Platform.Api.Services.Identity;
 
-public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? timeProvider = null) : ISessionManager
+using Platform.Api.Modules.Identity.SessionLimiting;
+
+public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<SessionOptions> sessionOptions,TimeProvider? timeProvider = null) : ISessionManager
 {
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+    private readonly SessionOptions options = sessionOptions.Value;
 
     public async Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)
     {
@@ -67,6 +71,14 @@ public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? t
             .Select(account => (AccountStatus?)account.Status)
             .SingleOrDefaultAsync(ct);
         if (status != AccountStatus.Active) return null;
+
+        var inactivityTime = TimeSpan.FromMinutes(options.ActivityTimeoutMinutes);
+       
+        if ((now - session.LastActivityAt) > inactivityTime) {
+            session.Revoke(now);
+            await db.SaveChangesAsync(ct);
+            return null;
+        }
 
         session.Touch(now);
         try

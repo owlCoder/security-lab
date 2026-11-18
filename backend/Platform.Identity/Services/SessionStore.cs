@@ -6,6 +6,7 @@ using Platform.Identity.Interfaces;
 using Platform.Identity.Persistence;
 namespace Platform.Identity.Services;
 
+
 internal sealed class SessionStore(PlatformIdentityDbContext db, TimeProvider time) : ISessionStore
 {
     public async Task<(string RawToken, Session Session)> CreateAsync(

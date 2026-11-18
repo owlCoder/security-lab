@@ -12,12 +12,12 @@ namespace Platform.Api.Services.Identity;
 /// IDN-03: writes the status to <c>identity.accounts</c>, the table login reads. The status change and the
 /// session revocation use one <see cref="PlatformIdentityDbContext"/>, so they share one transaction.
 /// </summary>
-public sealed class EfAccountStatusStore(PlatformIdentityDbContext db) : IAccountStatusStore
+public sealed class EfAccountStatusStore(PlatformIdentityDbContext db, ISessionManager sessionManager) : IAccountStatusStore
 {
     public async Task<IAccountStatusUnitOfWork> BeginAsync(CancellationToken ct = default) =>
-        new UnitOfWork(db, await db.Database.BeginTransactionAsync(ct));
+        new UnitOfWork(db, await db.Database.BeginTransactionAsync(ct), sessionManager);
 
-    private sealed class UnitOfWork(PlatformIdentityDbContext db, IDbContextTransaction transaction)
+    private sealed class UnitOfWork(PlatformIdentityDbContext db, IDbContextTransaction transaction, ISessionManager sessionManager)
         : IAccountStatusUnitOfWork
     {
         public DbTransaction Transaction => transaction.GetDbTransaction();
@@ -35,7 +35,7 @@ public sealed class EfAccountStatusStore(PlatformIdentityDbContext db) : IAccoun
 
             // Blocked and archived accounts lose all sessions at once (IDN-03, UC-05).
             return newStatus is AccountStatus.Blocked or AccountStatus.Archived
-                ? await new SessionManager(db).RevokeAllForUser(account.Id, "account status change", ct)
+                ? await sessionManager.RevokeAllForUser(account.Id, "account status change", ct)
                 : 0;
         }
 
