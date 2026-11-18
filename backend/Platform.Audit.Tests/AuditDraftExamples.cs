@@ -38,8 +38,34 @@ internal static class AuditDraftExamples
             new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
             AnonymousContext);
 
-        yield return (StatusChange(), UserContext);
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodesGenerated,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
 
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodeRedeemed,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodeRejected,
+                AuditOutcome.Denied),
+            AnonymousContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodesRevoked,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (StatusChange(), UserContext);
         foreach (var eventType in new[] { AuditEventTypes.RevisionSubmitted, AuditEventTypes.RevisionApproved,
                      AuditEventTypes.RevisionReturned })
             yield return (new AuditEventDraft(eventType, AuditOutcome.Success, CourseId,

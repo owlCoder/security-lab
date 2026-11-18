@@ -19,19 +19,20 @@ public sealed class AdministrationPolicy(IAccountReader accounts, ICourseAdminis
         Delegate or Revoke => AdminCapability.ManageDelegations,
         _ => AdminCapability.None
     };
-    public ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default)
+    public async ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (request.Subject is null || !Guid.TryParse(request.Subject.Id, out var actor) ||
             request.Resource?.Type != "course" || !Guid.TryParse(request.Resource.Id, out var course) ||
             actor == Guid.Empty || course == Guid.Empty || Required(request.Action) == AdminCapability.None)
-            return ValueTask.FromResult(false);
-        var account = accounts.FindAccount(actor);
-        var c = courses.FindCourse(course);
-        var grant = courses.FindAuthority(actor, course);
-        return ValueTask.FromResult(account.Status == PortStatus.Ok && account.Value is { IsActive: true } &&
-            account.Value.Id == actor && c.Status == PortStatus.Ok && c.Value?.Id == course &&
-            grant.Status == PortStatus.Ok && grant.Value is not null && Valid(grant.Value, actor, course, Required(request.Action)));
+            return false;
+        var account = await accounts.FindAccountAsync(actor, cancellationToken);
+        if (account.Status != PortStatus.Ok || account.Value is not { IsActive: true } || account.Value.Id != actor)
+            return false;
+        var c = await courses.FindCourseAsync(course, cancellationToken);
+        var grant = await courses.FindAuthorityAsync(actor, course, cancellationToken);
+        return c.Status == PortStatus.Ok && c.Value?.Id == course &&
+            grant.Status == PortStatus.Ok && grant.Value is not null && Valid(grant.Value, actor, course, Required(request.Action));
     }
     public static bool Valid(AdminGrant grant, Guid actor, Guid course, AdminCapability required) =>
         grant.Id != Guid.Empty && grant.GranteeId == actor && grant.CourseId == course &&

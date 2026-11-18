@@ -22,7 +22,13 @@ public sealed record SecurityEvent(DateTimeOffset Timestamp, string CorrelationI
     string PolicyVersion, int? VersionBefore = null, int? VersionAfter = null);
 
 // The account, membership and attempt modules own these records; consume snapshots, not their tables.
-public interface IAccountReader { PortResult<AccountSnapshot> FindAccount(Guid id); }
+public interface IAccountReader
+{
+    // Existing simulators remain source-compatible. I/O adapters implement the async port.
+    PortResult<AccountSnapshot> FindAccount(Guid id) => throw new NotSupportedException("Use FindAccountAsync for this adapter.");
+    ValueTask<PortResult<AccountSnapshot>> FindAccountAsync(Guid id, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(FindAccount(id)); }
+}
 public interface IMembershipReader { PortResult<MembershipSnapshot> FindMembership(Guid actorId, Guid courseId); }
 public interface IAttemptStore
 {
@@ -30,4 +36,9 @@ public interface IAttemptStore
     PortResult<AttemptView> ReadAnswer(AttemptSnapshot authorizedSnapshot);
     WriteResult UpdateDraft(AttemptSnapshot authorizedSnapshot, int expectedVersion, string answer);
 }
-public interface ISecurityAudit { void Write(SecurityEvent entry); }
+public interface ISecurityAudit
+{
+    void Write(SecurityEvent entry) => throw new NotSupportedException("Use WriteAsync for this adapter.");
+    ValueTask WriteAsync(SecurityEvent entry, CancellationToken ct = default)
+    { Write(entry); return ValueTask.CompletedTask; } // preserve the legacy producer record even if the client disconnects
+}

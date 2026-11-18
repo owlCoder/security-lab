@@ -70,7 +70,7 @@ flowchart LR
 
 The middleware places a `ValidateSession` in `HttpContext.Items`; `SessionIdentityContext` maps it to `CallerIdentity`. `IsAuthenticated` is true only for `Active`. Middleware accepts a valid `MfaPending` session as a validated session and does not apply endpoint-specific MFA policy.
 
-`Program.cs` registers both `StoreSessionManager` and `SessionManager` as `ISessionManager`. With the default Microsoft DI container, a single-interface resolution uses the last registration, `SessionManager`; that is the implementation used by middleware and consumers. `StoreSessionManager` retains no-op list/revocation methods and is not the selected implementation.
+`Program.cs` registers a single `ISessionManager`, `SessionManager`. The older `StoreSessionManager` stub (no-op list/revocation) is no longer registered. `SessionManager.ValidateAsync` refuses a session whose account is not `Active`, so a blocked or archived account is refused on its very next request (IDN-03, SEC-03).
 
 ## Data flow and trust boundary
 
