@@ -233,6 +233,7 @@ function LabSearchForm({ user }: Props) {
               <div><dt>Kreirana</dt><dd>{formatDate(lab.createdAt)}</dd></div>
               <div><dt>ID</dt><dd><code>{lab.id}</code></dd></div>
             </dl>
+            <a className="labs-competencies-link" href={`/laboratories/${encodeURIComponent(lab.id)}/competencies`}>Prikaži kompetencije</a>
           </li>)}
         </ul>}
       </div>}

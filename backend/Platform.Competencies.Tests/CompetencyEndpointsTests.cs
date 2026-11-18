@@ -121,6 +121,8 @@ public sealed class CompetencyEndpointsTests
         Assert.That(linksResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var links = await linksResponse.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>();
         Assert.That(links!.LaboratoryId, Is.EqualTo(LabId));
+        Assert.That(links.LaboratoryTitle, Is.EqualTo("Own lab"));
+        Assert.That(links.CanManage, Is.True);
         Assert.That(links.Competencies.Select(x => x.Id), Is.EqualTo(new[] { CompetencyId }));
     }
 
@@ -159,7 +161,48 @@ public sealed class CompetencyEndpointsTests
         using var denied = await Send(client, method, Link(LabId), "student");
 
         Assert.That(read.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var links = await read.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>();
+        Assert.That(links!.LaboratoryTitle, Is.EqualTo("Own lab"));
+        Assert.That(links.CanManage, Is.False);
         Assert.That(denied.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(factory.Store.MutationCalls, Is.Zero);
+        Assert.That(factory.Store.HasLink(LabId, CompetencyId), Is.True);
+    }
+
+    [Test]
+    public async Task MissingManagePolicy_ReadsLinksWithReadOnlyCapabilityWithoutProbingMutation()
+    {
+        using var factory = new Prg04Factory(hideManagePolicy: true);
+        factory.Store.Seed(LabId, CompetencyId);
+        using var client = factory.CreateClient();
+        using var response = await Send(client, "GET", Links(LabId), "teacher");
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var links = await response.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>();
+        Assert.That(links!.LaboratoryTitle, Is.EqualTo("Own lab"));
+        Assert.That(links.CanManage, Is.False);
+        Assert.That(links.Competencies.Select(x => x.Id), Is.EqualTo(new[] { CompetencyId }));
+        Assert.That(factory.Store.MutationCalls, Is.Zero);
+        Assert.That(factory.Catalog.ReadCalls, Is.Zero);
+    }
+
+    [Test]
+    public async Task ManageCapability_ReflectsMembershipChangesAndNeverAuthorizesTheNextMutation()
+    {
+        using var factory = new Prg04Factory();
+        factory.Store.Seed(LabId, CompetencyId);
+        using var client = factory.CreateClient();
+        using var firstRead = await Send(client, "GET", Links(LabId), "teacher");
+        Assert.That(firstRead.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await firstRead.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>())!.CanManage, Is.True);
+
+        factory.Membership.Set(Course, Teacher, CourseRole.Student);
+        using var denied = await Send(client, "DELETE", Link(LabId), "teacher");
+        using var nextRead = await Send(client, "GET", Links(LabId), "teacher");
+
+        Assert.That(denied.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(nextRead.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await nextRead.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>())!.CanManage, Is.False);
         Assert.That(factory.Store.MutationCalls, Is.Zero);
         Assert.That(factory.Store.HasLink(LabId, CompetencyId), Is.True);
     }

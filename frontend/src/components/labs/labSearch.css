@@ -1,4 +1,5 @@
 .labs .labs-panel-wide { grid-column: 1 / -1; }
+.labs .labs-competencies-link { display: inline-block; color: var(--labs-blue); font-size: .875rem; font-weight: 600; text-underline-offset: 4px; }
 
 /* LAB-05: local overrides keep the other laboratory panels unchanged. */
 .labs .labs-search {

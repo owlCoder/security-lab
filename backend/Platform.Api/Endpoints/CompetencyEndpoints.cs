@@ -6,7 +6,11 @@ namespace Platform.Api.Endpoints;
 
 public sealed record CompetencyResponse(Guid Id, string Name, string? Description);
 public sealed record CompetencyCatalogResponse(IReadOnlyList<CompetencyResponse> Competencies);
-public sealed record LaboratoryCompetenciesResponse(Guid LaboratoryId, IReadOnlyList<CompetencyResponse> Competencies);
+public sealed record LaboratoryCompetenciesResponse(
+    Guid LaboratoryId,
+    IReadOnlyList<CompetencyResponse> Competencies,
+    string LaboratoryTitle,
+    bool CanManage);
 public sealed record CompetencyErrorResponse(string Error);
 
 // PRG-04 only. Identity, laboratory existence and operation-specific authorization
@@ -41,7 +45,8 @@ public static class CompetencyEndpoints
         if (await identity.ResolveAsync(http, ct) is not { } userId) return Unauthenticated();
         var result = await operations.ReadAsync(userId, laboratoryId, ct);
         return result.Status == CompetencyOperationStatus.Ok
-            ? Results.Ok(new LaboratoryCompetenciesResponse(laboratoryId, ToResponses(result.Competencies!)))
+            ? Results.Ok(new LaboratoryCompetenciesResponse(laboratoryId, ToResponses(result.Competencies!),
+                result.LaboratoryTitle!, result.CanManage))
             : Failure(result.Status);
     }
 

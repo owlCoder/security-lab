@@ -3,8 +3,8 @@ using Platform.Competencies.Domain;
 namespace Platform.Competencies.Contracts;
 
 // Storage only. It neither resolves a laboratory nor authenticates or authorizes a caller.
-// The current PRG-04 HTTP boundary checks identity only; existence and per-laboratory
-// authorization are deliberately deferred to a later story.
+// The PRG-04 application boundary checks the active identity, laboratory existence
+// and operation-specific authorization before calling this storage contract.
 public interface ILaboratoryCompetencyStore
 {
     // Returns false if the relationship already exists; unknown competencies are rejected.

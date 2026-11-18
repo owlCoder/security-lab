@@ -7,7 +7,7 @@ namespace Platform.Competencies.Composition;
 
 public static class CompetenciesServiceCollectionExtensions
 {
-    // Explicit registration for a future host. No startup migration or public endpoint in story 1.
+    // Explicit persistence registration used by Platform.Api; startup does not apply migrations.
     public static IServiceCollection AddCompetencyPersistence(this IServiceCollection services, string connectionString)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);

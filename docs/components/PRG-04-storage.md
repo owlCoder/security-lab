@@ -1,4 +1,4 @@
-# PRG-04 — Model kompetencija, čuvanje veza i autorizovan API
+# PRG-04 — Model kompetencija, čuvanje veza, API i korisnički ekran
 
 ## Obim do sada
 
@@ -10,9 +10,11 @@ sa proverom aktivne sesije, postojanja laboratorije i prava nad njom. Jedna
 laboratorija može imati više kompetencija; izmena jedne veze čuva ostale veze.
 Testovi obuhvataju model, trajnost i pozitivne i negativne HTTP scenarije.
 
-Frontend za izbor i prikaz kompetencija i uređivanje kataloga trenutno ne postoje.
-Specifikacija za PRG-04 ne propisuje izričito takve ekrane. Provera usvojenosti,
-ocenjivanje i izmena revizija ili pokušaja nisu deo ove implementacije.
+React ekran omogućava ovlašćenom nastavniku da bira i uklanja kompetencije, a
+studentu da vidi povezane kompetencije dostupne laboratorije. Otvara se iz
+rezultata pretrage i studentskog prikaza na ruti
+`/laboratories/:laboratoryId/competencies`. Uređivanje kataloga, provera
+usvojenosti, ocenjivanje i izmena revizija ili pokušaja ostaju izvan ovog obima.
 
 ## Model i pravila
 
@@ -70,9 +72,15 @@ API ugovor je:
 | Metod i putanja | Ishod |
 | --- | --- |
 | `GET /api/competencies` | Katalog za aktivnog prijavljenog korisnika (`200`) |
-| `GET /api/laboratories/{laboratoryId}/competencies` | Veze postojeće laboratorije za koju korisnik ima pravo čitanja (`200`) |
+| `GET /api/laboratories/{laboratoryId}/competencies` | `laboratoryId`, `laboratoryTitle`, `canManage` i `competencies` za dostupnu laboratoriju (`200`) |
 | `PUT /api/laboratories/{laboratoryId}/competencies/{competencyId}` | Ovlašćeni autor dodaje vezu (`201`), odnosno `204` ako već postoji |
 | `DELETE /api/laboratories/{laboratoryId}/competencies/{competencyId}` | Ovlašćeni autor idempotentno uklanja vezu (`204`) |
+
+`laboratoryTitle` je sačuvani naslov laboratorije. `canManage` je serverski
+izračunata mogućnost izmene prema istoj ACC politici koju koristi svaka izmena;
+nije procena uloge na klijentu. Studentu i pri nedostajućoj politici vraća se
+`false` ako je čitanje inače dozvoljeno. Ranija polja odgovora ostaju sačuvana.
+Prikazana mogućnost ne zamenjuje ponovnu autorizaciju sledećeg `PUT`/`DELETE` poziva.
 
 Posle provere identiteta, prazan ID laboratorije vraća `400`; za izmenu se
 postojanje i pravo nad laboratorijom proveravaju pre ID-a kompetencije. Prazan ID
@@ -100,6 +108,25 @@ upis ili brisanje u PRG-04 šemi → rezultat. Katalog zahteva samo aktivan iden
 Rute imaju `DelegatesToLegacyAuthorization`, jer handler sprovodi te provere;
 izmena iz handlera poziva ACC engine. U Development okruženju, gde zajednički
 sesijski middleware preskače LAB rute, `Prg04SessionIdentity` sam validira cookie.
+
+## Frontend
+
+`CompetenciesPage` i `LaboratoryCompetencies` koriste postojeći beli/plavi izgled
+aplikacije. API adapter `frontend/src/api/competencies.ts` poziva postojeći
+`AuthContext.request`, koji prenosi sesijski cookie i obrađuje istek sesije.
+
+Ekran prvo učitava laboratoriju i njene veze. Samo kada server vrati
+`canManage: true` učitava se katalog i prikazuju pretraga, checkbox izbor i
+uklanjanje. Svaka promena šalje zaseban `PUT` ili `DELETE`, pa ponovni `GET`
+osvežava prikaz sačuvanim serverskim stanjem. Tokom čuvanja ostale izmene su
+onemogućene. Student vidi povezane kompetencije i opise, bez kataloga ili kontrola
+za izmenu.
+
+Obrađena su učitavanje, prazan katalog i veze, pretraga bez rezultata, greške i
+ponovni pokušaj. Greška kataloga ne skriva već učitane veze. Nepotvrđena izmena
+traži ponovno učitavanje; ekran ne pretpostavlja da neuspešan odgovor znači da
+upis nije sačuvan. Zahtevi se prekidaju pri promeni laboratorije/korisnika ili
+napuštanju ekrana, tako da zastareo odgovor ne menja novi prikaz.
 
 ## Baza i migracije
 
@@ -173,11 +200,33 @@ Opcija `-UseExistingServer` koristi već postavljenu test konekciju.
 | Student vidi samo objavljenu laboratoriju istog kursa; autor vidi i nacrt | `StudentCannotReadLinksWithoutMatchingPublishedLaboratory`, `TeacherCanReadOwnDraftWithoutPublishedContent` |
 | IDOR i jednaki odgovori za tuđu i nepostojeću laboratoriju | `SwappingLaboratoryId_ReturnsSameResponseAsMissingAndNeverTouchesLinks` |
 | Potrebni su vlasništvo, nastavničko članstvo i ACC politika | `LaboratoryOwnerWhoIsNotCourseTeacher_CannotEdit`, `MissingPrg04AccessPolicy_DeniesEvenTheAuthorizedTeacher` |
+| Serverska mogućnost izmene i njeno ponovno proveravanje | `MissingManagePolicy_ReadsLinksWithReadOnlyCapabilityWithoutProbingMutation`, `ManageCapability_ReflectsMembershipChangesAndNeverAuthorizesTheNextMutation` |
 | Kurs laboratorije i članstvo dolaze sa servera | `LaboratoryWithoutSavedCourse_IsDeniedEvenToItsCreator`, `SpoofedCourseAndCallerFields_DoNotChangeAuthorization`, `ChangingMembershipAfterSuccessfulEdit_IsCheckedOnTheNextRequest` |
 | Greške kompetencije i nedostupno skladište | `EmptyCompetencyId_IsRejectedWithoutMutation`, `UnknownCompetency_IsRejectedBeforeMutation`, `AuthenticatedCaller_Gets503WhenCompetencyPersistenceIsNotConfigured` |
 | Registracija PRG-04 ruta u stvarnom hostu | `ApiEndpointCoverageTests` |
+| React izbor/prikaz, studentski režim, čuvanje i oporavak od greške | `frontend/src/components/competencies/LaboratoryCompetencies.test.tsx` |
+| Frontend HTTP ugovor, sesijski poziv, validacija odgovora i prekid zahteva | `frontend/src/api/competencies.test.ts` |
+| Zaštićena ruta, povratak na kompetencije posle prijave i uklanjanje prikaza posle odjave | `frontend/src/__tests__/CompetenciesRouting.test.tsx` |
 
 ### Aktuelna provera — 18. novembar 2026.
+
+- Posle dopune GET ugovora i React ekrana,
+  `test-competencies-postgres.ps1 -NoBuild`: **66 prošlo, 0 neuspešnih,
+  0 preskočenih**, uključujući svih osam PostgreSQL testova.
+  Dokaz: `TestResults/competencies-postgres-5ecbb06e00864ca888f8eb39919a6da6/competencies-postgres.trx`.
+- Frontend produkcioni build sa novim ekranom je uspešan; kompletna provera
+  `npm.cmd test -- --maxWorkers=2`: **187 prošlo, 0 neuspešnih** u 21 test fajlu.
+- Pregled stvarno renderovanog React ekrana sa sintetičkim odgovorima API-ja:
+  izbor i uklanjanje, potvrda stanja sa servera, studentski prikaz, pretraga,
+  prazna stanja, greške i dugačak naslov. Prikazi na 390, 768 i 1440 piksela
+  nemaju horizontalno prelivanje. Snimci su u `.impeccable/review/`.
+- Impeccable mehanička provera vratila je `[]`; nezavisni vizuelni pregled
+  vraća `ship` za pregledani ekran i navedena stanja.
+
+### Prethodna provera pre React ekrana — 18. novembar 2026.
+
+Sledeći rezultati beleže raniji kod bez novog ekrana i GET polja
+`laboratoryTitle`/`canManage`; služe kao prethodna regresiona osnova.
 
 - Release build celog `SecurityLab.slnx`: uspešan, bez grešaka. Sedam `NU1900`
   upozorenja odnosi se na nedostupan NuGet izvor za podatke o ranjivostima paketa.
@@ -216,7 +265,7 @@ aktuelne testove iz tabele potrebno je ponovo pokrenuti navedenom komandom.
 ## Granice trenutne implementacije
 
 Provera postojanja laboratorije, serverska autorizacija i ograničenje studentskog
-čitanja na objavljen javni sadržaj deo su PRG-04 HTTP granice. Postojeći LAB
-ugovori se koriste bez izmene zajedničkih pravila drugih modula. Ekrani za izbor
-i prikaz kompetencija predstavljaju moguću narednu dopunu u okviru PRG-04,
-uz zasebno dogovoren obim.
+čitanja na objavljen javni sadržaj deo su PRG-04 HTTP granice. React ekran koristi
+istu granicu za izbor i prikaz kompetencija. Postojeći LAB ugovori se koriste bez
+izmene zajedničkih pravila drugih modula. Uređivanje kataloga, usvojenost
+kompetencija i analitika napretka nisu dodati.

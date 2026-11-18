@@ -10,5 +10,7 @@ public enum CompetencyOperationStatus
 
 public sealed record CompetencyOperationResult(
     CompetencyOperationStatus Status,
-    IReadOnlyList<Competency>? Competencies = null);
+    IReadOnlyList<Competency>? Competencies = null,
+    string? LaboratoryTitle = null,
+    bool CanManage = false);
 

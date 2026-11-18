@@ -30,19 +30,20 @@ public sealed class CompetencyLinkService(
 
     public async Task<CompetencyOperationResult> ReadAsync(Guid userId, Guid laboratoryId, CancellationToken ct)
     {
-        var denied = await GuardAsync(userId, laboratoryId, edit: false, ct);
-        if (denied is not null) return denied;
+        var guard = await GuardAsync(userId, laboratoryId, edit: false, ct);
+        if (guard.Status != CompetencyOperationStatus.Ok) return guard;
         var store = services.GetService<ILaboratoryCompetencyStore>();
         return store is null
             ? new(CompetencyOperationStatus.StorageUnavailable)
-            : new(CompetencyOperationStatus.Ok, await store.GetForLaboratoryAsync(laboratoryId, ct));
+            : new(CompetencyOperationStatus.Ok, await store.GetForLaboratoryAsync(laboratoryId, ct),
+                guard.LaboratoryTitle, await CanManageAsync(userId, laboratoryId, ct));
     }
 
     public async Task<CompetencyOperationResult> ChangeAsync(
         Guid userId, Guid laboratoryId, Guid competencyId, bool add, CancellationToken ct)
     {
-        var denied = await GuardAsync(userId, laboratoryId, edit: true, ct);
-        if (denied is not null) return denied;
+        var guard = await GuardAsync(userId, laboratoryId, edit: true, ct);
+        if (guard.Status != CompetencyOperationStatus.Ok) return guard;
         if (competencyId == Guid.Empty)
             return new(CompetencyOperationStatus.InvalidCompetencyId);
 
@@ -73,7 +74,7 @@ public sealed class CompetencyLinkService(
         }
     }
 
-    private async Task<CompetencyOperationResult?> GuardAsync(
+    private async Task<CompetencyOperationResult> GuardAsync(
         Guid userId, Guid laboratoryId, bool edit, CancellationToken ct)
     {
         // Never grant anonymous/internal invalid identities access, even if this service
@@ -106,17 +107,25 @@ public sealed class CompetencyLinkService(
                     return new(CompetencyOperationStatus.LaboratoryNotFound);
             }
 
-            return null;
+            return new(CompetencyOperationStatus.Ok, LaboratoryTitle: laboratory.Title);
         }
 
         // Read access is deliberately NOT reused as permission to edit.
+        return await CanManageAsync(userId, laboratoryId, ct)
+            ? new(CompetencyOperationStatus.Ok, LaboratoryTitle: laboratory.Title)
+            : new(CompetencyOperationStatus.LaboratoryNotFound);
+    }
+
+    // The GET capability and every mutation use the same ACC policy. A capability
+    // describes the current request; it never replaces the next write's check.
+    private async Task<bool> CanManageAsync(Guid userId, Guid laboratoryId, CancellationToken ct)
+    {
         var decision = await access.DecideAsync(new AccessRequest(
             new SubjectRef(userId.ToString("D"), AccountState.Active),
             CompetencyLinkActions.Manage,
             new ResourceRef("laboratory", laboratoryId.ToString("D")),
             Guid.NewGuid().ToString("N")), ct);
-        return decision.Outcome == AccessOutcome.Allow
-            ? null : new(CompetencyOperationStatus.LaboratoryNotFound);
+        return decision.Outcome == AccessOutcome.Allow;
     }
 }
 

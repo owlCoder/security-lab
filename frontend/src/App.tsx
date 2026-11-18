@@ -1,4 +1,4 @@
-import { useNavigate, Routes, Route } from 'react-router-dom'
+import { useLocation, useNavigate, Routes, Route } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { apiRequest } from './api/http'
@@ -16,9 +16,11 @@ import RevisionListPage from './pages/RevisionListPage'
 import DraftsPage from './pages/DraftsPage'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
+import CompetenciesPage from './pages/CompetenciesPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { refreshUser } = useAuth()
   const [error, setError] = useState('')
 
@@ -26,7 +28,10 @@ function LoginRoute() {
     <LoginPage onSuccess={() => {
       setError('')
       void refreshUser()
-        .then(() => navigate('/access-demo'))
+        .then(() => {
+          const from: unknown = location.state?.from
+          navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/access-demo')
+        })
         .catch(() => setError('Login succeeded, but the session could not be verified. Please try again.'))
       return true
     }} />
@@ -100,6 +105,7 @@ export default function App() {
         </>} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
+          <Route path="laboratories/:laboratoryId/competencies" element={<CompetenciesPage />} />
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
           {/*
             AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).
