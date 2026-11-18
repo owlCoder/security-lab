@@ -29,6 +29,10 @@ public class ApiEndpointCoverageTests
         "/api/admin/accounts/{id:guid}/status",
         "/api/auth/logout",
         "/api/auth/me",
+        // IDN-06: MFA handlers validate the session and MFA state in MfaService.
+        "/api/auth/mfa/enroll",
+        "/api/auth/mfa/enroll/confirm",
+        "/api/auth/mfa/verify",
         "/api/auth/sessions",
         "/api/auth/sessions/{handle:guid}",
         "/api/authoring/templates",

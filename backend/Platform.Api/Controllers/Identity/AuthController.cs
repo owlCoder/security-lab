@@ -7,16 +7,22 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using IIdentityContext = Platform.Api.Interfaces.Identity.IIdentityContext;
 
 namespace Platform.Api.Controllers.Identity;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(ILoginService login, ILogoutService logout, IIdentityContext identity) : ControllerBase
+public class AuthController(
+    ILoginService login,
+    ILogoutService logout,
+    IIdentityContext identity,
+    IMfaService mfaService) : ControllerBase
 {
     private readonly IIdentityContext _identity = identity;
     private readonly ILoginService _login = login;
     private readonly ILogoutService _logout = logout;
+    private readonly IMfaService _mfaService = mfaService;
 
     [AllowAnonymous]
     [AllowPublic]
@@ -31,7 +37,8 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
         {
             case LoginOutcome.Success:
                 // The token goes only into the cookie, never into the body.
-                Response.Cookies.Append(SessionCookie.Name, result.Session!.Token, SessionCookie.Options(result.Session.ExpiresAt));
+                Response.Cookies.Append(SessionCookie.Name, result.Session!.Token,
+                    SessionCookie.Options(result.Session.ExpiresAt));
                 return Ok(new LoginResponse(result.UserId!.Value));
             case LoginOutcome.InvalidRequest:
                 return BadRequest(new { code = "invalid_request" });
@@ -49,7 +56,8 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
     {
         // Revoke first: if it fails, the cookie stays and the client can try again.
         // No request token: a closed tab or a broken connection must not leave the session valid.
-        await _logout.ExecuteAsync(Request.Cookies[SessionCookie.Name], HttpContext.TraceIdentifier, CancellationToken.None);
+        await _logout.ExecuteAsync(Request.Cookies[SessionCookie.Name], HttpContext.TraceIdentifier,
+            CancellationToken.None);
 
         Response.Headers.CacheControl = "no-store";
         Response.Cookies.Delete(SessionCookie.Name, SessionCookie.Options(DateTimeOffset.UnixEpoch));
@@ -67,5 +75,54 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
 
         Response.Headers.CacheControl = "no-store";
         return Ok(new MeResponse(caller.UserId!.Value, caller.Level.ToString()));
+    }
+
+    [DelegatedAuthorization]
+    [HttpPost("mfa/enroll")]
+    public async Task<IActionResult> MfaEnroll(CancellationToken ct)
+    {
+        var (outcome, uri) =
+            await _mfaService.EnrollAsync(Request.Cookies[SessionCookie.Name], HttpContext.TraceIdentifier, ct);
+        Response.Headers.CacheControl = "no-store";
+        return outcome switch
+        {
+            MfaOutcome.Success => Ok(new MfaEnrollResponse(uri!)),
+            MfaOutcome.AlreadyEnabled => Conflict(new { code = "mfa_already_enabled" }),
+            MfaOutcome.EnrollmentPending => Conflict(new { code = "mfa_enrollment_pending" }),
+            MfaOutcome.Unavailable => StatusCode(503, new { code = "mfa_unavailable" }),
+            _ => Unauthorized(new { code = "invalid_mfa" })
+        };
+    }
+
+    [DelegatedAuthorization]
+    [HttpPost("mfa/enroll/confirm")]
+    public async Task<IActionResult> MfaEnrollConfirm([FromBody] MfaVerifyRequest request, CancellationToken ct)
+    {
+        var outcome = await _mfaService.ConfirmEnrollAsync(Request.Cookies[SessionCookie.Name], request.Code,
+            HttpContext.TraceIdentifier, ct);
+        Response.Headers.CacheControl = "no-store";
+        return outcome switch
+        {
+            MfaOutcome.Success => Ok(),
+            MfaOutcome.InvalidRequest => BadRequest(new { code = "invalid_request" }),
+            MfaOutcome.Unavailable => StatusCode(503, new { code = "mfa_unavailable" }),
+            _ => Unauthorized(new { code = "invalid_mfa" })
+        };
+    }
+
+    [DelegatedAuthorization]
+    [HttpPost("mfa/verify")]
+    public async Task<IActionResult> MfaVerify([FromBody] MfaVerifyRequest request, CancellationToken ct)
+    {
+        var outcome = await _mfaService.VerifyAsync(Request.Cookies[SessionCookie.Name], request.Code,
+            HttpContext.TraceIdentifier, ct);
+        Response.Headers.CacheControl = "no-store";
+        return outcome switch
+        {
+            MfaOutcome.Success => Ok(),
+            MfaOutcome.InvalidRequest => BadRequest(new { code = "invalid_request" }),
+            MfaOutcome.Unavailable => StatusCode(503, new { code = "mfa_unavailable" }),
+            _ => Unauthorized(new { code = "invalid_mfa" })
+        };
     }
 }

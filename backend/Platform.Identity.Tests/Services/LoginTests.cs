@@ -8,7 +8,9 @@ using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Models;
+using Platform.Identity.Entities;
 using Platform.Identity.Services;
 using Platform.Audit.Contracts;
 
@@ -35,6 +37,7 @@ public class LoginTests
     private Mock<ICredentialVerifier> _verifier = null!;
     private Mock<ISessionCreator> _sessions = null!;
     private Mock<ISessionManager> _sessionManager = null!;
+    private Mock<IMfaCredentialsStore> _mfaCredentials = null!;
     private Mock<ITrustedAuditWriter> _audit = null!;
     private List<(AuditEventDraft Draft, AuditContext Context)> _events = null!;
     private LoginService _login = null!;
@@ -45,6 +48,7 @@ public class LoginTests
         _verifier = new Mock<ICredentialVerifier>();
         _sessions = new Mock<ISessionCreator>();
         _sessionManager = new Mock<ISessionManager>();
+        _mfaCredentials = new Mock<IMfaCredentialsStore>();
         _sessionManager.Setup(manager => manager.RevokeSession(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
@@ -68,6 +72,7 @@ public class LoginTests
             _verifier.Object,
             _sessions.Object,
             _sessionManager.Object,
+            _mfaCredentials.Object,
             new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance));
     }
 
@@ -105,6 +110,36 @@ public class LoginTests
         var e = _events.Single();
         Assert.That(e.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
         Assert.That(e.Context.Actor.Id, Is.EqualTo(id));
+    }
+
+    [Test]
+    public async Task ValidCredentials_WithMfaEnabled_CreatesMfaPendingSession()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active));
+        _mfaCredentials.Setup(store => store.GetAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MfaCredentials(id) { MfaEnabled = true });
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-mfa-pending");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _sessions.Verify(store => store.CreateAsync(
+            id, AuthenticationLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ValidCredentials_WithoutMfaCredentials_CreatesActiveSession()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active));
+        _mfaCredentials.Setup(store => store.GetAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MfaCredentials?)null);
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-active");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _sessions.Verify(store => store.CreateAsync(
+            id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

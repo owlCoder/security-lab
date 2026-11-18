@@ -18,6 +18,7 @@ using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 using Testcontainers.PostgreSql;
 
@@ -156,6 +157,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
                 TimeProvider.System),
             new StoreSessionCreator(sessionStore, NullLogger<StoreSessionCreator>.Instance),
             new SessionManager(identity),
+            new EfMfaCredentialsStore(identity, TimeProvider.System),
             CreateProducer(new UnavailableAuditWriter()));
 
         var result = await login.ExecuteAsync(email, Password, Guid.NewGuid().ToString("N"));

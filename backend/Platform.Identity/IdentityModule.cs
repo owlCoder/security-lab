@@ -1,10 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 
 namespace Platform.Identity;
@@ -19,6 +22,12 @@ public static class IdentityModule
         var connectionString = configuration.GetConnectionString(ConnectionStringName);
 
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
+        services.AddDataProtection()
+            .SetApplicationName("SecurityLab");
+        services.AddSingleton<IDataProtector>(serviceProvider =>
+            serviceProvider
+                .GetRequiredService<IDataProtectionProvider>()
+                .CreateProtector("SecurityLab", "Identity", "MfaTotpSecret", "v1"));
 
         // IDN-05: an invalid lockout setting stops the service from starting.
         services.AddOptions<IdentityLockoutOptions>()
@@ -33,11 +42,13 @@ public static class IdentityModule
         services.AddScoped<IAccountStatusReader, EfAccountStatusReader>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
+        services.AddScoped<IMfaCredentialsStore, EfMfaCredentialsStore>();
 
         return services;
     }
 
-    internal static DbContextOptionsBuilder UseIdentityNpgsql(this DbContextOptionsBuilder options, string? connectionString) =>
+    internal static DbContextOptionsBuilder UseIdentityNpgsql(this DbContextOptionsBuilder options,
+        string? connectionString) =>
         options.UseNpgsql(connectionString, npgsql =>
             npgsql.MigrationsHistoryTable("__EFMigrationsHistory", PlatformIdentityDbContext.SchemaName));
 }

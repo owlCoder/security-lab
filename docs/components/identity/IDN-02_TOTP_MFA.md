@@ -1,71 +1,73 @@
-# MFA preko TOTP authenticator aplikacije
+# TOTP MFA enrollment
 
-**Komponenta:** Identity  
-**Oblast:** IDN-06  
-**Status:** Predlog za implementaciju  
+**Komponenta:** Identity
+**Story:** US-17 — MFA uključivanje na backendu
+**Status:** US-17 enrollment je implementiran; MFA login verifikacija je izdvojena u US-18.
 
-## 1. Cilj
+## 1. Obuhvat
 
-Omogućiti višefaktorsku autentikaciju korišćenjem TOTP-a (Time-based One-Time Password). Korisnik povezuje svoj nalog sa authenticator aplikacijom skeniranjem QR koda, a zatim pri prijavi unosi kratkotrajni šestocifreni kod.
+US-17 pokriva:
 
-## 2. Uklapanje u postojeći backend
+- pokretanje enrollment-a samo za postojeću, važeću `Active` sesiju;
+- generisanje TOTP tajne;
+- formiranje `otpauth://` URI-ja;
+- čuvanje pending enrollment-a bez aktiviranja MFA;
+- potvrdu enrollment-a kodom;
+- odbijanje ponovnog enrollment-a kada je MFA već aktivan;
+- odbijanje novog enrollment-a dok prethodni pending enrollment nije istekao;
+- zaštitu tajne u bazi i `Cache-Control: no-store` odgovore;
+- audit enrollment događaja bez tajne, URI-ja, koda ili ciphertext-a.
 
-Identity komponenta se nalazi u `backend/Platform.Identity`, dok API endpoint-i pripadaju `backend/Platform.Api`.
+US-18 (Tim 1) implementira proveru MFA koda tokom prijave, `MfaPending` tok,
+promociju sesije u `Active`, ograničavanje pokušaja i replay zaštitu tokom
+login verifikacije.
 
-Postojeći kod već podržava neophodne nivoe sesije:
+## 2. TOTP parametri
 
-- `MfaPending` — lozinka je proverena, ali MFA još nije završen;
-- `Active` — lozinka i MFA su uspešno provereni.
-
-Relevantna postojeća dokumentacija:
-
-- [IDN-02/IDN-06 DFD](./IDN-02_IDN-06_DFD.md)
-- [Login](./IDN-02_LOGIN.md)
-- [Logout](./IDN-02_LOGOUT.md)
-- [IIdentityContext](../../contracts/IIdentityContext.md)
-
-Trenutno [LoginService](../../../backend/Platform.Api/Services/Identity/LoginService.cs) uvek kreira `Active` sesiju. 
-Treba da se uvede provera MFA politike i kreiranje `MfaPending` sesije kada je MFA uključen ili obavezan.
-
-## 3. TOTP parametri
-
-| Parametar | Predložena vrednost |
+| Parametar | Implementirana vrednost |
 |-|-|
-| Algoritam | HMAC-SHA-1 zbog kompatibilnosti sa authenticator aplikacijama |
+| Algoritam | HMAC-SHA-1 |
 | Dužina koda | 6 cifara |
-| Vremenski interval | 30 sekundi |
-| Tolerancija vremena | trenutni interval, uz najviše jedan susedni interval |
-| Secret format | Base32 |
-| Provisioning | `otpauth://` URI prikazan kroz lokalno generisan QR |
+| Period | 30 sekundi |
+| Tolerancija vremena | jedan prethodni i jedan naredni interval |
+| Secret | 20 slučajnih bajtova, Base32 |
+| Provisioning | `otpauth://` URI |
 
-RFC 6238 dozvoljava HMAC-SHA-256 i HMAC-SHA-512, ali SHA-1 je najkompatibilniji sa uobičajenim authenticator aplikacijama. Server mora imati sinhronizovano vreme.
+TOTP helper koristi `Otp.NET`. QR kod se ne generiše niti šalje sa backend-a;
+frontend ga generiše lokalno iz URI-ja.
 
-## 4. Enrollment
-
-### 4.1 Pokretanje
+## 3. Pokretanje enrollment-a
 
 ```http
 POST /api/auth/mfa/enroll
 Cookie: SecurityLab.Session=<active-session>
 ```
 
-Backend:
+Servis:
 
-1. proverava da je korisnik autentifikovan;
-2. generiše kriptografski slučajnu tajnu od najmanje 160 bita;
-3. ne aktivira tajnu pre potvrde prvog koda;
-4. formira `otpauth://` URI;
-5. vraća URI samo jednom.
+1. učitava sesiju preko `ISessionStore`;
+2. prihvata samo neisteklu, neopozvanu sesiju nivoa `Active`;
+3. odbija aktivan MFA;
+4. učitava email korisnika;
+5. generiše novu tajnu;
+6. šifruje Base32 tajnu ASP.NET Core Data Protection-om;
+7. čuva ciphertext, verziju ključa `1` i rok pending enrollment-a od 10 minuta;
+8. vraća `MfaEnrollResponse` sa `otpauth://` URI-jem.
 
-Primer:
+URI se vraća samo iz uspešnog enrollment odgovora. Ne čuva se ponovo u bazi
+i ne piše se u audit.
 
-```text
-otpauth://totp/Security%20Lab:student%40example.com?secret=BASE32SECRET&issuer=Security%20Lab&algorithm=SHA1&digits=6&period=30
-```
+Mogući API ishodi:
 
-QR kod se generiše lokalno u frontend-u. Tajna se ne sme slati eksternom QR servisu.
+| Ishod | HTTP | Kod |
+|-|-|-|
+| uspeh | 200 | telo sadrži URI |
+| MFA već aktivan | 409 | `mfa_already_enabled` |
+| pending enrollment postoji | 409 | `mfa_enrollment_pending` |
+| neautorizovana sesija | 401 | `invalid_mfa` |
+| problem persistence-a | 503 | `mfa_unavailable` |
 
-### 4.2 Potvrda
+## 4. Potvrda enrollment-a
 
 ```http
 POST /api/auth/mfa/enroll/confirm
@@ -75,129 +77,86 @@ Cookie: SecurityLab.Session=<active-session>
 { "code": "123456" }
 ```
 
-Enrollment uspeva samo ako je kod validan, enrollment nije istekao i MFA još nije aktivan. Nakon uspeha tajna se šifrovano čuva, postavlja se `MfaEnabled = true`, a privremeni enrollment podatak se uklanja.
+Potvrda:
 
-Postojeća aktivna tajna ne sme biti prepisana običnim enrollment zahtevom.
+- zahteva važeću `Active` sesiju;
+- zahteva postojeći i neistekli pending enrollment;
+- dešifruje pending ciphertext;
+- proverava šestocifreni TOTP kod;
+- pri pogrešnom kodu ne menja MFA stanje;
+- pri ispravnom kodu prebacuje pending ciphertext u aktivni ciphertext;
+- postavlja `MfaEnabled = true`;
+- postavlja poslednji potvrđeni time-step;
+- briše pending ciphertext, verziju i rok.
 
-## 5. Login i verifikacija
+Neuspešni odgovori ne otkrivaju da li je problem bio u tajni, sesiji ili kodu.
 
-```text
-validna lozinka + MFA isključen  -> Active sesija
-validna lozinka + MFA uključen   -> MfaPending sesija
-nevalidna lozinka                -> 401
-```
+## 5. Čuvanje tajne
 
-Endpoint za završetak prijave:
-
-```http
-POST /api/auth/mfa/verify
-Content-Type: application/json
-Cookie: SecurityLab.Session=<mfa-pending-session>
-
-{ "code": "123456" }
-```
-
-Backend proverava da je sesija `MfaPending`, učitava zaštićenu tajnu i proverava TOTP kod. Uspešan kod promoviše sesiju u `Active`. Pogrešan, istekao ili ponovljen kod ne menja sesiju i vraća generički odgovor:
-
-```json
-{ "code": "invalid_mfa" }
-```
-
-`MfaPending` sesija ne sme pristupiti zaštićenim endpoint-ima. Ovo mora važiti i kada korisnik ručno pozove endpoint, bez oslanjanja na frontend.
-
-## 6. Podaci i zaštita tajne
-
-Preporučeni podaci u `identity.accounts` ili izdvojenoj tabeli `identity.mfa_credentials`:
+Entitet `identity.mfa_credentials` koristi:
 
 ```text
-mfa_enabled              boolean not null default false
-totp_secret_ciphertext   text null
-totp_secret_key_version  integer null
-last_totp_time_step      bigint null
-mfa_failed_attempts      integer not null default 0
-mfa_locked_until         timestamp null
+mfa_enabled
+totp_secret_ciphertext
+totp_secret_key_version
+pending_totp_secret_ciphertext
+pending_totp_secret_key_version
+pending_enrollment_expires_at
+last_totp_time_step
+mfa_failed_attempts
+mfa_locked_until
 ```
 
-TOTP tajna mora biti šifrovana pre upisa u bazu. Ključ se čuva u environment promenljivoj, user-secrets ili secrets manager-u, nikada u repozitorijumu. Tajna, QR URI i kod se ne smeju upisivati u logove, audit događaje ili response nakon enrollment-a.
-
-Pošto backend mora da koristi tajnu za verifikaciju, ona se ne hash-uje kao lozinka.
-
-## 7. Replay i rate limiting zaštita
-
-Za svaki nalog ili MFA credential čuvati poslednji prihvaćeni TOTP time-step. Kod iz istog ili starijeg time-step-a odbiti, čime se sprečava ponovna upotreba istog koda.
-
-Predloženo ograničenje:
+TOTP tajna se ne hash-uje jer je server mora dešifrovati. Data Protection
+provider koristi stabilan application name i purpose:
 
 ```text
-Najviše 5 neuspešnih MFA pokušaja po MfaPending sesiji.
-Nakon toga sesiju opozvati i zahtevati novi login lozinkom.
+SecurityLab / Identity / MfaTotpSecret / v1
 ```
 
-Ograničenje treba kombinovati sa postojećim mehanizmom za attempt limiting iz IDN-05 kada bude dostupan.
+Development koristi lokalni key ring. Production mora koristiti persistentan
+i zaštićen key ring; ephemeral ključevi nisu dovoljni za restart aplikacije.
 
-## 8. Recovery kodovi
+## 6. Audit i poverljivi podaci
 
-Preporučuje se generisanje 8–10 jednokratnih recovery kodova pri aktivaciji MFA:
+Enrollment i potvrda pišu audit preko postojećeg API `IAuditWriter` ugovora.
+Audit sadrži korisnika, akciju, ishod, korelacioni ID i bezbedan generički
+detail. Ne sme sadržati:
 
-- prikazuju se samo jednom;
-- u bazi se čuvaju samo hash vrednosti;
-- svaki kod može da se iskoristi jednom;
-- ne šalju se automatskim e-mailom.
+- Base32 tajnu;
+- `otpauth://` URI;
+- MFA kod;
+- ciphertext;
+- session token.
 
-Ako recovery kodovi nisu obuhvaćeni U-12 implementacijom, treba ih eksplicitno izdvojiti u naredni story. Bez recovery mehanizma gubitak telefona može trajno zaključati nalog.
+## 7. Granica prema US-18
 
-## 9. Acceptance kriterijumi
+`VerifyAsync` je namerno placeholder i trenutno vraća nedostupnost. US-18,
+koji implementira Tim 1, treba da doda:
 
-### Enrollment
+- login sa `MfaEnabled` nalogom koji kreira `MfaPending` sesiju;
+- proveru koda samo za `MfaPending` sesiju;
+- promociju sesije u `Active`;
+- odbijanje pogrešnog, istekao i ponovljenog koda;
+- ograničavanje pokušaja i opoziv/blokadu nakon praga;
+- replay zaštitu preko `LastTotpTimeStep`.
 
-- [ ] Validna sesija može pokrenuti TOTP enrollment.
-- [ ] Tajna se generiše kriptografski slučajno.
-- [ ] `otpauth://` URI se vraća samo tokom enrollment-a.
-- [ ] QR se generiše lokalno, bez eksternog servisa.
-- [ ] MFA se aktivira tek nakon uspešne potvrde prvog koda.
-- [ ] Aktivna tajna ne može biti slučajno prepisana.
+## 8. Testovi
 
-### Login
+US-17 negativni testovi pokrivaju:
 
-- [ ] Nalog bez MFA dobija `Active` sesiju.
-- [ ] Nalog sa MFA dobija `MfaPending` sesiju.
-- [ ] `MfaPending` nema pristup zaštićenim endpoint-ima.
-- [ ] Validan TOTP promoviše sesiju u `Active`.
-- [ ] Nevalidan TOTP ostavlja sesiju u `MfaPending`.
-- [ ] Već iskorišćen time-step se odbija.
+- enrollment bez tokena;
+- enrollment iz `MfaPending` sesije;
+- ponovno uključivanje aktivnog MFA;
+- novi enrollment dok pending enrollment još važi;
+- pogrešan kod;
+- istekao enrollment;
+- neispravan Data Protection ciphertext;
+- odsustvo tajne u audit događajima.
 
-### Bezbednost
+Login verifikacioni testovi pripadaju US-18.
 
-- [ ] TOTP tajna je šifrovana u bazi.
-- [ ] Kod, tajna i QR URI nisu prisutni u logovima.
-- [ ] Pogrešni pokušaji su ograničeni.
-- [ ] Istekla ili opozvana `MfaPending` sesija ne može biti promovisana.
-- [ ] Login i MFA odgovori imaju `Cache-Control: no-store`.
+## 9. Budući rad
 
-## 10. Testovi
-
-Dodati testove za:
-
-1. generisanje enrollment tajne i validnog `otpauth://` URI-ja;
-2. neuspešan i uspešan enrollment confirmation;
-3. zaštitu od prepisivanja postojeće tajne;
-4. kreiranje `MfaPending` sesije pri loginu;
-5. promovisanje sesije validnim TOTP kodom;
-6. odbijanje pogrešnog i ponovljenog koda;
-7. opoziv nakon previše pokušaja;
-8. odbijanje `MfaPending` sesije na zaštićenom endpoint-u;
-9. odsustvo tajne i koda iz audit događaja;
-10. čuvanje samo šifrovane vrednosti tajne.
-
-## 11. Odluka
-
-Za U-12 koristi se TOTP preko QR enrollment-a, bez automatskog slanja e-mailova. Rešenje je kompatibilno sa postojećim `MfaPending`/`Active` modelom sesija i ne uvodi zavisnost od SMTP servisa.
-
-TOTP nije phishing-resistant MFA. WebAuthn/passkeys mogu biti buduće poboljšanje za viši nivo zaštite.
-
-## 12. Izvori
-
-- [RFC 6238 — TOTP](https://datatracker.ietf.org/doc/html/rfc6238)
-- [RFC 4226 — HOTP](https://datatracker.ietf.org/doc/html/rfc4226)
-- [OWASP Multifactor Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html)
-- [NIST SP 800-63B](https://pages.nist.gov/800-63-4/sp800-63b.html)
+Recovery kodovi i administratorski MFA reset nisu deo US-17. TOTP nije
+phishing-resistant MFA; WebAuthn/passkeys mogu biti buduće poboljšanje.
