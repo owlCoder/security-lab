@@ -20,8 +20,8 @@ public sealed class CompositionScopeTests
     public void AccessAndAuditRegistrations_PassScopeAndBuildValidation()
     {
         var services = new ServiceCollection();
-        services.AddAccessControl();
         services.AddAudit();
+        services.AddAccessControl();
 
         using var provider = services.BuildServiceProvider(StrictOptions);
         using var scope = provider.CreateScope();

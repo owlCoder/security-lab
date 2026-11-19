@@ -74,8 +74,10 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         Assert.That(await RevokedAtAsync(second.Session.Id), Is.Not.Null);
     }
 
-    [Test]
-    public async Task AuditUnavailable_RollsBackStatusAndSessionRevocation()
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    public async Task AuditFailure_RollsBackStatusSessionRevocationAndAuditRow(int failurePoint)
     {
         var (admin, student) = await ArrangeAdminAndStudentAsync();
         var adminSession = await SessionTestData.CreateAsync(Factory, admin.Id);
@@ -84,7 +86,7 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         using var failing = Factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.RemoveAll<ITransactionalAuditWriter>();
-            services.AddSingleton<ITransactionalAuditWriter, UnavailableAuditWriter>();
+            services.AddSingleton<ITransactionalAuditWriter>(new UnavailableAuditWriter(failurePoint));
         }));
         using var client = failing.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(student.Id))
@@ -215,11 +217,36 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         Assert.That((await AuditRowsAsync(unknown)).Single().Outcome, Is.EqualTo("Failure"));
     }
 
-    private sealed class UnavailableAuditWriter : ITransactionalAuditWriter
+    private sealed class UnavailableAuditWriter(int failurePoint) : ITransactionalAuditWriter
     {
-        public ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
-            DbTransaction transaction, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(AuditWriteResult.Unavailable());
+        public async ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
+            DbTransaction transaction, CancellationToken cancellationToken = default)
+        {
+            if (failurePoint == 0)
+                return AuditWriteResult.Unavailable();
+
+            var result = await new PostgresTransactionalAuditWriter(TimeProvider.System)
+                .WriteAsync(draft, context, transaction, cancellationToken);
+            Assert.That(result.IsRecorded, Is.True);
+            await using var check = transaction.Connection!.CreateCommand();
+            check.Transaction = transaction;
+            check.CommandText = "SELECT count(*) FROM audit.audit_events WHERE resource_id = @target";
+            var target = check.CreateParameter();
+            target.ParameterName = "target";
+            target.Value = draft.Resource!.Id;
+            check.Parameters.Add(target);
+            Assert.That(Convert.ToInt64(await check.ExecuteScalarAsync(cancellationToken)), Is.EqualTo(1));
+
+            if (failurePoint == 2)
+            {
+                await using var failure = transaction.Connection.CreateCommand();
+                failure.Transaction = transaction;
+                failure.CommandText = "SELECT 1 / 0";
+                await failure.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            return AuditWriteResult.Unavailable();
+        }
     }
 
     private static async Task<IssuedSession?> IssueSessionAsync(Guid accountId)

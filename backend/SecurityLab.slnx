@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/Competencies/">
+    <Project Path="Platform.Competencies/Platform.Competencies.csproj" />
+    <Project Path="Platform.Competencies.Tests/Platform.Competencies.Tests.csproj" />
+  </Folder>
   <Project Path="Laboratories.Tests/Laboratories.Tests.csproj" />
   <Project Path="Platform.Access/Platform.Access.csproj" />
   <Project Path="Platform.Access.Tests/Platform.Access.Tests.csproj" />
@@ -11,6 +15,8 @@
   <Project Path="Platform.Authoring.Tests/Platform.Authoring.Tests.csproj" />
   <Project Path="Platform.Authoring/Platform.Authoring.csproj" />
   <Project Path="Platform.Kt1.Tests/Platform.Kt1.Tests.csproj" />
+  <Project Path="Platform.Coursework.Tests/Platform.Coursework.Tests.csproj" />
+  <Project Path="Platform.Coursework.AdminTool/Platform.Coursework.AdminTool.csproj" />
   <Project Path="Platform.LabLocalization.Tests/Platform.LabLocalization.Tests.csproj" />
   <Project Path="Platform.LabLocalization/Platform.LabLocalization.csproj" />
   <Project Path="Platform.LaboratoryPersistence.Tests/Platform.LaboratoryPersistence.Tests.csproj" />
@@ -19,6 +25,7 @@
   <Project Path="Platform.Prerequisites.Tests/Platform.Prerequisites.Tests.csproj" />
   <Project Path="Platform.Prerequisites/Platform.Prerequisites.csproj" />
   <Project Path="Platform.RateLimiting.Tests/Platform.RateLimiting.Tests.csproj" />
+  <Project Path="Platform.SessionSecurity/Platform.SessionSecurity.csproj" />
   <Project Path="Platform.Tests/Platform.Tests.csproj" />
   <Project Path="Platform.Identity.Tests/Platform.Identity.Tests.csproj" />
   <Project Path="Platform.Identity/Platform.Identity.csproj" />

@@ -132,17 +132,24 @@ server correlation ID and exactly one denial event. Historical records are uncha
   either fails, both are rolled back and the producer returns a generic technical error.
 - **For KT2:** variant B (transactional outbox) is considered only for a producer that cannot
   share the transaction (another database or an external identity provider).
-- **Identity producers today** (finding F7) save to an in-memory repository and write to a log.
-  No claim is made that their changes are guaranteed to be audited until they use the agreed
-  pattern.
-- Proof required (S-16, group T06): the state of rights is read from a new database session
-  after a forced audit failure, not only the type of the exception.
+- **IDN-03 implementation (PR #148):** `ChangeAccountStatus` uses the persistent
+  `identity.accounts` row and enlists the status update, session revocation and Audit insert in
+  one PostgreSQL transaction through `ITransactionalAuditWriter`.
+- **S-16 proof:** `AccountStatusChangeIntegrationTests` forces an unavailable Audit writer and
+  verifies the status, session and absence of an Audit row through fresh service scopes. The
+  transaction is not committed when mandatory Audit persistence fails.
 
 ### S11-07 Identity events (Teams 1 and 2, IDN-05 owner; members 9 and 3)
 
 Proposal: Identity calls the shared contract (`IAuditWriter` for normal requests,
 `ITrustedAuditWriter` for login before the session exists) instead of its own `IAuditWriter`. An
 adapter that copies free text from the old interface is not acceptable (AUD-03).
+
+PR #113 implements the login/logout producer and event mapping described below. Its login
+fail-closed choice (revoke the newly created session and return a generic `503` when mandatory
+Audit persistence is unavailable) is pending confirmation from the Team 1 Identity owner.
+PR #148 supplies the separate IDN-03 account-status transaction and S-16 rollback proof described
+in S11-06; the two changes share the same Audit contracts and composition.
 
 `account.status.changed` (IDN-03), from `ChangeAccountStatus`:
 
