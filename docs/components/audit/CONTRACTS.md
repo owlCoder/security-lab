@@ -168,6 +168,9 @@ with `EventIdConflict` and never replaces the stored record.
 | `auth.login` | Identity (IDN-02) | Success, Failure | Success: `User`. Failure: `Anonymous`, or `User` when the credentials were valid but the account is not active | forbidden | optional `Account` (the account that logged in) | `reasonCode` |
 | `auth.logout` | Identity (IDN-02) | Success | `User` | forbidden | none | none |
 | `auth.login.throttled` | Identity (IDN-05) | Denied | `Anonymous` | forbidden | none | none |
+| `auth.mfa.totp.enabled` | Identity (IDN-06) | Success | `User` | forbidden | `Account` (required) | none |
+| `auth.mfa.totp.verified` | Identity (IDN-06) | Success | `User` | forbidden | `Account` (required) | none |
+| `auth.mfa.totp.rejected` | Identity (IDN-06) | Denied | `User` whose password was already verified | forbidden | `Account` (required) | required `reasonCode` |
 | `account.status.changed` | Identity (IDN-03), Admin (ADM-01) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `oldStatus`, `newStatus`, `reasonCode` |
 | `course.member.role.changed` | Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
 | `course.delegation.granted` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
@@ -178,6 +181,10 @@ with `EventIdConflict` and never replaces the stored record.
 
 `reasonCode` is only allowed when the outcome is `Denied` or `Failure`. An empty GUID is never a
 valid `CourseId`.
+
+For `auth.mfa.totp.rejected`, the producer sends only an agreed generic code such as
+`invalid_code`, `replayed_code` or `attempt_limit`. It never sends the submitted TOTP value,
+the protected secret, a provisioning URI, a session value or exception text.
 
 The catalog is `AuditEventCatalog` in `Platform.Audit.Contracts`, so producers can see what each
 type allows. The checks are done by the internal `AuditDraftValidator` in
@@ -287,6 +294,7 @@ Agreements with the consumers and producers listed above are tracked in
 | Version | Date | Change |
 |-|-|-|
 | 0.1 | 2026-11-03 | Initial draft for review (S-02) |
+| 0.1 | 2026-11-19 | Additive IDN-06 TOTP event types and producer obligations; existing schema-version-1 events remain valid |
 
 ## REV-05 integration (2026-11-06)
 

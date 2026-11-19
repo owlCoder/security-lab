@@ -187,6 +187,34 @@ Audit component agree a short list of codes.
   Identity team. The Audit component asks only that the failure is visible (alarm) and that the
   login is never reported as audited when it was not.
 
+#### IDN-06 TOTP MFA integration (PR #196 review)
+
+The Audit catalog provides three allowlisted TOTP event types. They deliberately contain no
+TOTP code, Base32 secret, provisioning URI, ciphertext, cookie, session identifier or free text:
+
+| Identity action | Audit event | Outcome | Actor and resource | Details |
+|-|-|-|-|-|
+| Confirmed enrollment enables TOTP | `auth.mfa.totp.enabled` | Success | confirmed `User`; required `Account` | none |
+| A valid TOTP promotes `MfaPending` to `Active` | `auth.mfa.totp.verified` | Success | confirmed `User`; required `Account` | none |
+| A code is refused for a valid `MfaPending` identity | `auth.mfa.totp.rejected` | Denied | confirmed `User`; required `Account` | required safe `reasonCode` |
+
+Producer obligations remain on the Identity side:
+
+1. Enabling TOTP and recording `auth.mfa.totp.enabled` must commit in one PostgreSQL transaction
+   through `ITransactionalAuditWriter`; otherwise neither change is committed.
+2. A session is promoted from `MfaPending` to `Active` only when
+   `auth.mfa.totp.verified` returns `Recorded` in the same transaction.
+3. A rejected code stays rejected if its Audit write is `Rejected` or `Unavailable`. The producer
+   raises a structured technical alarm containing only the event type, status and correlation ID.
+4. The producer uses a server-confirmed account ID and correlation context. Request bodies,
+   submitted codes, secrets, provisioning URIs and session values never enter an Audit draft or
+   alarm.
+5. PostgreSQL integration tests must read fresh database contexts and prove both commit and
+   rollback behavior. Unit tests with a fake writer do not prove transactional delivery.
+
+These catalog additions do not claim that PR #196 already satisfies the producer obligations.
+Identity must replace its legacy logger-only writer and complete the transactional integration.
+
 ### S11-08 Membership and delegation (ACC-03, ACC-07 owner; members 9 and 5)
 
 - First, find the owner. Until then S-08 uses test doubles that are clearly marked as such.
@@ -267,3 +295,4 @@ Short texts that member 9 can send. Each answer is linked in the status table.
 | Date | Change |
 |-|-|
 | 2026-11-03 | Initial findings, proposals and status table (S-11) |
+| 2026-11-19 | Added the reviewed IDN-06 TOTP event mapping and transactional producer obligations |

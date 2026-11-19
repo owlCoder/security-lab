@@ -40,6 +40,28 @@ internal static class AuditDraftExamples
 
         yield return (
             new AuditEventDraft(
+                AuditEventTypes.AuthMfaTotpEnabled,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaTotpVerified,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaTotpRejected,
+                AuditOutcome.Denied,
+                Resource: TargetAccount,
+                Details: Details(("reasonCode", "invalid_code"))),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
                 AuditEventTypes.AuthMfaBackupCodesGenerated,
                 AuditOutcome.Success,
                 Resource: TargetAccount),

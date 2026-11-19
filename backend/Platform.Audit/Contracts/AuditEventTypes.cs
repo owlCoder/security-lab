@@ -11,6 +11,9 @@ public static class AuditEventTypes
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
     public const string AuthLoginThrottled = "auth.login.throttled";
+    public const string AuthMfaTotpEnabled = "auth.mfa.totp.enabled";
+    public const string AuthMfaTotpVerified = "auth.mfa.totp.verified";
+    public const string AuthMfaTotpRejected = "auth.mfa.totp.rejected";
     public const string AuthMfaBackupCodesGenerated = "auth.mfa.backup_codes.generated";
     public const string AuthMfaBackupCodeRedeemed = "auth.mfa.backup_code.redeemed";
     public const string AuthMfaBackupCodeRejected = "auth.mfa.backup_code.rejected";

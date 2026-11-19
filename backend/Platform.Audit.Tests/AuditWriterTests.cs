@@ -61,6 +61,49 @@ public sealed class AuditWriterTests
     }
 
     [Test]
+    public async Task TrustedWriteAsync_WhenTotpVerificationIsValid_RecordsAllowlistedEvent()
+    {
+        var store = new RecordingStore();
+        var writer = CreateWriter(store);
+        var draft = new AuditEventDraft(
+            AuditEventTypes.AuthMfaTotpVerified,
+            AuditOutcome.Success,
+            Resource: TargetAccount);
+
+        var result = await ((ITrustedAuditWriter)writer).WriteAsync(draft, UserContext);
+
+        var written = store.Events.Single();
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(result, Is.EqualTo(AuditWriteResult.Recorded(written.Id)));
+            Assert.That(written.EventType, Is.EqualTo(AuditEventTypes.AuthMfaTotpVerified));
+            Assert.That(written.Outcome, Is.EqualTo(AuditOutcome.Success));
+            Assert.That(written.ActorId, Is.EqualTo(UserId));
+            Assert.That(written.ResourceType, Is.EqualTo(AuditResourceTypes.Account));
+            Assert.That(written.ResourceId, Is.EqualTo(TargetAccountId.ToString()));
+            Assert.That(written.Details, Is.Empty);
+        }
+    }
+
+    [Test]
+    public async Task TrustedWriteAsync_WhenTotpRejectionContainsSubmittedCode_RejectsWithoutWriting()
+    {
+        var store = new RecordingStore();
+        var clock = new CountingTimeProvider(FixedUtcTime);
+        var writer = CreateWriter(store, clock);
+        var draft = new AuditEventDraft(
+            AuditEventTypes.AuthMfaTotpRejected,
+            AuditOutcome.Denied,
+            Resource: TargetAccount,
+            Details: Details(("reasonCode", "invalid_code"), ("totpCode", "123456")));
+
+        var result = await ((ITrustedAuditWriter)writer).WriteAsync(draft, UserContext);
+
+        AssertRejectedWithoutSideEffects(result, AuditRejectionCode.UnknownDetailKey, store, clock);
+        Assert.That(result.ToString(), Does.Not.Contain("123456"));
+    }
+
+    [Test]
     public async Task WriteAsync_WhenContextIsUnavailable_RejectsBeforeClockAndStore()
     {
         var store = new RecordingStore();

@@ -56,6 +56,32 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             null,
             Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaTotpEnabled,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaTotpVerified,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaTotpRejected,
+            Outcomes((AuditOutcome.Denied, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", ReasonCode)),
+            Required("reasonCode")),
+
         new AuditEventSchema(
             AuditEventTypes.AuthMfaBackupCodesGenerated,
             Outcomes((AuditOutcome.Success, User)),
@@ -191,4 +217,7 @@ public static class AuditEventCatalog
     private static IReadOnlyDictionary<string, AuditDetailField> Fields(
         params (string Key, AuditDetailField Field)[] entries) =>
         entries.ToFrozenDictionary(entry => entry.Key, entry => entry.Field, StringComparer.Ordinal);
+
+    private static IReadOnlySet<string> Required(params string[] keys) =>
+        keys.ToFrozenSet(StringComparer.Ordinal);
 }

@@ -43,6 +43,79 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, AnonymousContext), Is.EqualTo(AuditRejectionCode.None));
     }
 
+    [TestCase(AuditEventTypes.AuthMfaTotpEnabled)]
+    [TestCase(AuditEventTypes.AuthMfaTotpVerified)]
+    public void Validate_WhenSuccessfulTotpEventHasConfirmedUserAndAccount_AcceptsIt(string eventType)
+    {
+        var draft = new AuditEventDraft(
+            eventType,
+            AuditOutcome.Success,
+            Resource: TargetAccount);
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
+    }
+
+    [Test]
+    public void Validate_WhenTotpCodeIsRejectedWithSafeReason_AcceptsIt()
+    {
+        var draft = TotpRejected("invalid_code");
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
+    }
+
+    [Test]
+    public void Validate_WhenTotpRejectionHasNoReason_RejectsIt()
+    {
+        var draft = new AuditEventDraft(
+            AuditEventTypes.AuthMfaTotpRejected,
+            AuditOutcome.Denied,
+            Resource: TargetAccount);
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
+    }
+
+    [TestCase("123456")]
+    [TestCase("invalid code")]
+    [TestCase("INVALID_CODE")]
+    public void Validate_WhenTotpRejectionReasonIsNotASafeCode_RejectsIt(string reasonCode)
+    {
+        var draft = TotpRejected(reasonCode);
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
+    }
+
+    [TestCase("totpCode")]
+    [TestCase("secret")]
+    [TestCase("sessionToken")]
+    public void Validate_WhenTotpRejectionContainsSensitiveOrUnknownDetail_RejectsIt(string key)
+    {
+        var draft = new AuditEventDraft(
+            AuditEventTypes.AuthMfaTotpRejected,
+            AuditOutcome.Denied,
+            Resource: TargetAccount,
+            Details: Details(("reasonCode", "invalid_code"), (key, "must-not-be-stored")));
+
+        var result = _validator.Validate(draft, UserContext);
+
+        Assert.That(result, Is.AnyOf(AuditRejectionCode.UnknownDetailKey, AuditRejectionCode.ForbiddenDetailKey));
+    }
+
+    [Test]
+    public void Validate_WhenTotpEventUsesAnonymousActor_RejectsContext()
+    {
+        var draft = TotpRejected("invalid_code");
+
+        Assert.That(_validator.Validate(draft, AnonymousContext), Is.EqualTo(AuditRejectionCode.InvalidContext));
+    }
+
+    [Test]
+    public void Validate_WhenTotpEventHasNoAccountResource_RejectsResource()
+    {
+        var draft = new AuditEventDraft(AuditEventTypes.AuthMfaTotpVerified, AuditOutcome.Success);
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidResource));
+    }
+
     // Event type
 
     [TestCase("auth.unknown")]
@@ -300,4 +373,11 @@ public sealed class AuditDraftValidatorTests
             _validator.Validate(StatusChange(details: details), UserContext),
             Is.EqualTo(AuditRejectionCode.DetailsTooLarge));
     }
+
+    private static AuditEventDraft TotpRejected(string reasonCode) =>
+        new(
+            AuditEventTypes.AuthMfaTotpRejected,
+            AuditOutcome.Denied,
+            Resource: TargetAccount,
+            Details: Details(("reasonCode", reasonCode)));
 }
