@@ -37,6 +37,7 @@ using Platform.LabVisibility.Infrastructure.Persistence;
 using Platform.Prerequisites.Application;
 using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Infrastructure;
+using Platform.Api.ExceptionHandling;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
@@ -110,6 +111,7 @@ builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
+builder.Services.AddTransient<PrerequisitePersistenceExceptionHandler>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -164,6 +166,7 @@ else
 {
     // Production must not silently use in-memory laboratory data.
     builder.Services.AddSingleton<ILaboratoryRepository, UnavailableLaboratoryRepository>();
+    builder.Services.AddSingleton<IPrerequisiteRepository, UnavailablePrerequisiteRepository>();
 }
 
 // LAB-06: prerequisite access service
@@ -197,6 +200,9 @@ app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+
+app.UseMiddleware<PrerequisitePersistenceExceptionMiddleware>();
+
 if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 app.UseAccessControl();
 if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
