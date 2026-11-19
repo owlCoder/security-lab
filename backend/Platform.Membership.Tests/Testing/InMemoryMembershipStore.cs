@@ -1,4 +1,4 @@
-
+using Platform.Audit.Contracts;
 using Platform.Membership.Application;
 using Platform.Membership.Domain;
 
@@ -15,6 +15,12 @@ internal sealed class InMemoryMembershipStore : IMembershipStore
 
     /// <summary>Simulira da je drugi zahtev upisao istog korisnika između provere i upisa.</summary>
     public bool SimulateConcurrentInsert { get; set; }
+
+    /// <summary>Simulira da Audit nije mogao da sačuva zapis.</summary>
+    public bool SimulateAuditFailure { get; set; }
+
+    /// <summary>Audit podaci (akter, korelacioni ID) za svaki uspešan upis.</summary>
+    public List<AuditContext> AuditContexts { get; } = [];
 
     public IReadOnlyList<CourseMember> All
     {
@@ -41,6 +47,7 @@ internal sealed class InMemoryMembershipStore : IMembershipStore
 
     public ValueTask<AddMemberResult> AddAsync(
         CourseMember member,
+        AuditContext auditContext,
         CancellationToken cancellationToken = default)
     {
         lock (gate)
@@ -60,7 +67,14 @@ internal sealed class InMemoryMembershipStore : IMembershipStore
                 return ValueTask.FromResult(AddMemberResult.AlreadyActive);
             }
 
+            // Kao u pravoj bazi: bez audit zapisa nema upisa.
+            if (SimulateAuditFailure)
+            {
+                return ValueTask.FromResult(AddMemberResult.AuditUnavailable);
+            }
+
             members.Add(member);
+            AuditContexts.Add(auditContext);
             return ValueTask.FromResult(AddMemberResult.Added);
         }
     }

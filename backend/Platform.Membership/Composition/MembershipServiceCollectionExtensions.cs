@@ -11,6 +11,8 @@ using Platform.Membership.Infrastructure;
 using Platform.Membership.Infrastructure.Accounts;
 using Platform.Membership.Infrastructure.Courses;
 using Platform.Membership.Infrastructure.Persistence;
+using Platform.Audit.Composition;
+using Platform.Audit.Contracts;
 namespace Platform.Membership.Composition;
 
 public static class MembershipServiceCollectionExtensions
@@ -32,6 +34,8 @@ public static class MembershipServiceCollectionExtensions
         npgsql => npgsql.MigrationsHistoryTable(
         "__EFMigrationsHistory", MembershipDbContext.Schema)));
         services.TryAddSingleton(TimeProvider.System);
+        // AUD-01: audit zapis o upisu ide u istu transakciju kao upis (javni ugovor Tima 12).
+        services.TryAddSingleton<ITransactionalAuditWriter, PostgresTransactionalAuditWriter>();
         services.AddSingleton<IMembershipStore, EfMembershipStore>();
         // Platform.Api registruje pravi adapter nad nalozima; dok ga nema, ništa ne prolazi.
         services.TryAddSingleton<IAccountStatusReader, UnavailableAccountStatusReader>();

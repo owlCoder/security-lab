@@ -3,6 +3,7 @@ using Platform.Membership.Application;
 using Platform.Membership.Domain;
 using Platform.Membership.Infrastructure.Courses;
 using Platform.Membership.Tests.Testing;
+using Platform.Audit.Contracts;
 namespace Platform.Membership.Tests.Application;
 // ACC-02-3: poslovna pravila upisa. Ko sme da upisuje proverava MembershipAuthorizationTests (ACC-02-4);
 // ovde je politika "dozvoli sve", da bi se testirala samo pravila o kursu, nalogu i duplikatu.
@@ -119,4 +120,26 @@ public sealed class MembershipServiceTests
     new FixedTimeProvider(Now));
     private ValueTask<EnrollmentResult> Enroll(Guid courseId, Guid studentId) =>
     service.EnrollStudentAsync(TestAccess.Subject(Teacher), courseId, studentId, "corr");
+    // ACC-02 (audit, spec. 2.1 / AUD-01): upis beleži ko je upisao i korelacioni ID.
+    [Test]
+    public async Task Enrollment_is_audited_with_server_side_actor_and_correlation_id()
+    {
+        await Enroll(DevelopmentCourses.SecurityLab, Student);
+
+        Assert.That(store.AuditContexts, Has.Count.EqualTo(1));
+        Assert.That(store.AuditContexts[0].Actor, Is.EqualTo(AuditActor.ForUser(Teacher)));
+        Assert.That(store.AuditContexts[0].CorrelationId, Is.EqualTo("corr"));
+    }
+
+    // AUD-01 / S11-06: bez audit zapisa nema upisa.
+    [Test]
+    public async Task Without_an_audit_record_nothing_is_enrolled()
+    {
+        store.SimulateAuditFailure = true;
+
+        var result = await Enroll(DevelopmentCourses.SecurityLab, Student);
+
+        Assert.That(result.Outcome, Is.EqualTo(EnrollmentOutcome.Unavailable));
+        Assert.That(store.All, Is.Empty);
+    }
 }
