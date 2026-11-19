@@ -1,0 +1,81 @@
+.competencies-page { margin: 36px auto 56px; }
+.competencies-page .competencies { margin: 0; }
+.competencies {
+  --competencies-ink: #223045;
+  --competencies-muted: #52647b;
+  --competencies-blue: #315d8a;
+  --competencies-line: #e1e6ed;
+  --competencies-soft: #f7f9fc;
+  max-width: 100%;
+  margin: 36px 0 56px;
+  color: var(--competencies-ink);
+  line-height: 1.5;
+  color-scheme: light;
+  accent-color: var(--competencies-blue);
+  caret-color: var(--competencies-blue);
+  scrollbar-color: #b9c8d8 white;
+}
+.competencies ::selection { background: #dce9f6; color: var(--competencies-ink); }
+.competencies :is(a, button, input):focus-visible { outline: 3px solid var(--competencies-blue); outline-offset: 3px; }
+.competencies svg { width: 20px; height: 20px; flex-shrink: 0; }
+.competencies a { color: var(--competencies-blue); text-underline-offset: 4px; }
+.competencies .competencies-back { display: inline-flex; align-items: center; gap: 8px; font-size: .875rem; font-weight: 600; text-decoration: none; }
+.competencies .competencies-back:hover { text-decoration: underline; }
+.competencies .competencies-heading { margin: 24px 0 18px; }
+.competencies h1 { font-size: clamp(1.75rem, 3vw, 2.125rem); line-height: 1.2; letter-spacing: -.02em; margin: 0; text-wrap: balance; }
+.competencies .competencies-workspace { padding: 0; margin-top: 0; border: 1px solid var(--competencies-line); background: white; border-radius: 12px; overflow: hidden; }
+.competencies .competencies-context { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px; border-bottom: 1px solid var(--competencies-line); }
+.competencies .competencies-context-label { margin: 0 0 5px; color: var(--competencies-muted); font-size: .8125rem; }
+.competencies h2 { font-size: 1.125rem; line-height: 1.4; margin: 0; overflow-wrap: anywhere; }
+.competencies .competencies-access { display: inline-flex; align-items: center; gap: 7px; color: var(--competencies-blue); font-size: .8125rem; font-weight: 600; flex-shrink: 0; }
+.competencies .competencies-access svg { width: 17px; height: 17px; }
+.competencies .competencies-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+.competencies .competencies-catalog { padding: 26px 24px 24px; min-width: 0; }
+.competencies h3 { font-size: 1rem; line-height: 1.4; margin: 0 0 7px; }
+.competencies .competencies-help { font-size: .875rem; color: var(--competencies-muted); margin: 0; line-height: 1.6; }
+.competencies .competencies-search { display: grid; margin: 12px 0 0; padding-bottom: 18px; border-bottom: 1px solid var(--competencies-line); }
+.competencies .competencies-search input { min-width: 0; width: 100%; border: 1px solid #b9c5d3; border-radius: 8px; background: white; color: var(--competencies-ink); padding: 10px 12px; font: inherit; }
+.competencies .competencies-search input::placeholder { color: var(--competencies-muted); opacity: 1; }
+.competencies .competencies-options { border: 0; padding: 0; margin: 0; min-width: 0; }
+.competencies .competencies-option { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 12px; padding: 17px 12px; margin: 0; cursor: pointer; border-bottom: 1px solid var(--competencies-line); transition: background-color 140ms ease-out; }
+.competencies .competencies-option:last-of-type { border-bottom: 0; }
+.competencies .competencies-option:hover { background: var(--competencies-soft); }
+.competencies .competencies-option.is-selected { background: #edf3f9; }
+.competencies .competencies-option input { width: 18px; height: 18px; padding: 0; margin: 3px 0 0; }
+.competencies strong { font-size: .9375rem; font-weight: 600; overflow-wrap: anywhere; }
+.competencies .competencies-description { display: block; font-size: .8125rem; font-weight: 400; color: var(--competencies-muted); margin: 5px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
+.competencies .competencies-saving { display: block; font-size: .8125rem; color: var(--competencies-blue); margin-top: 6px; }
+.competencies .competencies-options:disabled .competencies-option { cursor: wait; }
+.competencies .competencies-linked { padding: 26px 24px 24px; background: var(--competencies-soft); border-left: 1px solid var(--competencies-line); min-width: 0; }
+.competencies .competencies-linked-heading h3 { margin-bottom: 0; }
+.competencies .competencies-count { color: var(--competencies-muted); font-size: .875rem; font-variant-numeric: tabular-nums; }
+.competencies .competencies-linked-list { list-style: none; padding: 0; margin: 16px 0 0; }
+.competencies .competencies-linked-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 15px 0; }
+.competencies .competencies-linked-list li + li { border-top: 1px solid var(--competencies-line); }
+.competencies .competencies-remove { display: grid; place-items: center; width: 32px; height: 32px; margin: -4px -6px 0 0; padding: 6px; border: 0; border-radius: 6px; background: transparent; color: var(--competencies-muted); }
+.competencies .competencies-remove:hover:not(:disabled) { background: #e3eaf2; color: var(--competencies-ink); }
+.competencies .competencies-empty { margin-top: 22px; color: var(--competencies-muted); font-size: .875rem; }
+.competencies .competencies-empty > p { margin: 0 0 10px; }
+.competencies .competencies-text-button { background: none; color: var(--competencies-blue); padding: 0; margin: 0; text-decoration: underline; text-underline-offset: 4px; font-size: .875rem; }
+.competencies .competencies-status { margin: 10px 0 0; color: var(--competencies-muted); font-size: .8125rem; }
+.competencies .competencies-grid-readonly { grid-template-columns: 1fr; }
+.competencies .competencies-grid-readonly .competencies-linked { border-left: 0; background: white; }
+.competencies .competencies-grid-readonly .competencies-linked-list { margin-top: 12px; max-width: 65ch; }
+.competencies .competencies-readonly-note { display: flex; align-items: center; gap: 8px; margin: 24px 0 0; color: var(--competencies-muted); font-size: .8125rem; }
+.competencies .competencies-readonly-note svg { width: 16px; height: 16px; }
+.competencies .competencies-feedback { margin-top: 0; padding: 24px; }
+.competencies .competencies-feedback p { max-width: 65ch; }
+.competencies .competencies-feedback button { margin-top: 4px; }
+.competencies .competencies-catalog-error { margin-top: 24px; color: #8a1f1f; font-size: .875rem; }
+.competencies .competencies-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (max-width: 680px) {
+  .competencies { margin-top: 28px; }
+  .competencies .competencies-heading { margin-top: 24px; }
+  .competencies .competencies-context { display: grid; gap: 12px; padding: 20px; }
+  .competencies .competencies-grid { grid-template-columns: 1fr; }
+  .competencies .competencies-catalog, .competencies .competencies-linked { padding: 24px 20px; }
+  .competencies .competencies-linked { border-left: 0; border-top: 1px solid var(--competencies-line); }
+  .competencies .competencies-grid-readonly .competencies-linked { border-top: 0; }
+  .competencies .competencies-remove { width: 40px; height: 40px; margin-top: -7px; }
+}
+@media (prefers-reduced-motion: reduce) { .competencies .competencies-option { transition: none; } }

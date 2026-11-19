@@ -1,4 +1,8 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Platform.Access.AspNet;
+using Platform.Access.Composition;
+using Platform.Access.Domain.Enums;
+using Platform.Access.Domain.Models;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
@@ -18,6 +22,7 @@ public static class LaboratoriesModule
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
         services.AddScoped<LaboratoryService>();
+        services.AddScoped<LaboratorySearchService>();
 
         if (environment.IsDevelopment())
         {
@@ -34,8 +39,40 @@ public static class LaboratoriesModule
             services.AddSingleton<IAccessDecision, DenyAllAccessDecision>();
         }
 
+        AddLaboratoryAccess(services);
+
         return services;
     }
+
+    // #185: radnje i politika za centralni ACC-05 middleware. Mora pre AddAccessControl()
+    // (na grani ACC-05 se AddLaboratories poziva pre njega; main tu registraciju jos ne proverava).
+    private static void AddLaboratoryAccess(IServiceCollection services)
+    {
+        foreach (string action in LabActions.All)
+        {
+            services.AddAccessAction<LaboratoryAccessPolicy>(
+                new ActionDefinition(action, ActionScope.Authenticated, null, false));
+        }
+
+        // Dekorator oko trenutno registrovanog provajdera subjekta (ili anonimnog, ako ga jos nema).
+        ServiceDescriptor? original = services.LastOrDefault(d => d.ServiceType == typeof(IAccessSubjectProvider));
+        if (original is not null)
+        {
+            services.Remove(original);
+        }
+
+        services.AddScoped<IAccessSubjectProvider>(sp =>
+            new LaboratorySubjectProvider(CreateInnerSubjectProvider(sp, original)));
+    }
+
+    private static IAccessSubjectProvider CreateInnerSubjectProvider(IServiceProvider sp, ServiceDescriptor? original) =>
+        original switch
+        {
+            null => new AnonymousAccessSubjectProvider(),
+            { ImplementationInstance: IAccessSubjectProvider instance } => instance,
+            { ImplementationFactory: { } factory } => (IAccessSubjectProvider)factory(sp),
+            _ => (IAccessSubjectProvider)ActivatorUtilities.CreateInstance(sp, original.ImplementationType!),
+        };
 
     public static IEndpointRouteBuilder MapLaboratories(this IEndpointRouteBuilder app)
     {

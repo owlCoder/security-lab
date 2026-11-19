@@ -17,16 +17,17 @@ They can still change through review.
 | A4 | Details are an allowlist per event type, string values only, at most 20 keys and 2048 bytes; secret-like key names are rejected as an extra check. | The system cannot reliably detect every secret in free text, so free text is not accepted (AUD-03). | PR #42 |
 | A5 | The catalog and draft validation belong to S-02; the writer (S-06) calls `AuditDraftValidator` before storing. | Avoids two validators for the same rules. Proposed in PR #42; member 3 to confirm. | PR #42 |
 | A6 | `AuditEvent` is an immutable domain record with its own invariants, independent of the validator. A retry with the same `EventId` and content is not a conflict; the time is not compared. | Defence in depth (ADM-07); supports idempotent retries. | S-03 |
+| A7 | Exception to A1: `IAuditContextProvider` is a public application integration port so the composition host can supply trusted server identity and correlation state without making the writer implementation public. `Platform.Identity.Tests` is a test-only friend assembly so its PostgreSQL integration test can exercise internal Audit persistence; production consumers still use only public contracts and composition entry points. | Keeps the runtime boundary explicit while avoiding public persistence types solely for cross-module integration testing. | PR #113; owner review pending |
 
 ## Open decisions from the team plan (v2.2)
 
 | # | Question | Owner | Target | Temporary rule |
 |-|-|-|-|-|
 | D1 | Identity and membership sources; owners of AUD-02..05; does Identity switch to the Audit contract or keep its own `IAuditWriter` behind an adapter? | Member 9 | 03.11 | Only test adapters until confirmed. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-07, S11-08, S11-10. |
-| D2 | Access DI lifetimes, explicit replacement of `NullAccessAuditWriter`, behaviour when the audit write fails. | Members 1, 5, 9 with Team 3 | 03.11 | No claim of a finished Access integration. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-01 to S11-05. |
-| D3 | Shared transaction or transactional outbox for privileged changes; meaning of each outcome per producer. | Members 2, 3, 9 with producers | before S-12 | Demo producer only; no real committed change without a guaranteed audit record. Proposal: one transaction for KT1, [INTEGRATION.md](INTEGRATION.md) S11-06. |
+| D2 | Access DI lifetimes, explicit replacement of `NullAccessAuditWriter`, behaviour when the audit write fails. | Members 1, 5, 9 with Team 3 | 03.11 | Direction proposed by Team 3: one central access audit writer in the host (see [D2: central access audit](#d2-central-access-audit-team-3-proposed)). Accepted only when their pull request is merged with Team 3 and member 1 confirmation; until then no claim of a finished Access integration. Earlier proposal: [INTEGRATION.md](INTEGRATION.md) S11-01 to S11-05. |
+| D3 | Shared transaction or transactional outbox for privileged changes; meaning of each outcome per producer. | Members 2, 3, 9 with producers | per producer | IDN-03 uses one PostgreSQL transaction for status, session revocation and Audit (PR #148, S-16 proof). Other privileged producers still require their own agreed transaction or outbox; see [INTEGRATION.md](INTEGRATION.md) S11-06. |
 | D4 | Global or administrator view of events; events without a course; which fields a teacher sees. | Members 5, 7, 9 with the assistant | before S-14 | Only the course view; no automatic global access. |
-| D5 | Query limits and behaviour when writing `audit.events.viewed` fails. | Members 4, 5, 6 | before S-14 | Proposed: 503 before any data is sent. |
+| D5 | Query limits and behaviour when writing `audit.events.viewed` fails. | Members 4, 5, 6 | before S-14 | Proposed in S-07 (see [Query limits](#d5-query-limits-proposal-s-07)); 503 before any data is sent if the viewed event cannot be written. |
 | D6 | Audit volume of Deny decisions and load on the database. | Member 9 with Team 3 | before S-13 | No silent sampling of mandatory records; measure and alarm on loss. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-04, S11-07. |
 | D7 | KT1 and KT2 dates and team capacity. | Member 1 | 03.11 | 09–10.11 is a working assumption. Everyone re-estimates the stories. |
 | D8 | Retention, restore and extra integrity protection. | Members 2, 7, 9 with ADM owners | KT2 | No public delete; stronger protection only with a justified design. |
@@ -43,6 +44,68 @@ They can still change through review.
 | D14 | Resolved in current code: Access returns `PolicyDenied` when a policy returns false and `PolicyError` on evaluation failure. | `Platform.Access` and REV-05 audit adapter | Member 9 with Team 3 | REV-05 preserves `policy_denied` separately; Audit accepts both codes. The revoked-grant HTTP test checks the stored reason (2026-11-06). |
 | D15 | `SubjectRef.Id` is a free string, while the audit actor ID is an account GUID. | `Platform.Access` | Member 9 with Team 3 | The forwarder records nothing for a non-GUID subject and raises an alarm (S11-05). |
 
+## D2: central access audit (Team 3, proposed)
+
+Team 3 answered D2 in code on branch `feature/ACC-05-deny-action-by-default` (head `142f275`,
+2026-11-12; no pull request yet). It is not on `main`, so D2 stays open until that change is merged.
+
+| Area | What Team 3 does |
+|-|-|
+| Where `access.denied` is written | `CentralAccessAuditWriter` and `AccessDeniedAuditMapper` in `Platform.Api/Security/AccessAudit`, registered once by `AddCentralAccessAudit()` before `AddAccessControl()`. The host owns it, so `Platform.Access` keeps no reference to `Platform.Audit`. |
+| What is written | Only Deny decisions, as `access.denied` through `ITrustedAuditWriter`, in a new DI scope per write (singleton writer, scoped Audit writer). Allow decisions are not written. Denials made by the middleware itself (missing or legacy metadata, subject failure) are written with reason `policy_error`. |
+| Correlation | `AccessControlMiddleware` uses `HttpContext.TraceIdentifier`, which the S-10 middleware sets to the request correlation ID. The decision and the stored record therefore carry the same ID as the `X-Correlation-ID` header. |
+| Audit write failure | A result other than `Recorded` is logged as a warning; an exception is caught by the decision engine or the middleware. The decision is not changed. |
+| Old audit chain | The `Resilient`/`Filtering`/`Aggregating`/`Logger` chain is removed; without the central writer, `AddAccessControl()` falls back to a logging writer. |
+| Composition rules | Every action and policy is registered before `AddAccessControl()`; registering later is a startup error. `[DelegatedAuthorization]` and `DelegatesToLegacyAuthorization()` are obsolete and the middleware denies such endpoints (403). |
+
+Consequences for the Audit component:
+
+- **S-13.** The S-13 forwarder ([PR #151](https://github.com/owlCoder/security-lab/pull/151)) and the central
+  writer do the same job. Both registered together would store every Deny twice, so #151 is not
+  merged and S-13 follows the central writer.
+- **Audit tests.** The Audit tests register `AddAudit()` before `AddAccessControl()`, and the Testing probe
+  endpoints declare `RequireAccess("audit.events.read")` on a synthetic probe course instead of
+  `[DelegatedAuthorization]`. Both work on the current `main` and on the Team 3 branch.
+
+Still to agree with Team 3 before D2 and D6 are accepted:
+
+| Point | Our contract | Their branch | Owner |
+|-|-|-|-|
+| Course of the denied resource | `CourseId` and resource `Course/{id}` when the Access resource is a `course` with a GUID, so the course audit view (AUD-06) shows the denial | No course, no resource | Team 3, member 9 |
+| Subject that is not an account GUID | No record and an alarm; the actor is never invented (D15) | Recorded as `Anonymous` | Team 3, member 9 |
+| Lost records (AUD-10, D6) | Counted and alarmed | Warning log only | Team 3, member 9 |
+| Volume (D6) | Measure before any filtering | Every Deny plus middleware denials | Team 3, member 9 |
+
+## D5 query limits (proposal, S-07)
+
+Implemented in `CourseAuditQueryNormalizer` and `CourseAuditQueryLimits`. Proposed by member 4;
+members 5 and 6 to confirm. Every refused value is a 400 in S-14 with a field name and a stable
+code (`Required`, `InvalidFormat`, `UnknownValue`, `OutOfRange`); the value itself is never returned.
+
+| Filter | Rule |
+|-|-|
+| `courseId` | From the route, mandatory, not empty. The SQL always has `course_id = @course`. There is no global mode. |
+| `page`, `pageSize` | Decimal digits only (at most 6). Defaults 1 and 50; `page >= 1`; `pageSize` 1 to 100; `(page - 1) * pageSize <= 10 000` (T11). |
+| `type` | Exact event type from `AuditEventCatalog`, case-sensitive. |
+| `outcome` | `success`, `denied` or `failure` (lower case, as in `audit.events.viewed`). |
+| `actorId` | GUID in `D` format, not empty. |
+| `correlationId` | `[A-Za-z0-9._-]{1,64}`, the same rule as the audit contract. |
+| `from`, `to` | ISO 8601 date and time with `Z` or `+hh:mm`/`-hh:mm` (no date-only or local time), at most 40 characters, converted to UTC. `from` inclusive, `to` exclusive, `from < to`, range at most 31 days. |
+| no date | Last 7 days up to the current server time. |
+| only `from` | `[from, from + 7 days)`. |
+| only `to` | `[to - 7 days, to)`. |
+
+Sorting is `occurred_at DESC, id DESC` (index `ix_audit_events_course_time_id`). Instead of a
+`COUNT`, the query reads `pageSize + 1` rows and returns `hasNextPage`; there is no total count.
+`hasNextPage` is false on the last page the offset limit allows, so it never points to a refused page.
+Offset pages are not a snapshot: new events can shift later pages. A cursor stays a KT2 option.
+The DTO is an allowlist (id, time, type, outcome, actor kind and id, resource, correlation ID);
+`details` is not selected from the database until D4 decides field visibility.
+A storage failure gives `Unavailable` (503) without exception text.
+
+In S-14 a `+` in a query-string offset must be sent as `%2B`, otherwise it arrives as a space
+and the time is refused.
+
 ## KT1 scope
 
 The official KT1 minimum comes from `docs/CHECKPOINT_1.md`: started code and behaviour,
@@ -51,14 +114,14 @@ demonstration and a plan for the remaining work. Documentation alone is not enou
 
 ### Minimum for KT1
 
-| Item | Stories | State on 03.11 |
+| Item | Stories | State on 09.11 |
 |-|-|-|
 | Audit module skeleton, solution and CI that fails on zero tests | S-01 | Done (PR #35) |
 | Audit contract, event catalog, draft validation and T03 tests | S-02 | Done (PR #42) |
-| Domain record, decisions and KT1 scope | S-03 | This pull request |
-| Threat model, security matrix and DFD of the Audit component | S-04, S-18 | Not started |
-| A verifiable write of an event, at least in memory and clearly marked as such | S-06, S-12 | Not started |
-| Individual evidence for each of the 10 members | S-20, S-21 | Not started |
+| Domain record, decisions and KT1 scope | S-03 | Done (PR #51) |
+| Threat model, security matrix and DFD of the Audit component | S-04, S-18 | Done for S-04 (PR #76); the DFD predates later merges and is updated in S-18 |
+| A verifiable write of an event, at least in memory and clearly marked as such | S-06, S-12 | Writer done (PR #72), PostgreSQL storage (PR #73); IDN-03 status change writes through `ITransactionalAuditWriter` (PR #148); S-12 PR #113 open |
+| Individual evidence for each of the 10 members | S-20, S-21 | S-20 in [AUD-01-AUD-06.md](../AUD-01-AUD-06.md); S-21 not started |
 
 If the AUD-06 endpoint is shown as working, server-side authorization and course isolation are
 mandatory. An unfinished endpoint stays unreachable, and every stub is labelled as a stub.
@@ -83,7 +146,7 @@ their own stories at the team sync; the new value is entered in Tapiz and here.
 | S-04 | 7 | 5 | | |
 | S-05 | 2 | 5 | | |
 | S-06 | 3 | 5 | | |
-| S-07 | 4 | 5 | | |
+| S-07 | 4 | 5 | 5 | S-07 CourseAuditQuery |
 | S-08 | 5 | 5 | | |
 | S-09 | 6 | 5 | | |
 | S-10 | 10 | 5 | | |
@@ -105,3 +168,6 @@ their own stories at the team sync; the new value is entered in Tapiz and here.
 |-|-|
 | 2026-11-03 | Initial register, KT1 scope and estimate table (S-03) |
 | 2026-11-03 | Links to the S-11 proposals; new questions D13 to D15 (S-11) |
+| 2026-11-05 | D5 query limits proposal and S-07 course query (S-07) |
+| 2026-11-09 | KT1 minimum state updated; link to the component document (S-20) |
+| 2026-11-12 | D2: Team 3 central access audit (proposed, not merged); Audit tests aligned with the ACC-05 composition rules (S-11) |

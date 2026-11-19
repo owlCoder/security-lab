@@ -1,6 +1,8 @@
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Modules.Kt1;
+using Platform.Api.Modules.Competencies;
+using Platform.Api.Modules.Administration.Api;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
@@ -19,8 +21,11 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Services.Audit;
+using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Competencies.Composition;
 using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
@@ -53,10 +58,14 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
+<<<<<<< HEAD
 // ACC-02: clanstvo u kursu (Platform.Membership)
 builder.Services.AddMembership(builder.Environment);
 
 // Access modul
+=======
+var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
+>>>>>>> origin/main
 builder.Services.AddAccessControl();
 builder.Services.AddAccessAspNet();
 builder.Services.AddRevisionAuthorization();
@@ -91,8 +100,18 @@ else
     builder.Services.AddSingleton<IRequestSubjectResolver, UnauthenticatedSubjectResolver>();
 }
 
-builder.Services.AddAudit();
-builder.Services.AddAuditPersistence(builder.Configuration.GetConnectionString("Laboratories"));
+builder.Services.AddAudit(builder.Configuration);
+builder.Services.AddScoped<IAuditContextProvider, ServerAuditContextProvider>();
+
+// PRG-04 uses its own schema, but can share the already configured PostgreSQL server.
+// A dedicated Competencies connection takes precedence when deployment supplies one.
+var competenciesConnectionString = builder.Configuration.GetConnectionString("Competencies");
+if (string.IsNullOrWhiteSpace(competenciesConnectionString))
+    competenciesConnectionString = builder.Configuration.GetConnectionString("Laboratories");
+
+if (!string.IsNullOrWhiteSpace(competenciesConnectionString))
+    builder.Services.AddCompetencyPersistence(competenciesConnectionString);
+
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -115,6 +134,7 @@ builder.Services.AddScoped<ChangeAccountStatus>();
 builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IdentityAuditProducer>();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -123,6 +143,7 @@ builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
 builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
 {
@@ -141,6 +162,12 @@ else
 
 // Kreiranje aplikacije
 builder.Services.AddRevisionRequestIdentity();
+builder.Services.AddPrg04CompetencyOperations();
+if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+
+//AUT-06: register the resolver that identifies the caller from the validated session
+builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
+
 var app = builder.Build();
 app.UseRouting();
 
@@ -148,7 +175,9 @@ app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 app.UseAccessControl();
+if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
 
 // Identity Rate Limiting
@@ -188,6 +217,7 @@ if (app.Environment.IsDevelopment())
 
     // AUT-04: demo laboratorije 4444 (objavljena) i 5555 (nacrt); sa ConnectionStrings:LabVisibility idu u PostgreSQL.
     await app.Services.SeedLabVisibilityDemoAsync();
+    await app.Services.SeedLaboratorySearchDemoAsync();
 
     // US-02 and US-09: migrate and seed the identity database (skipped without a connection string).
     if (await app.ApplyIdentityMigrationsAsync())
@@ -225,10 +255,12 @@ app.MapGet("/api/health", () => Results.Ok(new
 app.UseMiddleware<SessionCheckMiddleware>();
 
 app.MapControllers();
+if (administrationEnabled) app.MapPersistentCourseAdministration();
 app.MapLaboratories();
+app.MapCompetencyEndpoints();
+app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();
 app.MapRevisionReviews();
-
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/api/access/demo-deny", async (
