@@ -58,14 +58,10 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
-<<<<<<< HEAD
 // ACC-02: clanstvo u kursu (Platform.Membership)
 builder.Services.AddMembership(builder.Environment);
 
-// Access modul
-=======
 var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
->>>>>>> origin/main
 builder.Services.AddAccessControl();
 builder.Services.AddAccessAspNet();
 builder.Services.AddRevisionAuthorization();
