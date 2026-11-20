@@ -1,14 +1,19 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
+using Platform.Access.AspNet;
 using Platform.Access.Contracts;
+using Platform.Access.Domain.Enums;
+using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Policies;
 using Platform.Api.Endpoints;
 using Platform.Api.Enums.Identity;
@@ -26,6 +31,7 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Domain;
 using Platform.LabVisibility.Infrastructure.Membership;
 using AccountStatus = Platform.Identity.Enums.AccountStatus;
+using CourseRole = Platform.LabVisibility.Contracts.CourseRole;
 
 namespace Platform.Competencies.Tests;
 
@@ -51,6 +57,136 @@ public sealed class CompetencyEndpointsTests
     private static readonly Guid CompetencyId = BuiltInCompetencies.AccessControlId;
     private static readonly Guid SecondCompetencyId = BuiltInCompetencies.LogAnalysisId;
 
+    [TestCase("Production")]
+    [TestCase("Development")]
+    public void AllCompetencyRoutes_RequireExactlyOneRegisteredEntryActionWithoutLegacyMarkers(string environment)
+    {
+        using var factory = new Prg04Factory(environment);
+        using var client = factory.CreateClient();
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(endpoint => endpoint.RoutePattern.RawText is { } route &&
+                (route == CompetencyEndpoints.CatalogPath ||
+                 route.StartsWith(CompetencyEndpoints.LaboratoryCompetenciesPath, StringComparison.Ordinal)))
+            .ToArray();
+
+        Assert.That(endpoints.Select(endpoint =>
+                (endpoint.RoutePattern.RawText, endpoint.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Single())),
+            Is.EquivalentTo(new[]
+            {
+                (CompetencyEndpoints.CatalogPath, "GET"),
+                (CompetencyEndpoints.LaboratoryCompetenciesPath, "GET"),
+                ($"{CompetencyEndpoints.LaboratoryCompetenciesPath}/{{competencyId:guid}}", "PUT"),
+                ($"{CompetencyEndpoints.LaboratoryCompetenciesPath}/{{competencyId:guid}}", "DELETE")
+            }));
+        foreach (var endpoint in endpoints)
+        {
+            var requirements = endpoint.Metadata.GetOrderedMetadata<IAccessRequirementMetadata>();
+            Assert.That(requirements, Has.Count.EqualTo(1), endpoint.DisplayName);
+            Assert.Multiple(() =>
+            {
+                Assert.That(requirements[0].Action, Is.EqualTo(CompetencyLinkActions.Entry), endpoint.DisplayName);
+                Assert.That(requirements[0].ResourceType, Is.Null, endpoint.DisplayName);
+                Assert.That(requirements[0].IdRouteParam, Is.Null, endpoint.DisplayName);
+#pragma warning disable CS0618 // Assert that migration-only authorization metadata is absent.
+                Assert.That(endpoint.Metadata.GetMetadata<DelegatedAuthorizationAttribute>(), Is.Null, endpoint.DisplayName);
+                Assert.That(endpoint.Metadata.GetMetadata<AllowPublicAttribute>(), Is.Null, endpoint.DisplayName);
+                Assert.That(endpoint.Metadata.GetMetadata<PublicEndpointMetadata>(), Is.Null, endpoint.DisplayName);
+#pragma warning restore CS0618
+                Assert.That(endpoint.Metadata.GetMetadata<IAllowAnonymous>(), Is.Null, endpoint.DisplayName);
+            });
+        }
+    }
+
+    [TestCase("Production")]
+    [TestCase("Development")]
+    public async Task EntryAction_HasAuthenticatedScopeAndPolicyThatRejectsInvalidSubjectsAndRequests(string environment)
+    {
+        using var factory = new Prg04Factory(environment);
+        using var client = factory.CreateClient();
+        var actions = factory.Services.GetRequiredService<IActionCatalog>();
+        var policies = factory.Services.GetRequiredService<IAccessPolicyRegistry>();
+        Assert.That(actions.TryGet(CompetencyLinkActions.Entry, out var action), Is.True);
+        Assert.That(policies.TryGet(CompetencyLinkActions.Entry, out var policy), Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(action!.Scope, Is.EqualTo(ActionScope.Authenticated));
+            Assert.That(action.ResourceType, Is.Null);
+            Assert.That(action.IsPrivileged, Is.False);
+            Assert.That(policy, Is.TypeOf<CompetencyEntryPolicy>());
+        });
+
+        var allowed = new AccessRequest(new SubjectRef(Teacher.ToString("D"), AccountState.Active),
+            CompetencyLinkActions.Entry, null, "competency-entry-policy");
+        Assert.That(await policy!.EvaluateAsync(allowed), Is.True);
+        foreach (var rejected in new[]
+        {
+            allowed with { Subject = null },
+            allowed with { Subject = new SubjectRef(Teacher.ToString("D"), AccountState.Blocked) },
+            allowed with { Subject = new SubjectRef(Teacher.ToString("D"), AccountState.Archived) },
+            allowed with { Subject = new SubjectRef(Guid.Empty.ToString("D"), AccountState.Active) },
+            allowed with { Subject = new SubjectRef("not-an-account-id", AccountState.Active) },
+            allowed with { Action = CompetencyLinkActions.Manage },
+            allowed with { Resource = new ResourceRef("laboratory", LabId.ToString("D")) }
+        })
+            Assert.That(await policy.EvaluateAsync(rejected), Is.False, rejected.ToString());
+    }
+
+    [TestCaseSource(nameof(EntryRouteCases))]
+    public async Task MissingEntryPolicy_DeniesBeforeAnyCompetencyOperation(string environment, string method, string path)
+    {
+        using var factory = new Prg04Factory(environment, hideEntryPolicy: true);
+        factory.Store.Seed(LabId, CompetencyId);
+        using var client = factory.CreateClient();
+        int laboratoryReads = factory.Laboratories.ReadCalls;
+        int contentReads = factory.PublicContent.ReadCalls;
+        using var response = await Send(client, method, path, "teacher");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(factory.Store.ReadCalls, Is.Zero);
+            Assert.That(factory.Store.MutationCalls, Is.Zero);
+            Assert.That(factory.Catalog.ReadCalls, Is.Zero);
+            Assert.That(factory.Laboratories.ReadCalls, Is.EqualTo(laboratoryReads));
+            Assert.That(factory.PublicContent.ReadCalls, Is.EqualTo(contentReads));
+            Assert.That(factory.Store.HasLink(LabId, CompetencyId), Is.True);
+        });
+    }
+
+    [TestCase("Production", true)]
+    [TestCase("Development", true)]
+    [TestCase("Production", false)]
+    [TestCase("Development", false)]
+    public async Task RevokedSessionOrBlockedAccount_DeniesEveryRouteOnTheNextRequest(string environment, bool revokeSession)
+    {
+        using var factory = new Prg04Factory(environment);
+        factory.Store.Seed(LabId, CompetencyId);
+        using var client = factory.CreateClient();
+        using var before = await Send(client, "GET", CompetencyEndpoints.CatalogPath, "teacher");
+        Assert.That(before.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        if (revokeSession) factory.Sessions.RevokedTokens.Add("teacher");
+        else factory.Accounts.BlockedAccounts.Add(Teacher);
+        int laboratoryReads = factory.Laboratories.ReadCalls;
+        int contentReads = factory.PublicContent.ReadCalls;
+        int catalogReads = factory.Catalog.ReadCalls;
+        foreach (var (method, path) in CompetencyRequests())
+        {
+            using var response = await Send(client, method, path, "teacher");
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized), $"{method} {path}");
+        }
+        Assert.Multiple(() =>
+        {
+            Assert.That(factory.Store.ReadCalls, Is.Zero);
+            Assert.That(factory.Store.MutationCalls, Is.Zero);
+            Assert.That(factory.Catalog.ReadCalls, Is.EqualTo(catalogReads));
+            Assert.That(factory.Laboratories.ReadCalls, Is.EqualTo(laboratoryReads));
+            Assert.That(factory.PublicContent.ReadCalls, Is.EqualTo(contentReads));
+            Assert.That(factory.Store.HasLink(LabId, CompetencyId), Is.True);
+        });
+    }
+
     [TestCase("GET", null)]
     [TestCase("GET", "revoked")]
     [TestCase("PUT", null)]
@@ -72,14 +208,16 @@ public sealed class CompetencyEndpointsTests
         Assert.That(factory.Catalog.ReadCalls, Is.Zero);
     }
 
-    [TestCase("GET")]
-    [TestCase("PUT")]
-    [TestCase("DELETE")]
-    public async Task DevelopmentHeadersWithoutSession_DoNotAuthenticatePrg04(string method)
+    [TestCase("GET", true)]
+    [TestCase("GET", false)]
+    [TestCase("PUT", false)]
+    [TestCase("DELETE", false)]
+    public async Task DevelopmentHeadersWithoutSession_DoNotAuthenticatePrg04(string method, bool catalog)
     {
         using var factory = new Prg04Factory("Development");
         using var client = factory.CreateClient();
-        using var request = Request(method, method == "GET" ? Links(LabId) : Link(LabId), token: null);
+        using var request = Request(method,
+            catalog ? CompetencyEndpoints.CatalogPath : method == "GET" ? Links(LabId) : Link(LabId), token: null);
         request.Headers.Add("X-Test-User", $"{Teacher:D}:Teacher");
         request.Headers.Add("X-Stub-User", Teacher.ToString("D"));
         using var response = await client.SendAsync(request);
@@ -405,6 +543,21 @@ public sealed class CompetencyEndpointsTests
     private static string Links(Guid laboratoryId) => $"/api/laboratories/{laboratoryId:D}/competencies";
     private static string Link(Guid laboratoryId) => Link(laboratoryId, CompetencyId);
     private static string Link(Guid laboratoryId, Guid competencyId) => $"{Links(laboratoryId)}/{competencyId:D}";
+    private static IEnumerable<(string Method, string Path)> CompetencyRequests() =>
+    [
+        ("GET", CompetencyEndpoints.CatalogPath),
+        ("GET", Links(LabId)),
+        ("PUT", Link(LabId)),
+        ("DELETE", Link(LabId))
+    ];
+
+    private static IEnumerable<TestCaseData> EntryRouteCases()
+    {
+        foreach (string environment in new[] { "Production", "Development" })
+        foreach (var (method, path) in CompetencyRequests())
+            yield return new TestCaseData(environment, method, path);
+    }
+
     private static HttpRequestMessage Request(string method, string path, string? token)
     {
         var request = new HttpRequestMessage(new HttpMethod(method), path);
@@ -423,17 +576,22 @@ public sealed class CompetencyEndpointsTests
         private readonly string _environment;
         private readonly bool _includeCompetencyStores;
         private readonly bool _hideManagePolicy;
+        private readonly bool _hideEntryPolicy;
         public TestLaboratories Laboratories { get; } = new();
+        public TestSessions Sessions { get; } = new();
+        public TestAccounts Accounts { get; } = new();
         public InMemoryCourseMembership Membership { get; } = new();
         public RecordingCatalog Catalog { get; } = new();
         public RecordingStore Store { get; } = new();
         public TestPublicContentReader PublicContent { get; } = new();
 
-        public Prg04Factory(string environment = "Production", bool includeCompetencyStores = true, bool hideManagePolicy = false)
+        public Prg04Factory(string environment = "Production", bool includeCompetencyStores = true,
+            bool hideManagePolicy = false, bool hideEntryPolicy = false)
         {
             _environment = environment;
             _includeCompetencyStores = includeCompetencyStores;
             _hideManagePolicy = hideManagePolicy;
+            _hideEntryPolicy = hideEntryPolicy;
             var now = DateTimeOffset.UtcNow;
             Laboratories.AddAsync(Laboratory.Rehydrate(LabId, Course, "Own lab", LabStatus.Draft, Teacher, now)).GetAwaiter().GetResult();
             Laboratories.AddAsync(Laboratory.Rehydrate(OtherLabId, Course, "Other author's lab", LabStatus.Draft, OtherTeacher, now)).GetAwaiter().GetResult();
@@ -466,18 +624,19 @@ public sealed class CompetencyEndpointsTests
                 services.RemoveAll<ICompetencyCatalog>();
                 services.RemoveAll<ILaboratoryCompetencyStore>();
                 services.RemoveAll<ILabPublicContentReader>();
-                services.AddSingleton<ISessionManager, TestSessions>();
-                services.AddSingleton<IAccountStatusReader, TestAccounts>();
+                services.AddSingleton<ISessionManager>(Sessions);
+                services.AddSingleton<IAccountStatusReader>(Accounts);
                 services.AddSingleton<ILaboratoryRepository>(Laboratories);
                 services.AddSingleton<ICourseMembership>(Membership);
                 services.AddSingleton<ILabPublicContentReader>(PublicContent);
-                if (_hideManagePolicy)
+                if (_hideManagePolicy || _hideEntryPolicy)
                 {
                     // Keep startup's complete catalog, but make the real decision engine
                     // observe an absent policy for this request-level fail-closed test.
                     services.RemoveAll<IAccessPolicyRegistry>();
-                    services.AddSingleton<IAccessPolicyRegistry>(provider => new MissingManagePolicyRegistry(
-                        provider.GetRequiredService<InMemoryAccessPolicyRegistry>()));
+                    services.AddSingleton<IAccessPolicyRegistry>(provider => new MissingPolicyRegistry(
+                        provider.GetRequiredService<InMemoryAccessPolicyRegistry>(),
+                        _hideEntryPolicy ? CompetencyLinkActions.Entry : CompetencyLinkActions.Manage));
                 }
                 if (_includeCompetencyStores)
                 {
@@ -490,8 +649,11 @@ public sealed class CompetencyEndpointsTests
 
     private sealed class TestSessions : ISessionManager
     {
+        public HashSet<string> RevokedTokens { get; } = [];
+
         public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)
         {
+            if (RevokedTokens.Contains(token)) return Task.FromResult<ValidateSession?>(null);
             Guid? actor = token switch
             {
                 "teacher" => Teacher, "student" => Student, "other-teacher" => OtherTeacher,
@@ -514,13 +676,17 @@ public sealed class CompetencyEndpointsTests
     private sealed class TestLaboratories : ILaboratoryRepository
     {
         private readonly Dictionary<Guid, Laboratory> _laboratories = [];
+        public int ReadCalls { get; private set; }
         public Task AddAsync(Laboratory laboratory, CancellationToken cancellationToken = default)
         {
             _laboratories.Add(laboratory.Id, laboratory);
             return Task.CompletedTask;
         }
-        public Task<Laboratory?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_laboratories.GetValueOrDefault(id));
+        public Task<Laboratory?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            ReadCalls++;
+            return Task.FromResult(_laboratories.GetValueOrDefault(id));
+        }
         public Task<IReadOnlyList<Laboratory>> ListAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Laboratory>>(_laboratories.Values.ToArray());
         public Task UpdateAsync(Laboratory laboratory, CancellationToken cancellationToken = default)
@@ -534,25 +700,30 @@ public sealed class CompetencyEndpointsTests
 
     private sealed class TestAccounts : IAccountStatusReader
     {
+        public HashSet<Guid> BlockedAccounts { get; } = [Blocked];
         public Task<AccountSnapshot?> FindAsync(Guid accountId, CancellationToken cancellationToken = default) =>
             Task.FromResult<AccountSnapshot?>(accountId == UnknownAccount ? null : new AccountSnapshot(accountId,
-                accountId == Blocked ? AccountStatus.Blocked : AccountStatus.Active));
+                BlockedAccounts.Contains(accountId) ? AccountStatus.Blocked : AccountStatus.Active));
     }
 
     private sealed class TestPublicContentReader : ILabPublicContentReader
     {
+        public int ReadCalls { get; private set; }
         public LabPublicContent? Content { get; set; } = LabPublicContent.Create(
             LabId, Course, Teacher, LabVisibilityState.Published, "Published lab", "Goal", []);
 
-        public ValueTask<LabPublicContent?> GetAsync(Guid labId, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(Content);
+        public ValueTask<LabPublicContent?> GetAsync(Guid labId, CancellationToken cancellationToken = default)
+        {
+            ReadCalls++;
+            return ValueTask.FromResult(Content);
+        }
     }
 
-    private sealed class MissingManagePolicyRegistry(IAccessPolicyRegistry inner) : IAccessPolicyRegistry
+    private sealed class MissingPolicyRegistry(IAccessPolicyRegistry inner, string missingAction) : IAccessPolicyRegistry
     {
         public bool TryGet(string action, out IAccessPolicy? policy)
         {
-            if (action == CompetencyLinkActions.Manage)
+            if (action == missingAction)
             {
                 policy = null;
                 return false;

@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -10,6 +11,7 @@ using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
@@ -112,13 +114,32 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         var other = await UserTestData.AddAsync(Factory, "other@example.com", Password);
         var studentSession = await SessionTestData.CreateAsync(Factory, student.Id);
 
-        var response = await SendAsync(HttpMethod.Put, StatusUrl(other.Id), studentSession.RawToken, new { status = "BLOCKED" });
+        // #113: the shared factory replaces ITrustedAuditWriter with a fake that stores nothing. This test reads
+        // the real access.denied row, so it restores the real writer; ConnectionStrings:Audit is the test database.
+        using var audited = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ITrustedAuditWriter>();
+            services.AddScoped<ITrustedAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
+        }));
+        using var client = audited.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(other.Id))
+        {
+            Content = JsonContent.Create(new { status = "BLOCKED" })
+        };
+        request.Headers.Add("Cookie", $"{SessionCookie.Name}={studentSession.RawToken}");
+
+        var response = await client.SendAsync(request);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         Assert.That((await UserTestData.GetAsync(Factory, other.Id))!.Status, Is.EqualTo(AccountStatus.Active));
-        var record = (await AuditRowsAsync(other.Id)).Single();
-        Assert.That(record.Outcome, Is.EqualTo("Denied"));
-        Assert.That(record.ActorId, Is.EqualTo(student.Id));
+
+        // ACC-05: the central Access middleware denies a non-administrator before the handler runs, so the
+        // denial is recorded as access.denied for the caller; ChangeAccountStatus never starts and writes no
+        // account.status.changed row (its own Denied record stays the second line, see ChangeAccountStatusTests).
+        Assert.That(await AuditRowsAsync(other.Id), Is.Empty);
+        var denial = (await AccessDeniedRowsAsync(student.Id)).Single();
+        Assert.That(denial.Outcome, Is.EqualTo("Denied"));
+        Assert.That(denial.Details, Does.Contain("account.status.change"));
     }
 
     [Test]
@@ -312,6 +333,23 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
             WHERE event_type = 'account.status.changed' AND resource_id = @id
             """, connection);
         command.Parameters.AddWithValue("id", accountId.ToString("D"));
+
+        var rows = new List<AuditRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(new AuditRow(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2)));
+        return rows;
+    }
+
+    private static async Task<List<AuditRow>> AccessDeniedRowsAsync(Guid actorId)
+    {
+        await using var connection = new NpgsqlConnection(TestDatabaseFixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT outcome, actor_id, details::text FROM audit.audit_events
+            WHERE event_type = 'access.denied' AND actor_id = @id
+            """, connection);
+        command.Parameters.AddWithValue("id", actorId);
 
         var rows = new List<AuditRow>();
         await using var reader = await command.ExecuteReaderAsync();

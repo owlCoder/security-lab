@@ -26,17 +26,17 @@ public sealed class RevisionPermissionIntegrationTests
         memberships = new InMemoryMembershipReader();
         var collection = new ServiceCollection();
         collection.AddLogging();
-        collection.AddAccessControl();
         collection.AddSingleton<IMembershipReader>(memberships);
         collection.AddSingleton<IRevisionResourceReader>(new Resources());
         collection.AddSingleton<IRevisionAuthorReader>(new Authors());
         collection.AddSingleton<IAdminDirectory>(new Admins());
         collection.AddRevisionAuthorization();
+        collection.AddRevisionAccessPolicies();
+        collection.AddAccessControl();
         services = collection.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true, ValidateOnBuild = true
         });
-        services.RegisterRevisionPolicies();
     }
 
     [TearDown]

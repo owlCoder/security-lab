@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Platform.Access.Application.Services;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.ValueObjects;
@@ -7,12 +6,21 @@ namespace Platform.Access.Infrastructure.Policies;
 
 public sealed class InMemoryAccessPolicyRegistry : IAccessPolicyRegistry
 {
-    private readonly ConcurrentDictionary<string, IAccessPolicy> policies =
+    private readonly Dictionary<string, IAccessPolicy> policies =
         new(StringComparer.Ordinal);
     private readonly object registrationLock = new();
     private bool isFrozen;
 
-    public IReadOnlyCollection<string> RegisteredActions => policies.Keys.ToArray();
+    public IReadOnlyCollection<string> RegisteredActions
+    {
+        get
+        {
+            lock (registrationLock)
+            {
+                return policies.Keys.ToArray();
+            }
+        }
+    }
 
     public void Register(string action, IAccessPolicy policy)
     {
@@ -56,12 +64,9 @@ public sealed class InMemoryAccessPolicyRegistry : IAccessPolicyRegistry
 
     public bool TryGet(string action, out IAccessPolicy? policy)
     {
-        if (action is null)
+        lock (registrationLock)
         {
-            policy = null;
-            return false;
+            return policies.TryGetValue(action, out policy);
         }
-
-        return policies.TryGetValue(action, out policy);
     }
 }

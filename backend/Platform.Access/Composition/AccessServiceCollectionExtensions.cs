@@ -25,6 +25,7 @@ public static class AccessServiceCollectionExtensions
         where TPolicy : class, IAccessPolicy
     {
         ArgumentNullException.ThrowIfNull(services);
+        EnsureRegistrationOpen(services);
         ArgumentNullException.ThrowIfNull(definition);
         ActionCatalogValidator.Validate(definition);
 
@@ -47,6 +48,7 @@ public static class AccessServiceCollectionExtensions
         where TPolicy : class, IAccessPolicy
     {
         ArgumentNullException.ThrowIfNull(services);
+        EnsureRegistrationOpen(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
 
         if (!ActionId.IsValid(action))
@@ -88,15 +90,18 @@ public static class AccessServiceCollectionExtensions
 
         services.AddSingleton<AccessControlServicesRegistered>();
         services.TryAddSingleton(new AccessDecisionOptions());
-        services.TryAddSingleton(new AccessConfigurationOptions());
+        services.TryAddSingleton(new AccessConfigurationOptions
+        {
+            RequirePolicyCoverage = true
+        });
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<AccessAuditOptions>();
 
         services.AddSingleton<InMemoryActionCatalog>(sp =>
             new InMemoryActionCatalog(
                 sp.GetServices<AccessPolicyRegistration>()
                     .Where(registration => registration.Definition is not null)
-                    .Select(registration => registration.Definition!)));
+                    .Select(registration => registration.Definition!),
+                freezeAfterConstruction: true));
         services.AddSingleton<IActionCatalog>(sp => sp.GetRequiredService<InMemoryActionCatalog>());
         services.TryAddSingleton<IMembershipReader, EmptyMembershipReader>();
         services.TryAddSingleton<IResourceDescriptorResolver, EmptyResourceDescriptorResolver>();
@@ -126,20 +131,15 @@ public static class AccessServiceCollectionExtensions
                     policy);
             }
 
+            registry.Freeze();
             return registry;
         });
         services.AddSingleton<IAccessPolicyRegistry>(sp =>
             sp.GetRequiredService<InMemoryAccessPolicyRegistry>());
-        services.AddSingleton(CreateAggregatingSink);
-        services.AddSingleton<IAccessAuditWriter>(CreateAuditWriter);
-        services.AddSingleton<AccessAuditFlushService>(services =>
-            new AccessAuditFlushService(
-                services.GetRequiredService<AggregatingAccessAuditSink>(),
-                services.GetRequiredService<AccessAuditOptions>(),
-                services.GetRequiredService<TimeProvider>(),
-                services.GetService<ILogger<AccessAuditFlushService>>()
-                    ?? NullLogger<AccessAuditFlushService>.Instance));
-        services.AddSingleton<IHostedService>(services => services.GetRequiredService<AccessAuditFlushService>());
+        services.TryAddSingleton<IAccessAuditWriter>(sp =>
+            new LoggerAccessAuditWriter(
+                sp.GetService<ILogger<LoggerAccessAuditWriter>>()
+                    ?? NullLogger<LoggerAccessAuditWriter>.Instance));
         services.AddSingleton<IAccessDecision, DefaultDenyAccessDecision>();
         services.AddSingleton<AccessConfigurationStartupCheck>(services =>
             new AccessConfigurationStartupCheck(
@@ -188,13 +188,13 @@ public static class AccessServiceCollectionExtensions
             .Select(descriptor => descriptor.ImplementationInstance)
             .OfType<AccessPolicyRegistration>();
 
-    private static AggregatingAccessAuditSink CreateAggregatingSink(IServiceProvider services)
+    private static void EnsureRegistrationOpen(IServiceCollection services)
     {
-        var logger = new LoggerAccessAuditSink(
-            services.GetService<ILogger<LoggerAccessAuditSink>>()
-                ?? NullLogger<LoggerAccessAuditSink>.Instance);
-        return new AggregatingAccessAuditSink(
-            logger, services.GetRequiredService<AccessAuditOptions>(), services.GetRequiredService<TimeProvider>());
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(AccessControlServicesRegistered)))
+        {
+            throw new InvalidOperationException(
+                "Register all Access actions and policies before AddAccessControl(), then call AddAccessControl() once before building the host.");
+        }
     }
 
     internal sealed record AccessPolicyRegistration(
@@ -204,23 +204,5 @@ public static class AccessServiceCollectionExtensions
 
     private sealed class AccessControlServicesRegistered
     {
-    }
-
-    private static ResilientAccessAuditWriter CreateAuditWriter(IServiceProvider services)
-    {
-        var options = services.GetRequiredService<AccessAuditOptions>();
-        var clock = services.GetRequiredService<TimeProvider>();
-
-        var filtering = new FilteringAccessAuditWriter(
-            new AccessAuditRecordFactory(clock, options),
-            services.GetRequiredService<AggregatingAccessAuditSink>(),
-            options);
-
-        return new ResilientAccessAuditWriter(
-            filtering,
-            options,
-            clock,
-            services.GetService<ILogger<ResilientAccessAuditWriter>>()
-                ?? NullLogger<ResilientAccessAuditWriter>.Instance);
     }
 }

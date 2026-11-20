@@ -127,6 +127,8 @@ public sealed class AuditDraftValidatorTests
     [TestCase("")]
     [TestCase("corr 0001")]
     [TestCase("corr-0001\nforged line")]
+    [TestCase("corr-0001\n")]
+    [TestCase("corr-0001\r\n")]
     [TestCase("<script>")]
     public void Validate_WhenCorrelationIdIsMalformed_RejectsContext(string correlationId)
     {
@@ -213,6 +215,7 @@ public sealed class AuditDraftValidatorTests
     [TestCase("")]
     [TestCase("id with spaces")]
     [TestCase("id/../other")]
+    [TestCase("account-1\n")]
     public void Validate_WhenResourceIdIsMalformed_RejectsResource(string resourceId)
     {
         var draft = StatusChange() with { Resource = new AuditResourceRef(AuditResourceTypes.Account, resourceId) };

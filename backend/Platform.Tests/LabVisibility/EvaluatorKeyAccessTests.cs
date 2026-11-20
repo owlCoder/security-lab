@@ -39,14 +39,15 @@ public class EvaluatorKeyAccessTests
 
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.AddProvider(logs));
-        services.AddAccessControl();
+        // #185: radnje se prijavljuju pre AddAccessControl(), kao u Program.cs.
         services.AddLabVisibility();
+        services.AddLabVisibilityAccess();
+        services.AddAccessControl();
         provider = services.BuildServiceProvider(new ServiceProviderOptions
         {
             ValidateScopes = true,
             ValidateOnBuild = true
         });
-        provider.RegisterLabVisibilityAccess();
 
         var content = LabPublicContent.Create(
             LabId,

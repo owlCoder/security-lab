@@ -11,6 +11,8 @@ public static class CompetenciesModule
     {
         services.AddScoped<Prg04SessionIdentity>();
         services.AddScoped<CompetencyLinkService>();
+        services.AddAccessAction<CompetencyEntryPolicy>(new ActionDefinition(
+            CompetencyLinkActions.Entry, ActionScope.Authenticated, null, IsPrivileged: false));
         services.AddAccessAction<CompetencyLinkManagePolicy>(new ActionDefinition(
             CompetencyLinkActions.Manage, ActionScope.Course, "laboratory", IsPrivileged: true));
         return services;

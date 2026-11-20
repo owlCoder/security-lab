@@ -77,9 +77,9 @@ public static class CompetencyEndpoints
 
     private static RouteHandlerBuilder Configure(RouteHandlerBuilder endpoint) => endpoint
         .WithTags("Competencies")
-        // Explicit checks above call the ACC engine for the PRG-04 edit action.
-        // No global subject-provider or session-middleware behavior is changed.
-        .DelegatesToLegacyAuthorization()
+        // Central entry authorization uses the validated PRG-04 session. Concrete
+        // laboratory visibility and Manage authorization retain their 404 contract.
+        .RequireAccess(CompetencyLinkActions.Entry)
         .AddEndpointFilter(async (invocation, next) =>
         {
             invocation.HttpContext.Response.Headers.CacheControl = "no-store";

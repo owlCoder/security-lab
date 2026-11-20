@@ -34,7 +34,8 @@
 
 - Implementation status:
 
-  - `SessionController`, `GET /api/auth/sessions` and `DELETE /api/auth/sessions/{handle}` are implemented. Both actions are marked `[DelegatedAuthorization]` and are listed in the ACC-05 endpoint inventory, because they authenticate the caller themselves.
+  - `SessionController`, `GET /api/auth/sessions` and `DELETE /api/auth/sessions/{handle}` are implemented. Since ACC-05 both actions are gated by the central Access middleware: `[RequireAccess("identity.session.list")]` and `[RequireAccess("identity.session.revoke")]`, both with `SessionSelfServicePolicy` (an active signed-in account, no resource). The subject comes from the server-side session (`IdentitySessionSubjectProvider`), so the policy can only ever apply to the caller's own sessions; the controller still repeats the `401` check and ownership is still enforced by `ISessionManager.RevokeSession`. The routes are no longer `[DelegatedAuthorization]` and are not in the delegated route inventory of `ApiEndpointCoverageTests`.
+  - `SessionCheckMiddleware` also runs ahead of the Access middleware for the routes of this module (`UseWhen` in `Program.cs`, recognised by their `RequireAccess` action). Without it Access would answer a bad session with its generic `401`, and the stable `session_invalid` code and the cleared cookie would be lost. A valid session without permission keeps Access's `403` (`ProblemDetails`). The later `SessionCheckMiddleware` pass reuses the validated session from `HttpContext.Items`.
   - `SessionManager.ListForUser` filters by user ownership, revocation, and expiration.
   - `SessionManager.RevokeSession` revokes one session only when it belongs to the given owner. `Session.IsActiveAt` is the single definition of "not revoked and not expired"; there is no schema change and no migration.
   - `SessionManager` takes an optional `TimeProvider` so expiry can be tested.
@@ -156,7 +157,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   | Response contains credential material | `SessionInfo` has no token, hash, or cookie property | `SessionInfo_ExposesNoTokenOrHash`, `ListSessions_ReturnsOnlyTheCallersActiveSessions_WithoutCredentialMaterial` |
   | Request without a session cookie | `401 session_invalid`, no cookie to clear | `ProtectedRoute_WithoutCookie_Returns401SessionInvalid_AndHasNoCookieToClear` |
   | Request with an unknown token | `401 session_invalid`, cookie cleared | `ProtectedRoute_WithUnknownToken_Returns401SessionInvalid_AndClearsTheCookie` |
-  | Valid session without permission | `403`, nothing changed, session stays valid | `ProtectedRoute_ValidSessionWithoutPermission_Returns403_AndChangesNothing` |
+  | Valid session without permission | `403` (Access `ProblemDetails`), nothing changed, session stays valid | `ProtectedRoute_ValidSessionWithoutPermission_Returns403_AndChangesNothing` |
   | Revoked session is used again | `401 session_invalid` on the next request (not `403`), cookie cleared | `RevokedSession_Gets401OnTheNextRequest_WhilePermissionDenialStays403` |
   | User revokes another of their sessions | `204`; the revoked one is refused at once, the caller's session stays valid | `RevokeOtherSession_RejectsItImmediately_AndKeepsTheCallersSessionValid` |
   | User revokes the session they are using | `204`; the same cookie is refused on the next request | `RevokeCurrentSession_RejectsTheSameCookieOnTheNextRequest` |
@@ -170,7 +171,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   - `backend/Platform.Api/Middleware/SessionCheckMiddleware.cs`
   - `backend/Platform.Api/Services/Identity/SessionManager.cs`
   - `backend/Platform.Identity/Entities/Session.cs`
-  - `backend/Platform.Access.Tests/ApiEndpointCoverageTests.cs` (the two session routes in the ACC-05 inventory)
+  - `backend/Platform.Api/Security/IdentityAccess/` (`IdentityAccessActions.cs`, `IdentitySessionAccessRegistration.cs`, `IdentitySessionSubjectProvider.cs`, `SessionSelfServicePolicy.cs`) and `backend/Platform.Api/Program.cs` (ACC-05 alignment, #185 and #200)
   - `backend/Platform.Identity.Tests/Controllers/SessionControllerTests.cs`
   - `backend/Platform.Identity.Tests/Middleware/SessionCheckMiddlewareTests.cs`
   - `backend/Platform.Identity.Tests/Services/SessionManagerTests.cs`
