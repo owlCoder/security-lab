@@ -2,6 +2,7 @@ using Platform.Access.AspNet;
  using Microsoft.AspNetCore.Mvc;
  using Platform.Api.Enums.Identity;
  using Platform.Api.Models.Identity;
+using Platform.Api.Security.IdentityAccess;
  using Platform.Api.Services.Identity;
 
  namespace Platform.Api.Controllers.Identity;
@@ -10,7 +11,7 @@ using Platform.Access.AspNet;
  [Route("api/admin/accounts")]
  public class AdminAccountsController(ChangeAccountStatus changeStatus) : ControllerBase
  {
-     [DelegatedAuthorization]
+     [RequireAccess(IdentityAccessActions.AccountStatusChange)]
      [HttpPut("{id:guid}/status")]
      public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeStatusRequest body, CancellationToken ct)
      {

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 
@@ -5,68 +6,6 @@ namespace Platform.Access.Domain.Constants;
 
 public static class AccessActions
 {
-    public static IReadOnlySet<string> RequiredIds { get; } =
-        new HashSet<string>(
-            [
-                "public.info.read",
-                "public.catalog.read",
-                "lab.read",
-                "lab.draft.manage",
-                "lab.revision.publish",
-                "lab.criteria.hidden.read",
-                "assignment.manage",
-                "assignment.read.own",
-                "course.read",
-                "course.create",
-                "course.archive",
-                "group.read",
-                "group.create",
-                "group.member.add",
-                "group.member.remove",
-                "material.read",
-                "attempt.create",
-                "attempt.read",
-                "attempt.submit",
-                "attempt.read.course",
-                "attempt.review",
-                "account.status.change",
-                "system.config.manage",
-                "results.sensitive.read",
-                "evaluation.task.process",
-                "audit.events.read"
-            ],
-            StringComparer.Ordinal);
-
-    public static IReadOnlyList<ActionDefinition> All =>
-    [
-        PublicInfoRead,
-        PublicCatalogRead,
-        LabRead,
-        LabDraftManage,
-        LabRevisionPublish,
-        LabCriteriaHiddenRead,
-        AssignmentManage,
-        AssignmentReadOwn,
-        CourseRead,
-        CourseCreate,
-        CourseArchive,
-        GroupRead,
-        GroupCreate,
-        GroupMemberAdd,
-        GroupMemberRemove,
-        MaterialRead,
-        AttemptCreate,
-        AttemptRead,
-        AttemptSubmit,
-        AttemptReadCourse,
-        AttemptReview,
-        AccountStatusChange,
-        SystemConfigManage,
-        ResultsSensitiveRead,
-        EvaluationTaskProcess,
-        AuditEventsRead
-    ];
-
     public static ActionDefinition PublicInfoRead { get; } =
         new("public.info.read", ActionScope.Public, null, false);
 
@@ -144,4 +83,39 @@ public static class AccessActions
 
     public static ActionDefinition AuditEventsRead { get; } =
         new("audit.events.read", ActionScope.Course, "course", false);
+
+    private static readonly IReadOnlyList<ActionDefinition> AllDefinitions =
+        Array.AsReadOnly<ActionDefinition>([
+            PublicInfoRead,
+            PublicCatalogRead,
+            LabRead,
+            LabDraftManage,
+            LabRevisionPublish,
+            LabCriteriaHiddenRead,
+            AssignmentManage,
+            AssignmentReadOwn,
+            CourseRead,
+            CourseCreate,
+            CourseArchive,
+            GroupRead,
+            GroupCreate,
+            GroupMemberAdd,
+            GroupMemberRemove,
+            MaterialRead,
+            AttemptCreate,
+            AttemptRead,
+            AttemptSubmit,
+            AttemptReadCourse,
+            AttemptReview,
+            AccountStatusChange,
+            SystemConfigManage,
+            ResultsSensitiveRead,
+            EvaluationTaskProcess,
+            AuditEventsRead
+        ]);
+
+    public static IReadOnlySet<string> RequiredIds { get; } =
+        AllDefinitions.Select(action => action.Id).ToFrozenSet(StringComparer.Ordinal);
+
+    public static IReadOnlyList<ActionDefinition> All => AllDefinitions;
 }

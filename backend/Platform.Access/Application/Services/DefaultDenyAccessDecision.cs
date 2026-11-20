@@ -69,7 +69,7 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
             return AccessDecision.Deny(AccessDenialReason.UnknownAction, correlationId);
         }
 
-        if (definition.Scope == ActionScope.Unknown ||
+        if (!Enum.IsDefined(definition.Scope) ||
             (definition.ResourceType is null && request.Resource is not null) ||
             (definition.ResourceType is not null &&
              (request.Resource is null ||
@@ -106,7 +106,7 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
         var permitted = await EvaluatePolicyAsync(policy, request, cancellationToken).ConfigureAwait(false);
         return permitted
             ? AccessDecision.Allow(policyId, correlationId, policyVersion)
-            : AccessDecision.Deny(AccessDenialReason.PolicyDenied, correlationId, policyVersion);
+            : AccessDecision.Deny(AccessDenialReason.PolicyDenied, correlationId, policyVersion, policyId);
     }
 
     private async Task<bool> EvaluatePolicyAsync(
@@ -131,17 +131,31 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
 
     private async Task TryAuditAsync(AccessRequest request, AccessDecision decision)
     {
+        using var timeout = new CancellationTokenSource(options.AuditTimeout);
+
         try
         {
-            var task = auditWriter.WriteAsync(request, decision, CancellationToken.None).AsTask();
+            var task = auditWriter.WriteAsync(request, decision, timeout.Token).AsTask();
             ObserveFault(task);
-            await task.WaitAsync(options.AuditTimeout).ConfigureAwait(false);
+            await task.WaitAsync(timeout.Token).ConfigureAwait(false);
         }
-        catch (Exception exception)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
-            this.logger.LogError(exception, "Authorization audit failed. CorrelationId: {CorrelationId}", decision.CorrelationId);
+            LogAuditLost("timeout", decision.CorrelationId);
+        }
+        catch (Exception)
+        {
+            LogAuditLost("failed", decision.CorrelationId);
         }
     }
+
+    private void LogAuditLost(string status, string correlationId) =>
+        logger.LogError(
+            AccessAuditEventIds.Lost,
+            "Access denial audit was not saved. EventType: {EventType}, Status: {Status}, CorrelationId: {CorrelationId}",
+            AccessAuditEventIds.DeniedEventType,
+            status,
+            correlationId);
 
     private static void ObserveFault(Task task) =>
         task.ContinueWith(
@@ -150,8 +164,14 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
 
-    private static string NormalizeCorrelationId(string? correlationId) =>
-        string.IsNullOrWhiteSpace(correlationId)
-            ? Guid.NewGuid().ToString("N")
-            : Regex.Replace(correlationId, @"[^\u0021-\u007E]", "_")[..Math.Min(correlationId.Length, 64)];
+    private static string NormalizeCorrelationId(string? correlationId)
+    {
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            return Guid.NewGuid().ToString("N");
+        }
+
+        var bounded = correlationId[..Math.Min(correlationId.Length, 64)];
+        return Regex.Replace(bounded, @"[^\u0021-\u007E]", "_");
+    }
 }

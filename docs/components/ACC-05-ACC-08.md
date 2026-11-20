@@ -4,7 +4,7 @@
 |---|---|
 | Tim | Tim 3 |
 | Zahtevi | ACC-05, ACC-08 |
-| Status | ACC-05 jezgro implementirano|
+| Status | ACC-05 implementirano; nedostupni ili nevažeći audit zapisi ostaju fail-closed i aktiviraju bezbedan alarm |
 | Projekat | `backend/Platform.Access` |
 | Studenti | PR 1/2023 Živanović Jovana<br>PR 16/2023 Musli Danijel<br>PR 18/2023 Spasić Veljko<br>PR 30/2023 Pavlović Sara<br>PR 32/2023 Stanković Pavle<br>PR 53/2023 Matić Željana<br>PR 60/2023 Todorović Nikolina |
 
@@ -26,8 +26,10 @@ Ugovor trenutno obuhvata:
 - `ResourceRef` — tip i identifikator resursa;
 - `AccessRequest` — subjekt, akcija, resurs i korelacioni ID;
 - `AccessDecision` — ishod, razlog, politika, verzija i korelacioni ID;
-- `IActionCatalog`, `IAccessPolicyRegistry` i `IAccessAuditWriter` — granice za buduće adaptere.
+- `IActionCatalog` i `IAccessPolicyRegistry` — granice katalog/registar;
+  `IAccessAuditWriter` — ugovor za Access audit adapter.
 - `IResourceOwnershipResolver` — server-side granica za potvrdu vlasništva resursa.
+- `IAccessSubjectProvider` — server-side izvor subjekta za ASP.NET middleware.
 
 `IActionCatalog` izlaže tipizovane `ActionDefinition` zapise.
 
@@ -82,13 +84,20 @@ eksplicitnu `ActionDefinition` kroz `AddAccessAction<TPolicy>(definition)`;
 njihovo uvođenje zahteva code review centralnog ugovora. Nepoznata akcija daje
 `UnknownAction`, a akcija bez politike `NoPolicy`.
 
-Postojeći moduli još imaju privremeni composition adapter koji registruje
-akcije/politike nakon `Build()`, ali pre `app.Run()`. To je migraciona
-kompatibilnost, ne obrazac za nove integracije. `AccessConfigurationStartupCheck`
-zamrzava katalog i registar pri pokretanju hosta; posle toga registracije
-bacaju grešku. Konkretni registry/catalog adapteri dostupni su postojećim
-modulima samo radi tog privremenog composition koraka; ne smeju se koristiti
-za autorizacione izmene tokom obrade zahteva.
+API dodaje identitetske, Authoring i Revision akcije/politike kroz ovaj ugovor
+pre `Build()`. DI kreirani katalog i registar se zamrzavaju pri sastavljanju
+kompozicije, pre nego što se mogu koristiti nakon izgradnje hosta. Registracija
+akcija ili politika preko konkretnih runtime registry-ja nije podržana.
+
+API host zahteva potpunu pokrivenost politika za sve akcije koje se mogu
+koristiti. Jedine izuzetke eksplicitno navodi `ActionsWithoutPolicy`; oni ostaju
+bez politike i zato se i dalje odbijaju (`NoPolicy`). Trenutni izuzeci su
+`public.catalog.read`, `account.status.change`, `system.config.manage`,
+`results.sensitive.read` i `evaluation.task.process`. Izuzetak nije dozvola;
+`public.info.read` nije izuzetak i ima registrovanu politiku.
+`ActionScope.Unknown` i nevažeći resource type odbacuju se prilikom validacije.
+Resource type je case-sensitive ASCII obrazac `[a-z][a-z0-9-]{0,63}`; isti
+validator koriste katalog i ASP.NET endpoint metadata.
 
 Politike su singleton-i jer su i decision engine i registry singleton-i.
 Zato politika, kao i svi servisi koje ona koristi, mora biti thread-safe i ne
@@ -137,12 +146,27 @@ Dok politika nije registrovana, zahtev se odbija sa `NoPolicy`;
 Membership/delegation status, uključujući istek i opoziv, ostaje garancija
 vlasnika stvarnog `IMembershipReader` adaptera.
 
-## Implementacija 
+## Implementacija
 
 Registracija zavisnosti je deo `Platform.Access/Composition`. `Program.cs`
-poziva `AddAccessControl()`; moduli dodaju svoje akcije/politike kroz javni
-composition API pre `Build()`. Trenutni API još ne registruje konkretnu Audit
-politiku niti menja fail-closed membership/resource fallback-e.
+poziva `AddAccessControl()`; identitetske, Authoring i Revision akcije/politike
+registruje kroz javni composition API pre `Build()`. `AccessControlMiddleware`
+se izvršava pre `SessionCheckMiddleware`. Access subject provider je
+`IdentitySessionSubjectProvider` za session-bound akcije, dok
+`RevisionSessionSubjectProvider` dodatno validira sesiju i status naloga na
+revision rutama. Ostale akcije koriste unutrašnji provider, podrazumevano
+`AnonymousAccessSubjectProvider`; Authoring rute koriste
+`AuthoringAccessSubjectProvider` i validiranu sesiju. `SessionCheckMiddleware`
+ponovo proverava sesiju pre endpoint-a gde se primenjuje. Razvojni header nije
+izvor Access identiteta.
+
+Auth login/logout i health su eksplicitno javne rute. `/api/auth/me` je javna
+samo za centralni Access sloj, ali i dalje zahteva validnu sesiju kroz
+`SessionCheckMiddleware`. Administratorske, kreiranje naloga, Authoring i
+Revision rute koriste `RequireAccess`. Legacy delegation marker nikada ne
+dozvoljava prolaz; rute sa markerom, bez zahteva ili sa više/konfliktnim
+zahtevima se odbijaju. Odbijanja pre evaluacije politike se takođe šalju na
+audit.
 
 Fail-closed tok:
 
@@ -155,36 +179,51 @@ Fail-closed tok:
 7. neusklađen scope ili tip resursa → `PolicyError`;
 8. samo uspešna politika može vratiti `Allow`.
 
-Audit se izvršava kroz lanac `ResilientAccessAuditWriter` →
-`FilteringAccessAuditWriter` → `AggregatingAccessAuditSink` →
-`LoggerAccessAuditSink`. Odbijanja se agregiraju po akteru, akciji, ciljnom resursu
-i razlogu odbijanja; prvi događaj se emituje odmah, a ponovljena odbijanja se
-objavljuju kao ograničeni summary zapisi nakon isteka aggregation prozora.
-`AccessAuditFlushService` periodično i pri gašenju aplikacije flush-uje otvorene
-summary zapise. Pipeline ima ograničene aggregation ključeve i pending retry
-zapise, tako da rast broja događaja ne postane neograničen.
+API šalje Access odbijanja kroz `CentralAccessAuditWriter` do
+`ITrustedAuditWriter`. Audit koristi `AccessDecision.CorrelationId`, uključujući
+vrednost koju je engine normalizovao ili generisao. Samo odsutan subjekt se
+mapira na `Anonymous`; subjekt sa ID-em koji nije neprazan GUID se ne upisuje i
+aktivira alarm `access.audit.lost`. Nevalidna opcionalna `action`, `policyId` i
+`policyVersion` vrednost se izostavlja iz audit detalja.
 
-`ResilientAccessAuditWriter` izoluje audit od odluke: audit ima timeout,
-prosleđuje cancellation token i greške audit adaptera ne menjaju već izračunati
-`Allow` ili `Deny` ishod. Neuspeh i timeout se prijavljuju kao zasebni alarmi.
-Audit record factory i sanitizer dozvoljavaju samo definisana polja, ograničavaju
-dužinu vrednosti i odbacuju kontrolne/hostile vrednosti; tajne, telo zahteva i
-studentski odgovori se ne upisuju.
+Audit u engine-u i pre-decision middleware denial-u koristi nezavisan
+`CancellationTokenSource` sa istim `AccessDecisionOptions.AuditTimeout`; token
+nije povezan sa `HttpContext.RequestAborted`. Timeout token se prosleđuje kroz
+Access adapter, `ITrustedAuditWriter`, `AuditWriter` i PostgreSQL store, koji ga
+prosleđuje EF Core komandi. Timeout ili neuspešan/nepotpun zapis ne menja
+HTTP denial: odbijeni zahtev ostaje 403. Jedan neuspešan zapis emituje tačno
+jedan `LogError` sa stabilnim EventId `access.audit.lost`; sadržaj obuhvata
+samo tip događaja, status i correlation ID, nikada exception, identitet
+subjekta, akciju ili rejection detalje. Kada je klijent prekinuo zahtev,
+Audit operacija se i dalje može izvršavati do nezavisnog timeout-a.
 
-`LoggerAccessAuditSink` je lokalni adapter preko host `ILogger` ugovora. Centralni
-`Platform.Audit` ugovor još nije direktno integrisan; integracija se radi nakon
-stabilizacije Audit modula. Testovi koriste eksplicitne recording/throwing
+Prema D6, svaki obavezni `access.denied` događaj se šalje pojedinačno; nema
+agregacije ni uzorkovanja. Kapacitet baze i održiva stopa upisa nisu potvrđeni
+ovom izmenom: produkciono opterećenje nije testirano i nema tvrdnje o
+performansama. Potrebna je koordinacija Tima 3 i Tima 12 (Audit/skladište) za
+reprezentativnu proveru opterećenja i kapaciteta pre takve tvrdnje. Eventualna
+promena koja odbacuje ili agregira obavezne događaje zahteva zasebnu odluku
+vlasnika D6.
+
+Uspešne Access odluke se trenutno ne upisuju kao Access audit događaj: Audit
+katalog prihvata `AccessDenied`, ali nema odgovarajući događaj za odluku
+`Allow`. Do izmene vlasničkog ugovora `Platform.Audit`, dozvole se ne smeju
+mapirati na događaj odbijanja.
+
+`LoggerAccessAuditWriter` je lokalni fallback preko host `ILogger` ugovora. Centralni
+`Platform.Audit` ugovor je integrisan za odbijanja kroz `CentralAccessAuditWriter`;
+za uspešne odluke još nije definisan odgovarajući Audit event. Testovi koriste eksplicitne recording/throwing
 audit fake-ove. `EmptyMembershipReader`
 i `EmptyResourceDescriptorResolver` ostaju namerni fail-closed fallback-i za slučaj
 da domenski adapteri nisu registrovani; ne predstavljaju placeholder poslovnu
 logiku i ne mogu odobriti zahtev.
 
-`AddAccessControl()` registruje katalog, policy registry, decision engine, audit
-pipeline i flush servis kao singleton komponente. Politike i membership/resource
-readeri moraju biti singleton-safe. U composition fazi katalog i registar mogu
-se koristiti kroz postojeće adapterske API-je; host startup ih zamrzava pre
-prvog zahteva, pa naknadna izmena nije moguća. Moduli koji se integrišu treba da
-koriste javni `AddAccessAction`/`AddAccessPolicy` hook pre `Build()`.
+`AddAccessControl()` registruje katalog, policy registry i decision engine kao
+singleton komponente. API host registruje `CentralAccessAuditWriter` kao
+`IAccessAuditWriter`; minimalni hostovi zadržavaju logger fallback. Politike i membership/resource readere
+moraju biti singleton-safe. DI kreirani katalog/registar se zamrzavaju pre
+prvog zahteva; moduli koriste isključivo `AddAccessAction`/`AddAccessPolicy`
+pre `Build()`.
 Audit loggers koriste host
 logger kada je dostupan, a `NullLogger` fallback u minimalnim kontejnerima; modul
 ne konfiguriše globalni logging hosta.
@@ -197,37 +236,198 @@ moduli treba da ga obezbede kroz dogovorenu integraciju.
 ## Dijagram arhitekture
 
 ```mermaid
-flowchart LR
-  API[Platform.Api] -->|AccessRequest| DEC[IAccessDecision]
-  DEC --> CAT[IActionCatalog]
-  DEC --> REG[IAccessPolicyRegistry]
-  DEC --> AUD[IAccessAuditWriter]
-  REG --> POL[Policy adapter]
-  DEC -->|AccessDecision| API
-  ID[Identity / membership] -. future adapter .-> API
-  OWN[IResourceOwnershipResolver] --> POL
+flowchart TB
+  CLIENT["Klijent"] --> ROUTING["HTTP rutiranje"]
+  ROUTING --> ACM["AccessControlMiddleware"]
+  ENDPOINT_META["Endpoint metapodaci<br/>RequireAccess action/resurs"] --> ACM
+  ACM -->|"endpoint nije pronađen"| NEXT["Nastavak pipeline-a bez Access odluke"]
+
+  subgraph IDENTITY["Identifikacija subjekta"]
+    ACM --> SUBJECT_PROVIDER["IAccessSubjectProvider"]
+    SUBJECT_PROVIDER --> SUBJECT["SubjectRef ili null"]
+  end
+  ACM --> REQUEST["AccessRequest"]
+  SUBJECT --> REQUEST
+
+  subgraph DECISION_FLOW["Odluka o pristupu"]
+    REQUEST --> DECISION["DefaultDenyAccessDecision"]
+    DECISION --> CATALOG["IActionCatalog"]
+    CATALOG --> DECISION
+    DECISION --> REGISTRY["IAccessPolicyRegistry"]
+    REGISTRY --> POLICY["IAccessPolicy"]
+    POLICY --> RESOLVERS["Membership / resource resolvers"]
+    RESOLVERS --> POLICY
+    POLICY --> DECISION
+  end
+
+  subgraph CONFIGURATION["Konfiguracija i startup"]
+    ACTIONS["Centralne i dodatno registrovane akcije"] --> CATALOG
+    POLICIES["Ugrađene i dodatno registrovane politike"] --> REGISTRY
+    CATALOG --> STARTUP["Startup konfiguraciona validacija"]
+    REGISTRY --> STARTUP
+  end
+  DECISION --> ACM
+
+  subgraph AUDIT_FLOW["Audit odbijanja"]
+    DECISION --> AUDIT_ADAPTER["IAccessAuditWriter"]
+    ACM -->|"odbijanja pre evaluacije"| AUDIT_ADAPTER
+    AUDIT_ADAPTER --> WRITER_BINDING["Audit writer registrovan u hostu"]
+    WRITER_BINDING -->|"API host"| CENTRAL_AUDIT["CentralAccessAuditWriter"]
+    CENTRAL_AUDIT -->|"samo Deny"| TRUSTED_AUDIT["ITrustedAuditWriter"]
+    WRITER_BINDING -->|"logger fallback host"| LOGGER_WRITER["LoggerAccessAuditWriter"]
+    LOGGER_WRITER --> LOG["Host logger"]
+  end
+
+  subgraph RESPONSE_FLOW["Nastavak zahteva i odgovor"]
+    NEXT --> SESSION
+    ACM -->|"Allow"| SESSION["SessionCheckMiddleware<br/>gde je registrovan"]
+    SESSION --> ENDPOINT["Endpoint"]
+    ACM -->|"Deny"| RESPONSE["Access ProblemDetails<br/>401/403"]
+    SESSION -->|"nevažeća sesija"| SESSION_FAILURE["401 status<br/>bez Access ProblemDetails"]
+    RESPONSE --> CLIENT
+    SESSION_FAILURE --> CLIENT
+    ENDPOINT --> CLIENT
+  end
 ```
 
-**Veza sa platformom:** `Platform.Api` je kompozicioni sloj; moduli registruju odobrene akcije/politike pre izgradnje hosta i koriste server-side resolvere preko javnih ugovora.
+Definicije kataloga se validiraju pri njegovoj izgradnji. Pri pokretanju se
+katalog i registar zamrzavaju, a zatim se proveravaju pokrivenost politika i
+izuzeci; konfiguraciona greška prekida pokretanje. U API hostu audit adapter je
+centralni; drugi hostovi mogu koristiti logger fallback. Session middleware je
+posle Access middleware-a u API pipeline-u.
 
-## Dijagram toka podataka
+## Dijagrami toka podataka
+
+### 1. Konfiguracioni podaci
 
 ```mermaid
-flowchart LR
-  U[Student / nastavnik / administrator]
-  subgraph CLIENT[Granica poverenja: klijent]
-    U -->|HTTP zahtev| API[Platform.Api]
-  end
-  subgraph SERVER[Granica poverenja: serverska platforma]
-    API -->|server-side podaci| P[Proces odluke]
-    P --> C[(Katalog akcija)]
-    P --> R[(Registar politika)]
-    P --> A[(Audit adapter)]
-    P -->|Allow / Deny| API
-  end
-  API -->|generički rezultat| U
-  API -.->|uloga/identitet iz zahteva se ignorišu| IGN[Klijentski header/body/query]
+flowchart TB
+  ACTION_DEFS["AccessActions.All<br/>dodatne ActionDefinition"] --> CATALOG_VALIDATION["Validacija ID-a, scope-a,<br/>resource type-a, duplikata<br/>i obaveznih akcija"]
+  CATALOG_VALIDATION --> CATALOG["InMemoryActionCatalog"]
+  POLICY_DEFS["CourseRolePolicies.All<br/>AddAccessPolicy registracije"] --> REGISTRY["InMemoryAccessPolicyRegistry"]
+  ADD_ACTION["AddAccessAction registracije"] --> CATALOG_VALIDATION
+  ADD_ACTION --> REGISTRY
+  CONFIG["AccessConfigurationOptions"] --> STARTUP["AccessConfigurationStartupCheck"]
+  CATALOG --> STARTUP
+  REGISTRY --> STARTUP
+  STARTUP --> FREEZE["Zamrzavanje registra i kataloga"]
+  FREEZE --> VALIDATE["AccessConfigurationValidator.Validate"]
+  VALIDATE -->|"validno"| READY["Katalog/registar spremni"]
+  VALIDATE -->|"konfiguracija ne prolazi validaciju"| CONFIG_ERROR["Greška pri pokretanju"]
+  READY -->|"akcija bez politike, uz eksplicitni izuzetak"| NO_POLICY["Runtime odluka: NoPolicy"]
 ```
+
+### 2. HTTP zahtev i AccessRequest
+
+```mermaid
+flowchart TB
+  CLIENT["Klijent"] -->|"HTTP zahtev + mogući session cookie"| ROUTING["UseRouting"]
+  ROUTING -->|"HttpContext sa endpoint-om i route vrednostima"| ACM["AccessControlMiddleware"]
+  ACM --> META_CHECK["Provera Access metapodataka"]
+  META_CHECK -->|"tačno jedan RequireAccess;<br/>nije public/delegated"| SUBJECT_LOOKUP["IAccessSubjectProvider.GetSubjectAsync"]
+  META_CHECK -->|"nedostaje/više zahteva,<br/>public ili delegated"| EARLY_DENY["Pre-decision Deny"]
+  SUBJECT_LOOKUP --> AUTHORING_PROVIDER["AuthoringAccessSubjectProvider"]
+  AUTHORING_PROVIDER -->|"Authoring akcija"| AUTHORING_RESOLVER["AuthoringSession resolver"]
+  AUTHORING_RESOLVER -->|"validirana sesija ili null"| SUBJECT_RESULT
+  AUTHORING_PROVIDER -->|"ostale rute"| REVISION_PROVIDER["RevisionSessionSubjectProvider<br/>dekorator"]
+  REVISION_PROVIDER -->|"revision ruta: session cookie"| SESSION_MANAGER["ISessionManager.ValidateAsync"]
+  SESSION_MANAGER -->|"validna aktivna sesija"| ACCOUNT_READER["IAccountStatusReader.FindAsync"]
+  ACCOUNT_READER -->|"nalog Active + validan user ID"| SUBJECT["SubjectRef(user ID, Active)"]
+  SESSION_MANAGER -->|"nema/nevažeća/neaktivna sesija"| NO_SUBJECT["null subject"]
+  ACCOUNT_READER -->|"nalog nedostaje ili nije Active"| NO_SUBJECT
+  REVISION_PROVIDER -->|"ostale rute"| IDENTITY_PROVIDER["IdentitySessionSubjectProvider"]
+  IDENTITY_PROVIDER -->|"session-bound akcija"| SESSION_MANAGER
+  IDENTITY_PROVIDER -->|"ostale akcije: inner provider"| INNER["AnonymousAccessSubjectProvider"]
+  INNER -->|"SubjectRef ili null"| SUBJECT_RESULT["Subject provider rezultat"]
+  SUBJECT --> SUBJECT_RESULT
+  NO_SUBJECT --> SUBJECT_RESULT
+  SUBJECT_RESULT -->|"SubjectRef ili null"| ACM
+  ACM --> ACTION_CHECK["Validacija ActionId"]
+  SUBJECT_LOOKUP -->|"izuzetak"| EARLY_DENY
+  ACTION_CHECK -->|"nevažeći action ID"| EARLY_DENY
+  ACTION_CHECK -->|"validno"| RESOURCE_CHECK["Izgradnja ResourceRef"]
+  RESOURCE_CHECK -->|"resource type + ID iz route parametra;<br/>provera i normalizacija"| RESOURCE["ResourceRef ili null"]
+  RESOURCE_CHECK -->|"loš metadata/route ID"| EARLY_DENY
+  RESOURCE --> REQUEST["AccessRequest<br/>subject, action, resource, correlationId"]
+  ACM -->|"SubjectRef ili null"| REQUEST
+  ACTION_CHECK -->|"action"| REQUEST
+  ACM -->|"TraceIdentifier"| REQUEST
+  EARLY_DENY -->|"middleware pravi AccessRequest<br/>sa dostupnim podacima"| EARLY_REQUEST["AccessRequest (može biti nepotpun)"]
+  EARLY_DENY -->|"Deny: PolicyError"| EARLY_DECISION["AccessDecision"]
+```
+
+### 3. Podaci odluke i politike
+
+```mermaid
+flowchart TB
+  REQUEST["AccessRequest<br/>subject, action, resource, correlationId"] --> ENGINE["DefaultDenyAccessDecision"]
+  ENGINE -->|"action ID"| CATALOG["IActionCatalog"]
+  CATALOG -->|"nema akcije"| UNKNOWN["Deny: UnknownAction"]
+  CATALOG -->|"startup-validirana ActionDefinition"| CHECKS["Provera scope/resursa/subjekta"]
+  REQUEST --> CHECKS
+  CHECKS -->|"nevažeći scope ili resource type"| INVALID["Deny: PolicyError"]
+  CHECKS -->|"osim Public: subject null/neaktivan"| UNAUTH["Deny: Unauthenticated / AccountNotActive"]
+  CHECKS -->|"validno"| REGISTRY["IAccessPolicyRegistry"]
+  REGISTRY -->|"nema politike"| NO_POLICY["Deny: NoPolicy"]
+  REGISTRY -->|"politika postoji"| POLICY_CHECK["Provera policy Id/version"]
+  POLICY_CHECK -->|"nedostaje Id/version"| INVALID
+  POLICY_CHECK -->|"validna politika + AccessRequest"| POLICY["IAccessPolicy<br/>npr. CourseRoleAccessPolicy"]
+  POLICY -->|"ResourceRef"| RESOLVER["IResourceDescriptorResolver<br/>(mora i IResourceOwnershipResolver<br/>kad se traži vlasništvo)"]
+  RESOLVER -->|"course ID / owner ID"| POLICY
+  POLICY -->|"account ID + course ID"| MEMBERSHIP["IMembershipReader"]
+  MEMBERSHIP -->|"account/course ID, Active status,<br/>role i delegated actions"| POLICY
+  POLICY -->|"true"| ALLOW["Allow"]
+  POLICY -->|"false"| DENY["Deny: PolicyDenied"]
+  POLICY -->|"izuzetak/PolicyTimeout 2 s"| INVALID
+  ENGINE -->|"greška evaluacije, policy timeout ili cancellation<br/>(PolicyError; middleware token nakon 3 s)"| INVALID
+  UNKNOWN --> RESULT["AccessDecision<br/>outcome, reason, policyId/version,<br/>correlationId"]
+  INVALID --> RESULT
+  UNAUTH --> RESULT
+  NO_POLICY --> RESULT
+  ALLOW --> RESULT
+  DENY --> RESULT
+```
+
+### 4. Audit podaci
+
+```mermaid
+flowchart TB
+  ENGINE["Decision engine"] -->|"AccessRequest + AccessDecision<br/>za svaki ishod"| AUDIT["IAccessAuditWriter"]
+  EARLY["Middleware denial pre decision-a"] -->|"AccessRequest + Deny"| AUDIT
+  AUDIT -->|"Allow"| IGNORE["Central adapter ga ignoriše"]
+  AUDIT -->|"Deny"| CENTRAL["CentralAccessAuditWriter"]
+  CENTRAL --> MAPPER["AccessDeniedAuditMapper"]
+  MAPPER -->|"draft: denialReason, valid action/policy/version;<br/>context: actor + decision.CorrelationId; bez ResourceRef"| TRUSTED["ITrustedAuditWriter"]
+  TRUSTED -->|"nije zabeležen"| LOST["LogError: access.audit.lost<br/>tip događaja, status, correlation ID"]
+  CENTRAL -->|"greška"| CALLER["Pozivalac"]
+  CALLER -->|"engine i middleware pre-decision audit:<br/>AccessDecisionOptions.AuditTimeout"| LOG["ILogger; odluka ostaje Deny"]
+  AUDIT -->|"samo kada je fallback registrovan"| FALLBACK["LoggerAccessAuditWriter"]
+  FALLBACK -->|"loguje samo Deny"| LOG
+```
+
+### 5. Rezultat HTTP obrade
+
+```mermaid
+flowchart TB
+  ACM["AccessControlMiddleware"] -->|"decision Allow"| NEXT["_next"]
+  NEXT --> SESSION["SessionCheckMiddleware"]
+  SESSION -->|"sesija validna / AllowAnonymous /<br/>Development bypass rute"| ENDPOINT["Endpoint"]
+  SESSION -->|"sesija nedostaje ili nevažeća"| SESSION_401["401 status"]
+  ACM -->|"metadata gate rejection /<br/>subject-provider exception"| FORBIDDEN["403 ProblemDetails"]
+  ACM --> STATUS["Status za action/resource grešku<br/>ili Access Deny"]
+  STATUS -->|"subject null ili Unauthenticated"| UNAUTH["401 ProblemDetails"]
+  STATUS -->|"subject postoji i drugi Deny razlog"| FORBIDDEN
+  UNAUTH --> RESPONSE["correlationId; bez razloga/resursa"]
+  FORBIDDEN --> RESPONSE
+  RESPONSE --> CLIENT["HTTP odgovor"]
+  SESSION_401 --> CLIENT
+  ENDPOINT --> CLIENT
+```
+
+`AccessProblemDetailsWriter` vraća 401 za neautentifikovanog subjekta, a inače
+403, sa `correlationId` bez detalja odluke. `SessionCheckMiddleware` može
+postaviti 401 nakon dozvoljene Access odluke; taj odgovor nije ProblemDetails
+koji formira Access middleware.
 
 
 ## Demonstracija
@@ -265,46 +465,3 @@ if (app.Environment.IsDevelopment())
 Ako se API pokrene bez `ASPNETCORE_ENVIRONMENT=Development`, `/api/health` će raditi, ali će `/api/access/demo-deny` vratiti `404 Not Found`. To znači da ruta nije registrovana, a ne da je autorizacija odbila zahtev.
 
 Ovim se proveravaju pokretanje API-ja i početni ACC-05 tok. Demo ruta je samo razvojna i namerno nije dostupna u produkciji.
-
-
-## Planirani tok razvoja
-
-1. Dogovor sa Identity, Laboratories, Attempts i Audit timovima.
-2. Registrovane akcije i konkretne politike.
-3. Endpoint metadata i fallback-deny.
-4. Integracija sa centralnim `Platform.Audit` modulom nakon stabilizacije njegovog composition ugovora.
-5. Domenski ownership adapteri i preostala ACC-08 pravila.
-6. Jedinični, integracioni i negativni testovi u CI-ju.
-## Integracija razvojne KT1 demonstracije (ACC-04/ADM-08)
-
-KT1 endpoint-i su dostupni isključivo u Development okruženju uz eksplicitno
-`Kt1Demo:Enabled`. KT1 koristi **izolovan** `DefaultDenyAccessDecision` sa sopstvenim
-katalogom i registracijom svojih `AttemptPolicy` i `AdministrationPolicy` pravila.
-KT1 servisi dobijaju taj imenovani decision engine kroz DI fabrike, dok ostatak
-API-ja nastavlja da koristi globalni `IAccessDecision` iz ACC-05.
-
-Razlog je što KT1 simulacija i produkciona matrica imaju isto ime akcije
-`attempt.read`, ali različite izvore članstva i provere vlasništva. Ne sme se
-preskočiti konflikt registracije tako da jedan modul neprimetno nasledi politiku
-drugog. Oba engine-a zadržavaju fail-closed proveru opsega, resursa,
-identiteta i konkretne politike; KT1 ne postaje alternativna dozvola na
-produkcijskim endpoint-ima.
-
-Za konačnu integraciju svih timova ostaje obavezno da rute eksplicitno
-deklariraju `RequireAccess` ili odobreni `AllowPublic`; test endpoint
-coverage-a se ne isključuje radi zelenog CI-a.
-
-Integraciona provera 2026-11-05: resursne akcije Authoring i LabVisibility sada se registruju sa eksplicitnim tipom resursa i opsegom u kompoziciji pripadajućih modula; provera scope-a i dalje ostaje fail-closed.
-
-## Migracija postojećih rutera bez promene njihovih autorizacionih pravila
-
-`DelegatedAuthorizationAttribute` i `DelegateAuthorization()` su privremeni
-migracioni most za proverene postojeće endpoint-e. Ne predstavljaju `Allow`,
-ne kreiraju Access politiku i ne zamenjuju `RequireAccess`; endpoint owner je
-odgovoran za nezavisno testirani guard, a delegacija zahteva eksplicitnu
-reviziju. Novi endpoint-i ne smeju koristiti adapter. ACC-05 coverage test
-proverava odobreni inventar ruta i odbija nepoznate/neodobrene delegacije.
-
-Audit probni `/__test/audit-events` postoji isključivo u `Testing` hostu
-i oslanja se na testovima definisan sintetički kontekst. Ne postoji u
-produkcijskom registru endpoint-a.

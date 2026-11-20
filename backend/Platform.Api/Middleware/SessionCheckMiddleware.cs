@@ -64,6 +64,14 @@ public class SessionCheckMiddleware
             return;
         }
 
+        // IDN-07 / ACC-05: Identity routes are checked ahead of Access (see Program.cs); the later pass
+        // reuses that result instead of validating, and touching, the same session twice.
+        if (context.Items[SessionItemKey] is ValidateSession)
+        {
+            await _next(context);
+            return;
+        }
+
         ValidateSession? validate = await sessionManager.ValidateAsync(token, context.RequestAborted);
 
         if (validate == null)

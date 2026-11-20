@@ -39,7 +39,6 @@ public class ApiEndpointCoverageTests
         "/api/laboratories/{id:guid}/title",
         "/api/laboratories/{laboratoryId:guid}/competencies",
         "/api/laboratories/{laboratoryId:guid}/competencies/{competencyId:guid}",
-        "/api/laboratories/{laboratoryId:guid}/access",
         "/api/labs/",
         "/api/labs/{id:guid}",
         "/api/labs/{id:guid}/title",
@@ -52,7 +51,7 @@ public class ApiEndpointCoverageTests
     };
 
     [Test]
-    public void ACC05_Every_real_route_is_protected_or_approved_public()
+    public void ACC05_Every_real_route_has_exactly_one_access_requirement()
     {
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b => b.UseEnvironment("Development"));
@@ -65,19 +64,9 @@ public class ApiEndpointCoverageTests
         foreach (var e in endpoints)
         {
             var route = "/" + e.RoutePattern.RawText?.TrimStart('/');
-            var hasReq = e.Metadata.GetMetadata<IAccessRequirementMetadata>() is not null;
-            var isPublic = e.Metadata.GetMetadata<PublicEndpointMetadata>() is not null
-                           || e.Metadata.GetMetadata<AllowPublicAttribute>() is not null;
-            var isDelegated = e.Metadata.GetMetadata<DelegatedAuthorizationAttribute>() is not null;
-
-            if ((hasReq ? 1 : 0) + (isPublic ? 1 : 0) + (isDelegated ? 1 : 0) > 1)
-                violations.Add($"{route}: conflicting access metadata");
-            else if (!hasReq && !isPublic && !isDelegated)
-                violations.Add($"{route}: no access metadata");
-            else if (isPublic && !ApprovedPublicRoutes.Contains(route))
-                violations.Add($"{route}: public but not approved");
-            else if (isDelegated && !ApprovedDelegatedRoutes.Contains(route))
-                violations.Add($"{route}: legacy delegation not explicitly reviewed");
+            var requirements = e.Metadata.GetOrderedMetadata<IAccessRequirementMetadata>();
+            if (requirements.Count != 1)
+                violations.Add($"{route}: expected exactly one access requirement");
         }
 
         Assert.That(violations, Is.Empty, string.Join(Environment.NewLine, violations));

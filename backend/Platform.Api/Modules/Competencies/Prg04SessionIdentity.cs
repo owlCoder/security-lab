@@ -9,7 +9,7 @@ using SessionIdentityContextContract = Platform.Api.Interfaces.Identity.IIdentit
 
 namespace Platform.Api.Modules.Competencies;
 
-// Used only by PRG-04 handlers. In Development the shared session middleware skips
+// Used by PRG-04's central subject provider and handlers. In Development the shared session middleware skips
 // /api/laboratories, so validate its cookie here if it supplied no trusted session.
 public sealed class Prg04SessionIdentity(
     SessionIdentityContextContract identity,
