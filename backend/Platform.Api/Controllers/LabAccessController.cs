@@ -8,8 +8,8 @@ using AccountState = Platform.Access.Domain.Enums.AccountState;
 
 namespace Platform.Api.Controllers;
 
+[RequireAccess(LabVisibilityActions.Entry)]
 [ApiController]
-[DelegatedAuthorization]
 [Route("api/laboratories/{laboratoryId:guid}/access")]
 public sealed class LabAccessController(
     IPrerequisiteAccessService accessService,
