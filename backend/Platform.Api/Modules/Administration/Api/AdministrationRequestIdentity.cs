@@ -13,7 +13,8 @@ public static class AdministrationRequestIdentity
 {
     internal static readonly object ActorKey = new();
     internal static readonly object IdentityUnavailableKey = new();
-    public static bool AppliesTo(HttpContext http) => http.GetEndpoint()?.Metadata.GetMetadata<AdministrationEndpointMetadata>() is not null;
+    public static bool AppliesTo(HttpContext http) => http.GetEndpoint()?.Metadata.GetMetadata<AdministrationEndpointMetadata>() is not null ||
+        http.GetEndpoint()?.Metadata.GetMetadata<Platform.Api.Modules.Access.Api.AttemptEndpointMetadata>() is not null;
 
     public static IServiceCollection AddAdministrationRequestIdentity(this IServiceCollection services)
     {

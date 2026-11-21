@@ -6,6 +6,7 @@ using Platform.Access.Domain.Enums;
 using Platform.Api.Modules.Access;
 using Platform.Api.Modules.Administration.Persistence;
 using Platform.Api.Services.Identity;
+using Platform.Api.Modules.Administration.Integration;
 
 namespace Platform.Api.Modules.Administration.Api;
 
@@ -25,13 +26,16 @@ public static class AdministrationEndpoints
         services.AddSingleton(new AdministrationDatabase(connection));
         services.AddSingleton<IdentityAdministrationAccounts>();
         services.AddSingleton<AdministrationSessions>();
+        services.AddSingleton<ITrustedCourseDirectory, CatalogCourseDirectory>();
         services.AddSingleton<PersistentAdministrationPolicy>(sp => new(
-            sp.GetRequiredService<AdministrationDatabase>(), sp.GetRequiredService<IdentityAdministrationAccounts>()));
+            sp.GetRequiredService<AdministrationDatabase>(), sp.GetRequiredService<IdentityAdministrationAccounts>(),
+            sp.GetRequiredService<ITrustedCourseDirectory>()));
         foreach (var action in new[] { AdministrationPolicy.Read, AdministrationPolicy.Rename, AdministrationPolicy.Delegate, AdministrationPolicy.Revoke })
             services.AddAccessAction<PersistentAdministrationPolicy>(new(action, ActionScope.Course, "course", true));
         services.AddScoped<PersistentAdministrationService>(sp => new(connection,
             sp.GetRequiredService<IdentityAdministrationAccounts>(), sp.GetRequiredService<IAccessDecision>(),
-            sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<PersistentAdministrationService>>()));
+            sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<PersistentAdministrationService>>(),
+            sp.GetRequiredService<ITrustedCourseDirectory>()));
         return true;
     }
 
