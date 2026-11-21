@@ -41,6 +41,10 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
+using Platform.Api.ExceptionHandling;
+using Platform.Prerequisites.Application;
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
@@ -108,6 +112,7 @@ builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
+builder.Services.AddTransient<PrerequisitePersistenceExceptionHandler>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -180,6 +185,36 @@ else
     builder.Services.AddSingleton<ILaboratoryRepository, UnavailableLaboratoryRepository>();
 }
 
+// LAB-06: prerequisite persistence
+if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
+{
+    builder.Services.AddScoped<IPrerequisiteRepository, LabPrerequisiteStoreAdapter>();
+}
+else if (builder.Environment.IsDevelopment() ||
+         builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddSingleton<IPrerequisiteRepository, InMemoryPrerequisiteRepository>();
+}
+else
+{
+    builder.Services.AddSingleton<IPrerequisiteRepository, UnavailablePrerequisiteRepository>();
+}
+
+builder.Services.AddScoped<IPrerequisiteAccessService, PrerequisiteAccessService>();
+
+// LAB-06: completed laboratories source
+if (builder.Environment.IsDevelopment() ||
+    builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddSingleton<StubCompletedLaboratories>();
+    builder.Services.AddSingleton<ICompletedLaboratories>(
+        sp => sp.GetRequiredService<StubCompletedLaboratories>());
+}
+else
+{
+    builder.Services.AddSingleton<ICompletedLaboratories, NoCompletedLaboratories>();
+}
+
 // Kreiranje aplikacije
 var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
 builder.Services.AddSingleton(new AccessConfigurationOptions
@@ -209,6 +244,7 @@ app.UseRouting();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+app.UseMiddleware<PrerequisitePersistenceExceptionMiddleware>();
 if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 // Preserve KT1's non-enumerating public denial contract using the same central decider.
 if (kt1Enabled) app.UseMiddleware<Kt1AccessContractMiddleware>();

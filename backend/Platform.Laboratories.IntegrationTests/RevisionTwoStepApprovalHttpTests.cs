@@ -25,6 +25,8 @@ using Platform.Laboratories.Infrastructure.Composition;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Infrastructure.Persistence;
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
 using Testcontainers.PostgreSql;
 
 namespace Platform.Laboratories.IntegrationTests;
@@ -73,6 +75,7 @@ public sealed class RevisionTwoStepApprovalHttpTests
                 services.AddAuditPersistence(connection);
                 services.AddLaboratoryPersistence(new ConfigurationBuilder().AddInMemoryCollection(
                     new Dictionary<string, string?> { ["ConnectionStrings:Authoring"] = connection }).Build());
+                services.AddScoped<IPrerequisiteRepository, LabPrerequisiteStoreAdapter>();
                 services.AddScoped<ILaboratoryRepository, PostgresLaboratoryRepository>();
             });
         });
