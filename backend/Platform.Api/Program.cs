@@ -39,6 +39,7 @@ using Platform.Identity.Services;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.Api.Modules.Membership;
 using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
 
@@ -62,6 +63,8 @@ if (builder.Environment.IsDevelopment())
 }
 
 // Access module
+// ACC-02: clanstvo u kursu (Platform.Membership); radnja i politika se prijavljuju pre AddAccessControl() (strogi ACC-05).
+builder.Services.AddMembership(builder.Environment);
 
 builder.Services.AddCentralAccessAudit();
 builder.Services.AddRevisionAuthorization();
@@ -235,6 +238,9 @@ if (kt1Enabled)
 // IDN-01: politike i endpoint za kreiranje naloga
 app.MapAccountEndpoints();
 
+
+// ACC-02: upis studenta u kurs
+await app.MapMembershipAsync();
 // AUT-06: radnje i politike za sablone laboratorija, pa endpointi
 app.MapAuthoringEndpoints();
 

@@ -22,15 +22,15 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task ActiveTeacher_SeesTheirCourse()
     {
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
     }
 
     [Test]
     public async Task TeacherInK_StudentInL_DoesNotInheritTeacherPermissionInL()
     {
-        memberships.Set(Membership());
-        memberships.Set(Membership(CourseRole.Student, courseId: CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Student, courseId: CourseL));
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
         Assert.That(await policy.EvaluateAsync(Request(courseId: CourseL)), Is.False);
     }
@@ -38,7 +38,7 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task ActiveAssistant_WithCurrentExactActionDelegation_IsAllowed()
     {
-        memberships.Set(Membership(CourseRole.Assistant, delegatedActions: ["audit.events.read"]));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant, delegatedActions: ["audit.events.read"]));
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
     }
 
@@ -47,7 +47,7 @@ public sealed class CourseAuditReadPolicyTests
     [TestCase((CourseRole)999)]
     public async Task NonTeachingRole_IsDeniedEvenWithADelegatedAction(CourseRole role)
     {
-        memberships.Set(Membership(role, delegatedActions: ["audit.events.read"]));
+        memberships.Set(AuditAuthorizationExamples.Membership(role, delegatedActions: ["audit.events.read"]));
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
 
@@ -57,14 +57,14 @@ public sealed class CourseAuditReadPolicyTests
     [TestCase("audit.events.*")]
     public async Task UnrelatedOrMalformedDelegatedAction_DoesNotGrantAccess(string action)
     {
-        memberships.Set(Membership(CourseRole.Assistant, delegatedActions: [action]));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant, delegatedActions: [action]));
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
 
     [Test]
     public async Task CaseInsensitiveProviderSet_CannotWeakenExactActionMatching()
     {
-        var membership = Membership(CourseRole.Assistant) with
+        var membership = AuditAuthorizationExamples.Membership(CourseRole.Assistant) with
         {
             DelegatedActions = new HashSet<string>(["Audit.Events.Read"], StringComparer.OrdinalIgnoreCase)
         };
@@ -75,7 +75,7 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task AssistantWithoutDelegatedAction_IsDenied()
     {
-        memberships.Set(Membership(CourseRole.Assistant));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant));
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
 
@@ -83,14 +83,14 @@ public sealed class CourseAuditReadPolicyTests
     public async Task MissingDelegatedActionSet_DoesNotGrantAssistantAccess()
     {
         memberships.Handler = (_, _, _) => ValueTask.FromResult<CourseMembership?>(
-            Membership(CourseRole.Assistant) with { DelegatedActions = null! });
+            AuditAuthorizationExamples.Membership(CourseRole.Assistant) with { DelegatedActions = null! });
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
 
     [Test]
     public async Task MatchingActionAmongUnrelatedActions_GrantsOnlyTheMembershipCourse()
     {
-        memberships.Set(Membership(CourseRole.Assistant, delegatedActions: ["attempt.read", "audit.events.read"]));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant, delegatedActions: ["attempt.read", "audit.events.read"]));
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
         Assert.That(await policy.EvaluateAsync(Request(courseId: CourseL)), Is.False);
     }
@@ -116,7 +116,7 @@ public sealed class CourseAuditReadPolicyTests
     [TestCase("null-course-id")]
     public async Task InvalidRequest_IsDeniedBeforeProviderLookup(string scenario)
     {
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         var request = Request();
         request = scenario switch
         {
@@ -163,7 +163,7 @@ public sealed class CourseAuditReadPolicyTests
     [TestCase((MembershipStatus)999)]
     public async Task NonActiveMembership_CannotGrantTeacherAccess(MembershipStatus status)
     {
-        memberships.Set(Membership() with { Status = status });
+        memberships.Set(AuditAuthorizationExamples.Membership() with { Status = status });
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
 
@@ -172,8 +172,8 @@ public sealed class CourseAuditReadPolicyTests
     public async Task ProviderResultForAnotherScope_CannotGrantTeacherAccess(string scenario)
     {
         var membership = scenario == "other-account"
-            ? Membership(accountId: OtherAccountId)
-            : Membership(courseId: CourseL);
+            ? AuditAuthorizationExamples.Membership(accountId: OtherAccountId)
+            : AuditAuthorizationExamples.Membership(courseId: CourseL);
         memberships.Handler = (_, _, _) => ValueTask.FromResult<CourseMembership?>(membership);
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
@@ -181,7 +181,7 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task NextRequestWithBlockedSubject_IsDeniedByTheSamePolicy()
     {
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
         var nextRequest = Request() with { Subject = new SubjectRef(TeacherId.ToString("D"), AccountState.Blocked) };
         Assert.That(await policy.EvaluateAsync(nextRequest), Is.False);
@@ -191,9 +191,9 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task MembershipRevokedBetweenRequests_IsDeniedWithoutRestart()
     {
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
-        memberships.Set(Membership() with { Status = MembershipStatus.Left });
+        memberships.Set(AuditAuthorizationExamples.Membership() with { Status = MembershipStatus.Left });
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
         Assert.That(memberships.Calls, Is.EqualTo(2));
     }
@@ -201,7 +201,7 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task MembershipRemovedBetweenRequests_IsDeniedWithoutRestart()
     {
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
         memberships.Remove(TeacherId, CourseK);
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
@@ -210,18 +210,18 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task TeachingRoleRemovedBetweenRequests_IsDeniedWithoutRestart()
     {
-        memberships.Set(Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership());
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
-        memberships.Set(Membership(CourseRole.Student));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Student));
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
     }
 
     [Test]
     public async Task DelegatedActionRevokedByProvider_IsDeniedOnNextEvaluation()
     {
-        memberships.Set(Membership(CourseRole.Assistant, delegatedActions: ["audit.events.read"]));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant, delegatedActions: ["audit.events.read"]));
         Assert.That(await policy.EvaluateAsync(Request()), Is.True);
-        memberships.Set(Membership(CourseRole.Assistant));
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Assistant));
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
         Assert.That(memberships.Calls, Is.EqualTo(2));
     }
@@ -235,7 +235,7 @@ public sealed class CourseAuditReadPolicyTests
         var validFrom = clock.UtcNow.AddMinutes(1);
         var expiresAt = validFrom.AddMinutes(1);
         memberships.Handler = (accountId, courseId, _) => ValueTask.FromResult<CourseMembership?>(
-            Membership(CourseRole.Assistant, accountId, courseId,
+            AuditAuthorizationExamples.Membership(CourseRole.Assistant, accountId, courseId,
                 clock.GetUtcNow() >= validFrom && clock.GetUtcNow() < expiresAt ? ["audit.events.read"] : []));
         Assert.That(await policy.EvaluateAsync(Request()), Is.False);
         clock.UtcNow = validFrom;
@@ -287,8 +287,8 @@ public sealed class CourseAuditReadPolicyTests
     [Test]
     public async Task ConcurrentSubjects_DoNotShareAccountOrCourseState()
     {
-        memberships.Set(Membership());
-        memberships.Set(Membership(CourseRole.Student, OtherAccountId, CourseL));
+        memberships.Set(AuditAuthorizationExamples.Membership());
+        memberships.Set(AuditAuthorizationExamples.Membership(CourseRole.Student, OtherAccountId, CourseL));
         var bothStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var started = 0;
         memberships.Handler = async (accountId, courseId, token) =>
