@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
+using Platform.Api.Modules.Identity.SessionLimiting;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Contracts;
 using Platform.Audit.Infrastructure.Persistence;
@@ -131,14 +132,20 @@ public sealed class IdentityAuditPostgresIntegrationTests
 
         await using var identity = new PlatformIdentityDbContext(identityOptions);
         var sessionStore = new SessionStore(identity, TimeProvider.System);
+        var sessionOptions = Options.Create(new SessionOptions
+        {
+            AbsoluteLifetimeMinutes = 480,
+            ActivityTimeoutMinutes = 45,
+            MfaPendingTimeoutMinutes = 5
+        });
         var login = new LoginService(
             new CredentialVerifier(
                 new EfCredentialStore(identity),
                 new BCryptPasswordHasher(),
                 Options.Create(new IdentityLockoutOptions()),
                 TimeProvider.System),
-            new StoreSessionCreator(sessionStore, NullLogger<StoreSessionCreator>.Instance),
-            new SessionManager(identity),
+            new StoreSessionCreator(sessionStore, sessionOptions, NullLogger<StoreSessionCreator>.Instance),
+            new SessionManager(identity, sessionOptions),
             CreateProducer(new UnavailableAuditWriter()));
 
         var result = await login.ExecuteAsync(email, Password, Guid.NewGuid().ToString("N"));

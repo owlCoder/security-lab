@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -14,13 +15,14 @@ namespace Platform.Identity.Tests.Services;
 [Category("IDN-07")]
 public class SessionManagerValidationTests
 {
-    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
+    private  TimeSpan Lifetime = TimeSpan.FromHours(8);
 
     private DbContextOptions<PlatformIdentityDbContext> _options = null!;
     private MovableClock _clock = null!;
     private PlatformIdentityDbContext _db = null!;
     private SessionManager _manager = null!;
 
+    private IOptions<Api.Modules.Identity.SessionLimiting.SessionOptions> _optionsTime = null!;
     [SetUp]
     public void SetUp()
     {
@@ -28,9 +30,16 @@ public class SessionManagerValidationTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
 
+        _optionsTime = Options.Create(new Api.Modules.Identity.SessionLimiting.SessionOptions
+        {
+            AbsoluteLifetimeMinutes = 480,
+            ActivityTimeoutMinutes = 45,
+            MfaPendingTimeoutMinutes = 5
+        });
         _clock = new MovableClock();
         _db = new PlatformIdentityDbContext(_options);
-        _manager = new SessionManager(_db, _clock);
+        _manager = new SessionManager(_db, _optionsTime, _clock);
+        Lifetime = TimeSpan.FromMinutes(_optionsTime.Value.AbsoluteLifetimeMinutes);
     }
 
     [TearDown]
@@ -83,7 +92,7 @@ public class SessionManagerValidationTests
         await RevokeAsync(token);
 
         using var nextRequestDb = new PlatformIdentityDbContext(_options);
-        Assert.That(await new SessionManager(nextRequestDb, _clock).ValidateAsync(token), Is.Null);
+        Assert.That(await new SessionManager(nextRequestDb, _optionsTime ,_clock).ValidateAsync(token), Is.Null);
     }
 
     [Test]
@@ -99,7 +108,12 @@ public class SessionManagerValidationTests
     public async Task SessionJustBeforeExpiry_IsStillValid()
     {
         var (token, _) = await CreateSessionAsync(Guid.NewGuid());
-        _clock.Advance(Lifetime - TimeSpan.FromSeconds(1));
+        for (var i = 0; i < 10; i++)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(44));
+            Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+        }
+        _clock.Advance(Lifetime - TimeSpan.FromMinutes(440) - TimeSpan.FromSeconds(1));
 
         Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
     }

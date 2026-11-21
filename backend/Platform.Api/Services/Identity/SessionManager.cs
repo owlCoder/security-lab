@@ -71,10 +71,13 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
             .Select(account => (AccountStatus?)account.Status)
             .SingleOrDefaultAsync(ct);
         if (status != AccountStatus.Active) return null;
-
-        var inactivityTime = TimeSpan.FromMinutes(options.ActivityTimeoutMinutes);
+        var inactivityTime = TimeSpan.FromMinutes(options.ActivityTimeoutMinutes); 
+        if (session.AuthLevel == AuthLevel.MfaPending)
+        {
+             inactivityTime = TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
+        }
        
-        if ((now - session.LastActivityAt) > inactivityTime) {
+        if ((now - session.LastActivityAt) >= inactivityTime) {
             session.Revoke(now);
             await db.SaveChangesAsync(ct);
             return null;

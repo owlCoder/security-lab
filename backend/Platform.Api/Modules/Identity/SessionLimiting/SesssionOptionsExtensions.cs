@@ -20,7 +20,8 @@ public static class SessionOptionsExtensions
                 o =>
                     o.AbsoluteLifetimeMinutes > 0 &&
                     o.ActivityTimeoutMinutes > 0 &&
-                    o.MfaPendingTimeoutMinutes > 0,
+                    o.MfaPendingTimeoutMinutes > 0 &&
+                    o.MfaPendingTimeoutMinutes < o.ActivityTimeoutMinutes,
                 ("All session timeout values must be positive.")
             )
             .ValidateOnStart();

@@ -26,7 +26,7 @@ public sealed class StoreSessionCreator(ISessionStore store,IOptions<SessionOpti
         try
         {
             
-            var Lifetime = TimeSpan.FromMinutes(options.AbsoluteLifetimeMinutes);
+            var Lifetime = storedLevel == AuthLevel.Active ? TimeSpan.FromMinutes(options.AbsoluteLifetimeMinutes) : TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
             // Re-checks the status under a row lock: login read it earlier and it may have changed since (IDN-03).
             var created = await store.CreateForActiveAccountAsync(userId, storedLevel, Lifetime, ct);
             if (created is null) throw new AccountNotActiveException(userId);

@@ -1,11 +1,14 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
+using Platform.Api.Modules.Identity.SessionLimiting;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -16,12 +19,19 @@ public class StoreSessionCreatorTests
 
     private FakeStore _store = null!;
     private StoreSessionCreator _creator = null!;
+    private IOptions<Api.Modules.Identity.SessionLimiting.SessionOptions> _options = null!;
 
     [SetUp]
     public void SetUp()
     {
         _store = new FakeStore();
-        _creator = new StoreSessionCreator(_store, NullLogger<StoreSessionCreator>.Instance);
+        _options = Options.Create(new Api.Modules.Identity.SessionLimiting.SessionOptions
+        {
+            AbsoluteLifetimeMinutes = 480,
+            ActivityTimeoutMinutes = 45,
+            MfaPendingTimeoutMinutes = 5
+        });
+        _creator = new StoreSessionCreator(_store, _options, NullLogger<StoreSessionCreator>.Instance);
     }
 
     [Test]
@@ -31,11 +41,12 @@ public class StoreSessionCreatorTests
 
         var issued = await _creator.CreateAsync(userId, AuthenticationLevel.Active);
 
+        
         Assert.That(issued!.Token, Is.EqualTo(Token));
         Assert.That(issued.Handle, Is.EqualTo(_store.Created!.SessionHandle));
         Assert.That(issued.ExpiresAt, Is.EqualTo(_store.Created.ExpiresAt));
         Assert.That(_store.Created.UserId, Is.EqualTo(userId));
-        Assert.That(_store.LastLifetime, Is.EqualTo(StoreSessionCreator.Lifetime));
+        Assert.That(_store.LastLifetime, Is.EqualTo(TimeSpan.FromMinutes(_options.Value.AbsoluteLifetimeMinutes)));
     }
 
     [TestCase(AuthenticationLevel.Active, AuthLevel.Active)]
@@ -45,6 +56,12 @@ public class StoreSessionCreatorTests
         await _creator.CreateAsync(Guid.NewGuid(), level);
 
         Assert.That(_store.Created!.AuthLevel, Is.EqualTo(expected));
+        Assert.That(
+            _store.LastLifetime,
+            Is.EqualTo(TimeSpan.FromMinutes(
+                level == AuthenticationLevel.Active
+                    ? _options.Value.AbsoluteLifetimeMinutes
+                    : _options.Value.MfaPendingTimeoutMinutes)));
     }
 
     [Test]
