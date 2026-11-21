@@ -10,7 +10,8 @@ public sealed class PlatformIdentityDbContext(DbContextOptions<PlatformIdentityD
 
     public DbSet<UserAccount> Accounts => Set<UserAccount>();
     public DbSet<Session> Sessions => Set<Session>();
-
+    public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
+    
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);

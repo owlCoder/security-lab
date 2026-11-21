@@ -11,7 +11,7 @@ using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
-
+using Platform.Api.Modules.Identity.Federation;
 using Platform.Access.Application.Options;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
@@ -148,6 +148,9 @@ builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
 builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
 builder.Services.AddScoped<ILoginService, LoginService>();
+// IDN-08: login via an external OIDC identity
+builder.Services.AddScoped<IFederatedLoginService, FederatedLoginService>();
+var oidcEnabled = builder.Services.AddOidcFederation(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 builder.Services.AddScoped<IdentityAuditProducer>();
@@ -225,6 +228,11 @@ if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>(
 
 // Identity Rate Limiting
 app.UseIdentityRateLimiting();
+
+// IDN-08: the OIDC handler processes /api/auth/oidc/callback here. KT1 adds the same middleware itself.
+if (oidcEnabled && !kt1Enabled)
+    app.UseAuthentication();
+
 if (kt1Enabled)
 {
     app.UseAuthentication();

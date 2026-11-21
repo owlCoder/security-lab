@@ -116,7 +116,7 @@ The first call lists the templates (`200`), the second creates a draft from one 
 
 - `backend/SecurityLab.slnx` — backend solution file used by CI.
 - `backend/Platform.Api/` — API entry point.
-- `backend/Platform.Identity/` — identity module: entities, `DbContext`s, migrations, and core services (IDN-01, IDN-02).
+- `backend/Platform.Identity/` — identity module: entities, `DbContext`s, migrations, and core services (IDN-01, IDN-02, IDN-08). Account creation and OIDC federation: [docs/components/identity/IDN-01-IDN-08.md](docs/components/identity/IDN-01-IDN-08.md).
 - `backend/Platform.Identity.Tests/` — NUnit tests for the identity module and the identity part of the API.
 - `backend/Platform.Access/` — access control module (ACC-05, ACC-08).
 - `backend/Platform.Assignments/` — assignments module: assignment model, attempt limit and individual deadline extension (ASN-04, ASN-06). Its tests are in `backend/Platform.Tests/Assignments/`.
