@@ -8,6 +8,15 @@
 
 **Grana:** `feature/LAB-03-model-kursa`
 
+**Dopuna čuvanja kursa (REV-05 integracija):** migracija `AddLaboratoryCourse`
+u `Platform.LaboratoryPersistence` sada čuva `CourseId` kroz PostgreSQL adapter.
+Stari redovi ostaju sa NULL kursom, koji se učitava kao `Guid.Empty` i odbija
+pri otvaranju i kreiranju revizije. Uobičajene izmene ne menjaju vezu sa kursom.
+Raniji opis zahteva za Tim 20 ispod ostaje zapis prvobitnog plana; detalji nove
+migracije i administrativnog dopunjavanja starih podataka opisani su u
+[REV-05 dokumentaciji](REV-05-use-cases-api.md). Zadržan je legacy `Rehydrate`
+za bezbedno učitavanje starih podataka, bez automatske dodele kursa.
+
 ## Odgovornosti i granice
 
 - **Procesi i scenariji:** nastavnik pravi laboratoriju na kursu na kome predaje (`POST /api/laboratories` sa `courseId`). Laboratorija ne moze da nastane bez kursa, a kurs se posle kreiranja ne menja.

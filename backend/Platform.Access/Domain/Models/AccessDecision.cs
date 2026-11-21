@@ -14,8 +14,9 @@ public sealed record AccessDecision(
     public static AccessDecision Deny(
         AccessDenialReason reason,
         string correlationId,
-        string policyVersion = InitialPolicyVersion)
-        => new(AccessOutcome.Deny, reason, null, policyVersion, correlationId);
+        string policyVersion = InitialPolicyVersion,
+        string? policyId = null)
+        => new(AccessOutcome.Deny, reason, policyId, policyVersion, correlationId);
 
     public static AccessDecision Allow(
         string policyId,

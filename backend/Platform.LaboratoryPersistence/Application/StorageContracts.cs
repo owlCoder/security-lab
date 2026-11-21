@@ -3,7 +3,9 @@ using Platform.LabMetadata;
 namespace Platform.LaboratoryPersistence.Application;
 
 // Storage DTO, not a second LAB-01 entity.
-public sealed record StoredLaboratory(Guid Id, string Title, string Status, Guid CreatedBy, DateTimeOffset CreatedAt);
+// Null course identifies legacy rows whose course has not been established.
+public sealed record StoredLaboratory(Guid Id, string Title, string Status, Guid CreatedBy,
+    DateTimeOffset CreatedAt, Guid? CourseId = null);
 public sealed record StoredRevision(Guid Id, Guid LaboratoryId, int Number);
 
 public interface ILaboratoryStore

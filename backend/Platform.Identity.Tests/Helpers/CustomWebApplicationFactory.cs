@@ -14,6 +14,11 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // #113: the Audit writer reads ConnectionStrings:Audit (not Laboratories). Point it at the Testcontainers
+        // database, so a test that restores the real ITrustedAuditWriter (see ConfigureTestServices below for the
+        // default fake) can read audit rows next to the identity data.
+        builder.UseSetting("ConnectionStrings:Audit", TestDatabaseFixture.ConnectionString);
+
         builder.ConfigureServices(services =>
         {
             // Pronađi i ukloni postojeću registraciju PlatformIdentityDbContext-a

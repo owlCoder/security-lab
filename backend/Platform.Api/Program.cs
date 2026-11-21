@@ -1,6 +1,10 @@
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
+using Platform.Api.Security.AccessAudit;
+using Platform.Api.Security.AccessPolicies;
+using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Modules.Kt1;
+using Platform.Api.Modules.Competencies;
 using Platform.Api.Modules.Administration.Api;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
@@ -8,8 +12,10 @@ using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
 
+using Platform.Access.Application.Options;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
+using Platform.Access.Domain.Constants;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Access.AspNet;
@@ -24,12 +30,16 @@ using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Competencies.Composition;
+using Platform.Authoring.Application;
 using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Persistence;
+using Platform.Identity.Services;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
@@ -53,17 +63,11 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
-var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
-builder.Services.AddAccessControl();
-builder.Services.AddAccessAspNet();
+builder.Services.AddCentralAccessAudit();
 builder.Services.AddRevisionAuthorization();
-
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddScoped<
-        IAccessSubjectProvider,
-        DevelopmentFakeSubjectProvider>();
-}
+builder.Services.AddRevisionAccessPolicies();
+builder.Services.AddAccessAspNet();
+builder.Services.AddScoped<IAccessSubjectProvider, ResolverAccessSubjectProvider>();
 
 var kt1Enabled = Kt1Endpoints.Enabled(
     builder.Environment,
@@ -90,6 +94,16 @@ else
 
 builder.Services.AddAudit(builder.Configuration);
 builder.Services.AddScoped<IAuditContextProvider, ServerAuditContextProvider>();
+
+// PRG-04 uses its own schema, but can share the already configured PostgreSQL server.
+// A dedicated Competencies connection takes precedence when deployment supplies one.
+var competenciesConnectionString = builder.Configuration.GetConnectionString("Competencies");
+if (string.IsNullOrWhiteSpace(competenciesConnectionString))
+    competenciesConnectionString = builder.Configuration.GetConnectionString("Laboratories");
+
+if (!string.IsNullOrWhiteSpace(competenciesConnectionString))
+    builder.Services.AddCompetencyPersistence(competenciesConnectionString);
+
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
@@ -102,6 +116,30 @@ builder.Services.AddLaboratoriesPersistence(
 builder.Services.AddRevisionReviews();
 builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
+builder.Services
+    .AddAccessPolicy<PublicHealthReadPolicy>(AccessActions.PublicInfoRead.Id)
+    .AddAccessAction<CreateAccountPolicy>(
+        new ActionDefinition(
+            CreateAccountPolicy.ActionId,
+            ActionScope.Authenticated,
+            null,
+            false))
+    .AddAccessAction<AuthoringAuthorPolicy>(
+        new ActionDefinition(
+            AuthoringActions.TemplateList,
+            ActionScope.Authenticated,
+            null,
+            false))
+    .AddAccessAction<AuthoringAuthorPolicy>(
+        new ActionDefinition(
+            AuthoringActions.TemplateCopy,
+            ActionScope.Course,
+            AuthoringActions.TemplateResourceType,
+            false));
+
+// AUT-04 / AUT-07 / #185: LabVisibility radnje i politike, pre AddAccessControl() (strogi ACC-05).
+builder.Services.AddLabVisibilityAccess();
+
 // IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
 builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
@@ -113,6 +151,10 @@ builder.Services.AddScoped<ILoginService, LoginService>();
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 builder.Services.AddScoped<IdentityAuditProducer>();
+
+// IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
+builder.Services.AddIdentityAuthenticationAccess();
+builder.Services.AddIdentitySessionAccess();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -139,17 +181,31 @@ else
 }
 
 // Kreiranje aplikacije
+var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
+builder.Services.AddSingleton(new AccessConfigurationOptions
+{
+    RequirePolicyCoverage = true,
+    ActionsWithoutPolicy = new HashSet<string>(StringComparer.Ordinal)
+    {
+        AccessActions.PublicCatalogRead.Id,
+        AccessActions.SystemConfigManage.Id,
+        AccessActions.ResultsSensitiveRead.Id,
+        AccessActions.EvaluationTaskProcess.Id
+    }
+});
+builder.Services.AddPrg04CompetencyOperations();
+builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
-if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+if (kt1Enabled) builder.Services.AddKt1RequestIdentity();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
 AuthoringAccessSubjectProvider.Register(builder.Services);
+if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+builder.Services.AddPrg04RequestIdentity();
 
 var app = builder.Build();
 app.UseRouting();
-
-app.Services.RegisterRevisionPolicies();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
@@ -158,6 +214,15 @@ app.UseCorrelationContext();
 app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
 
 if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
+// Preserve KT1's non-enumerating public denial contract using the same central decider.
+if (kt1Enabled) app.UseMiddleware<Kt1AccessContractMiddleware>();
+// Identity and catalog routes retain their invalid-session response before ACC-05 checks access.
+app.UseWhen(
+    context => IdentitySessionSubjectProvider.IsIdentityRoute(context) || CatalogModule.RequiresSession(context),
+    routes => routes.UseMiddleware<SessionCheckMiddleware>());
+// AUT-06: Authoring uses the validated session to identify the caller.
+app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
+
 app.UseAccessControl();
 if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
@@ -167,20 +232,17 @@ app.UseIdentityRateLimiting();
 if (kt1Enabled)
 {
     app.UseAuthentication();
-    // KT1 policy registrations are isolated within AddCourseworkKt1().
+    // Only the explicitly enabled simulator maps these namespaced Access actions.
     app.MapCourseworkKt1();
 }
 
 // IDN-01: politike i endpoint za kreiranje naloga
-app.Services.RegisterIdentityAccess();
 app.MapAccountEndpoints();
 
 // AUT-06: radnje i politike za sablone laboratorija, pa endpointi
-app.Services.RegisterAuthoringAccess();
 app.MapAuthoringEndpoints();
 
 // AUT-04/AUT-07: radnje i politike za prikaz laboratorije
-app.Services.RegisterLabVisibilityAccess();
 
 // Probni nalozi samo za lokalni razvoj
 if (app.Environment.IsDevelopment())
@@ -193,6 +255,7 @@ if (app.Environment.IsDevelopment())
 
     // AUT-04: demo laboratorije 4444 (objavljena) i 5555 (nacrt); sa ConnectionStrings:LabVisibility idu u PostgreSQL.
     await app.Services.SeedLabVisibilityDemoAsync();
+    await app.Services.SeedLaboratorySearchDemoAsync();
 
     // US-02 and US-09: migrate and seed the identity database (skipped without a connection string).
     if (await app.ApplyIdentityMigrationsAsync())
@@ -225,13 +288,18 @@ app.MapGet("/api/health", () => Results.Ok(new
     note = "Initial scaffold; not a production-ready laboratory platform"
 }))
 .AllowAnonymous()   // IDN-02 SessionCheckMiddleware
-.AllowPublic();     // ACC-05 AccessControlMiddleware
+.RequireAccess(AccessActions.PublicInfoRead.Id);
 
-app.UseWhen(context => !AuthoringAccessSubjectProvider.AppliesTo(context), otherRoutes => otherRoutes.UseMiddleware<SessionCheckMiddleware>());
+// Downstream handlers read the validated session from HttpContext.Items.
+app.UseWhen(
+    context => !AuthoringAccessSubjectProvider.AppliesTo(context)
+                && !AdministrationRequestIdentity.AppliesTo(context),
+    otherRoutes => otherRoutes.UseMiddleware<SessionCheckMiddleware>());
 
 app.MapControllers();
 if (administrationEnabled) app.MapPersistentCourseAdministration();
 app.MapLaboratories();
+app.MapCompetencyEndpoints();
 app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();
 app.MapRevisionReviews();
@@ -257,7 +325,7 @@ if (app.Environment.IsDevelopment())
             decision.CorrelationId
         });
     })
-    .AllowPublic();
+    .RequireAccess(AccessActions.PublicInfoRead.Id);
 }
 
 app.Run();

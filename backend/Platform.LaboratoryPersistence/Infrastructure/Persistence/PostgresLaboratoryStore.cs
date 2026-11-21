@@ -15,7 +15,7 @@ public sealed class PostgresLaboratoryStore(LaboratoryDbContext context)
         context.Laboratories.Add(new LaboratoryRecord
         {
             Id = lab.Id, Title = lab.Title, Status = lab.Status,
-            CreatedBy = lab.CreatedBy, CreatedAt = lab.CreatedAt
+            CreatedBy = lab.CreatedBy, CreatedAt = lab.CreatedAt, CourseId = lab.CourseId
         });
         await context.SaveChangesAsync(ct);
     }
@@ -33,7 +33,7 @@ public sealed class PostgresLaboratoryStore(LaboratoryDbContext context)
         ArgumentNullException.ThrowIfNull(lab);
         var r = await context.Laboratories.FirstOrDefaultAsync(x => x.Id == lab.Id, ct);
         if (r is null) return false;
-        // Never modify immutable LAB-01 identity, author or creation time.
+        // Course association is immutable through normal edits, including legacy null courses.
         r.Title = lab.Title;
         r.Status = lab.Status;
         await context.SaveChangesAsync(ct);
@@ -103,5 +103,5 @@ public sealed class PostgresLaboratoryStore(LaboratoryDbContext context)
             .Select(x => x.PrerequisiteLabId).ToListAsync(ct);
 
     private static StoredLaboratory ToStored(LaboratoryRecord r) =>
-        new(r.Id, r.Title, r.Status, r.CreatedBy, r.CreatedAt);
+        new(r.Id, r.Title, r.Status, r.CreatedBy, r.CreatedAt, r.CourseId);
 }

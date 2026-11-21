@@ -13,6 +13,25 @@ public sealed class IdentityAuditProducerTests
     private const string CorrelationId = "corr-s12-1";
 
     [Test]
+    public async Task LoginThrottled_UsesAnonymousActorAndNoAccountOrRequestDetails()
+    {
+        var writer = new RecordingWriter();
+        var result = await CreateProducer(writer).LoginThrottledAsync(CorrelationId);
+        var write = writer.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.IsRecorded, Is.True);
+            Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthLoginThrottled));
+            Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Denied));
+            Assert.That(write.Draft.CourseId, Is.Null);
+            Assert.That(write.Draft.Resource, Is.Null);
+            Assert.That(write.Draft.Details, Is.Null);
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.Anonymous));
+            Assert.That(write.Context.CorrelationId, Is.EqualTo(CorrelationId));
+        });
+    }
+
+    [Test]
     public async Task LoginSuccess_UsesConfirmedUserAndAccountResource()
     {
         var writer = new RecordingWriter();

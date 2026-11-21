@@ -43,6 +43,17 @@ All tests that ran passed. PostgreSQL integration tests were tested locally agai
 
 ## Remaining work
 
+### Laboratory course association
+
+`StoredLaboratory` includes an optional `CourseId`. Migration `AddLaboratoryCourse`
+adds the nullable UUID column and an index. Existing rows retain NULL because their
+course cannot be inferred safely. New LAB-03 laboratories persist their known course.
+Normal updates preserve the original association, including NULL on legacy rows.
+An administrator must establish and backfill legacy associations from trusted data.
+The REV API rejects creation for unknown or mismatched courses. Migration upgrade,
+repeatability and real adapter round trips are tested in
+`Platform.Laboratories.IntegrationTests`.
+
 - Confirm integration with Teams 11 and 14.
 - Connect the storage interfaces to the application services.
 - Add indirect cycle detection for prerequisites.

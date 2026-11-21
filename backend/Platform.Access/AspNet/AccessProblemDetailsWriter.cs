@@ -6,6 +6,8 @@ namespace Platform.Access.AspNet;
 
 public static class AccessProblemDetailsWriter
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public static async Task WriteAsync(
         HttpContext context,
         bool unauthenticated,
@@ -35,7 +37,7 @@ public static class AccessProblemDetailsWriter
         await JsonSerializer.SerializeAsync(
             context.Response.Body,
             problem,
-            new JsonSerializerOptions(JsonSerializerDefaults.Web),
+            JsonOptions,
             context.RequestAborted);
     }
 }
