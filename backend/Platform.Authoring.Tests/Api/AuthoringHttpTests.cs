@@ -20,12 +20,90 @@ using Platform.Api.Services.Identity;
 
 using ISessionManager = Platform.Api.Interfaces.Identity.ISessionManager;
 using Platform.Identity.Entities;
+using System.Text.Json.Nodes;
 
 namespace Platform.Authoring.Tests.Api;
 
 [TestFixture]
 public sealed class AuthoringHttpRequests
 {
+    [Test]
+    public async Task Author_ListsTemplates_Returns200AndTemplateList()
+    {
+        const string authorId = "11111111-1111-1111-1111-111111111111";
+
+        using var baseFactory = new AuthoringHostFactory();
+        using var factory = baseFactory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                //Test session belongs to the account who has authoring access rights
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AuthoringTests:SessionUserId"] = authorId,
+                    ["Authoring:AuthorAccountsIds:0"] = authorId
+                });
+            });
+        });
+
+        using var client = factory.CreateClient();
+
+        //sending cookies which existing TestSessionManager recognizes
+        client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
+
+        using var response = await client.GetAsync("/api/authoring/templates");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        var templates = body.RootElement.GetProperty("templates");
+
+        Assert.That(templates.ValueKind, Is.EqualTo(JsonValueKind.Array));
+        var expectedTemplateId = Guid.Parse("a1000000-0000-4000-8000-000000000001");
+
+        Assert.That(templates.EnumerateArray().Any(template =>
+            template.GetProperty("id").GetGuid() == expectedTemplateId && template.GetProperty("title").GetString() == "Access control and ownership"), Is.True);
+    }
+
+    [Test]
+    public async Task Templates_WithoutSession_Returns401()
+    {
+        using var factory = new AuthoringHostFactory();
+        using var client = factory.CreateClient();
+
+        //request is sent without session cookie
+        using var response = await client.GetAsync("/api/authoring/templates");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    [Test]
+    public async Task Templates_WithNonAuthorSession_Returns403()
+    {
+        const string studentId = "22222222-2222-2222-2222-222222222222";
+        const string authorId = "11111111-1111-1111-1111-111111111111";
+
+        using var baseFactory = new AuthoringHostFactory();
+        using var factory = baseFactory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                //user has an active session, but no proper rights
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AuthoringTests:SessionUserId"] = studentId,
+                    ["Authoring:AuthorAccountIds:0"] = authorId
+                });
+            });
+        });
+
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
+
+        using var response = await client.GetAsync("/api/authoring/templates");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+
     [Test]
     public async Task Assistant_CreatesDraftFromExistingTemplate()
     {
