@@ -14,7 +14,7 @@ so the next login and the next request of an existing session see it.
 
 ## Responsibilities and boundaries
 
-* Owned by Team 2: the use-case `ChangeAccountStatus`, the store `EfAccountStatusStore`, the session check. Team 12 (Audit) owns the Audit contract; we only call it.
+* Owned by Team 2: the use-case `ChangeAccountStatus`, the store `EfAccountStatusStore`, the session check. Team 12 (Audit) owns the Audit contract; we only call it. Team 4 (IDN-05 administrator unlock) uses the same store and transaction through `ClearLockoutAsync`; a lockout is separate from the status, so unlocking a `BLOCKED` or `ARCHIVED` account leaves it blocked or archived.
 * One successful change is **one database transaction**: new status, revocation of all sessions (for `BLOCKED` and `ARCHIVED`) and the Audit record. If any step fails, nothing is stored.
 * Refusals (unauthenticated, not an administrator, invalid status, self-change, unknown account, same status) change nothing and are recorded in Audit in their own short transaction. A failed Audit write does not change the answer to a refusal.
 * If the Audit record of a successful change cannot be written, the change is rolled back and the endpoint returns `503 unavailable`.
@@ -22,8 +22,9 @@ so the next login and the next request of an existing session see it.
 |Contract|Implementation|
 |-|-|
 |`IIdentityContext`|`SessionIdentityContext` (server-side session, IDN-02)|
-|`IAccessDecision`|`AdminOnlyAccessDecision`, administrator only, deny by default|
+|`IAccessDecision`|`AdminOnlyAccessDecision`, administrator only, deny by default. `CanChangeAccountStatus` is the check of this component; `CanUnlockAccount` is the second-line check of the [IDN-05 administrator unlock](components/identity/IDN-05-admin-unlock.md), with the same administrator source|
 |`IAccountStatusStore`|`EfAccountStatusStore` over `PlatformIdentityDbContext` (`identity.accounts`, `identity.sessions`)|
+|`IAccountStatusUnitOfWork`|One transaction opened by `IAccountStatusStore.BeginAsync`; disposing without `CommitAsync` rolls it back. `FindForUpdateAsync` reads and locks the account row, `ApplyAsync` stores the status and, for `BLOCKED` and `ARCHIVED`, revokes the sessions. `ClearLockoutAsync` is used only by the IDN-05 administrator unlock: it sets `failed_login_count` to 0 and `lockout_end` to null and returns the lockout end it cleared, or changes nothing and returns null when the account is not locked. It never touches the status or the sessions|
 |`ISessionManager`|`SessionManager` (single registration; revocation runs inside the status transaction)|
 |`ITransactionalAuditWriter`|Audit module, receives the open `DbTransaction`; event type `account.status.changed`|
 

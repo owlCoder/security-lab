@@ -45,6 +45,12 @@ public class LabPrerequisiteStoreAdapterTests
 
             return Task.FromResult(result);
         }
+        public Task<T> RunInPrerequisiteLockAsync<T>(
+            Func<CancellationToken, Task<T>> action,
+            CancellationToken ct = default)
+        {
+            return action(ct);
+        }
     }
 
     [Test]

@@ -43,6 +43,7 @@ public sealed class RevisionEndpointMetadataTests
     [TestCase("api/auth/login", IdentityAccessActions.Login, ActionScope.Public)]
     [TestCase("api/auth/logout", IdentityAccessActions.Logout, ActionScope.Public)]
     [TestCase("api/auth/me", IdentityAccessActions.SessionRead, ActionScope.Authenticated)]
+    [TestCase("api/admin/accounts/{id:guid}/unlock", IdentityAccessActions.AccountUnlock, ActionScope.System)]
     public void AuthRoutes_RequireExactlyOneRegisteredPolicy_WithoutMigrationMarkers(
         string route, string action, ActionScope scope)
     {

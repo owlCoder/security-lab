@@ -22,6 +22,9 @@ jobs:
       - name: Test PRG-04 persistence with isolated PostgreSQL
         shell: pwsh
         run: ./scripts/test-competencies-postgres.ps1 -NoBuild
+      - name: Test LAB-06 prerequisites with isolated PostgreSQL
+        shell: pwsh
+        run: ./scripts/test-prerequisites-postgres.ps1 -NoBuild
       - name: Verify tests were discovered and executed
         shell: bash
         run: |
