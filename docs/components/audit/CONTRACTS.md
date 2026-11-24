@@ -175,6 +175,7 @@ with `EventIdConflict` and never replaces the stored record.
 | `course.delegation.revoked` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
 | `course.delegation.expired` | Memberships (ACC-07), background job | Success | `Service` | required | `Account` (required) | `action`, `delegationId` |
 | `access.denied` | Access, Team 3 (ACC-05), through the host adapter | Denied | `User` or `Anonymous` | optional, only from a trusted resource resolver | optional | `action`, `denialReason`, `policyId`, `policyVersion` |
+| `lab.visibility.accessed` | Lab visibility, Team 6 (AUT-04, AUT-07) | Success, Denied, Failure | Success, Failure: `User` or `Service` (evaluator). Denied: `User`, `Service` or `Anonymous` | optional | none | `action` and `laboratoryId` (both required), `reasonCode` |
 | `audit.events.viewed` | Audit (AUD-06) | Success | `User` | required | `Course` (required) | `filterType`, `filterOutcome`, `filterFrom`, `filterTo`, `resultCount` |
 
 `reasonCode` is only allowed when the outcome is `Denied` or `Failure`. An empty GUID is never a
@@ -196,6 +197,7 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 | `policyId` | `^[a-z][a-z0-9_.-]{0,63}$` |
 | `policyVersion` | `^v[0-9]{1,4}(\.[0-9]{1,4}){0,2}$` |
 | `delegationId` | UUID |
+| `laboratoryId` | UUID |
 | `filterOutcome` | one of `success`, `denied`, `failure` |
 | `filterFrom`, `filterTo`, `lockoutEnd` | UTC timestamp, ISO 8601, ending with `Z` |
 | `resultCount` | integer from 0 to 100000 |

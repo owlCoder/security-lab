@@ -161,6 +161,23 @@ public static class AuditEventCatalog
                 ("filterTo", new AuditDetailField(AuditDetailFormat.UtcTimestamp)),
                 ("resultCount", new AuditDetailField(AuditDetailFormat.Count)))),
 
+        // AUT-04/AUT-07 (Team 6): student view, preview and evaluator key read/write of one lab.
+        // The evaluator reads the key as a service. No content and no answers, only the action.
+        new AuditEventSchema(
+            AuditEventTypes.LabVisibilityAccessed,
+            Outcomes(
+                (AuditOutcome.Success, Kinds(AuditActorKind.User, AuditActorKind.Service)),
+                (AuditOutcome.Denied, Kinds(AuditActorKind.User, AuditActorKind.Service, AuditActorKind.Anonymous)),
+                (AuditOutcome.Failure, Kinds(AuditActorKind.User, AuditActorKind.Service))),
+            AuditPresence.Optional,
+            AuditPresence.Forbidden,
+            null,
+            Fields(
+                ("action", new AuditDetailField(AuditDetailFormat.ActionId)),
+                ("laboratoryId", new AuditDetailField(AuditDetailFormat.Uuid)),
+                ("reasonCode", ReasonCode)),
+            new[] { "action", "laboratoryId" }.ToFrozenSet(StringComparer.Ordinal)),
+
         Revision(AuditEventTypes.RevisionSubmitted),
         Revision(AuditEventTypes.RevisionApproved),
         Revision(AuditEventTypes.RevisionReturned),
