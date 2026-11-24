@@ -208,6 +208,8 @@ builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubject
 AuthoringAccessSubjectProvider.Register(builder.Services);
 if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
 builder.Services.AddPrg04RequestIdentity();
+// ACC-08: decorate only after all identity provider decorators have selected the final subject.
+builder.Services.AddSystemRoleSubjectProvider();
 
 var app = builder.Build();
 app.UseRouting();
