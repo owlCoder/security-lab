@@ -15,7 +15,8 @@
 | Ko kreira naloge | Samo administrator, nema javne samoregistracije | Manja površina napada; isti model koristi i IDN-08 |
 | Identifikator | Email, normalizovan (`Trim` + mala slova); `Id` je `Guid` koji se ne menja | Jedinstvenost garantuje unique indeks u bazi, ne samo kod |
 | Brisanje | Nalozi se ne brišu fizički; arhiviran ili blokiran nalog zadržava email i `Id` | Identifikator se ne može ponovo dodeliti |
-| Kriptografija | Samo gotove biblioteke: ASP.NET Core Identity (heš lozinke), `Microsoft.AspNetCore.Authentication.OpenIdConnect` (tokeni) | Spec zabranjuje sopstvenu kriptografiju |
+| Kriptografija | Samo gotove biblioteke: BCrypt preko `IPasswordHasher` (heš lozinke, isti kao kod prijave), `Microsoft.AspNetCore.Authentication.OpenIdConnect` (tokeni) | Spec zabranjuje sopstvenu kriptografiju |
+| Jedno skladište naloga | Nalozi se pišu u `identity.accounts`, istu tabelu koju koriste prijava (IDN-02), statusi (IDN-03) i OIDC (IDN-08) | Nalog koji admin napravi odmah može da se prijavi i da se poveže preko OIDC-a |
 | Ključ spoljnog identiteta | Par `(issuer, sub)` iz validiranog `id_token`-a, nikad email | `sub` je stabilan; email kod IdP-a može da se promeni |
 | Prvo povezivanje (IDN-08) | Samo sa **postojećim** nalogom i samo preko emaila koji je IdP potvrdio (`email_verified = true`); nalog se nikad ne pravi automatski | Sprečava preuzimanje naloga; u skladu sa odlukom iz IDN-01 |
 | OIDC tok | Authorization code + PKCE, public klijent (bez client secret-a) | Nema tajne u Git-u |
@@ -25,11 +26,11 @@
 
 | Deo | Student | IDN-01 | IDN-08 |
 |---|---|---|---|
-| Domen i ugovori | Antonija | `AppUser`, `RegistrationOutcome`, `RegisterAccountCommand/Result`, `IAccountRegistration` | `ExternalLogin`, `FederatedLoginOutcome`, `ExternalIdentity`, `FederatedLoginResult`, `IExternalIdentityLinker` |
+| Domen i ugovori | Antonija | `RegistrationOutcome`, `RegisterAccountCommand/Result`, `IAccountRegistration` | `ExternalLogin`, `FederatedLoginOutcome`, `ExternalIdentity`, `FederatedLoginResult`, `IExternalIdentityLinker` |
 | Prijava i endpointi | Antonija | admin endpoint i `CreateAccountPolicy` (zajedno sa timom) | `FederatedLoginService`, OIDC handler, `GET /api/auth/oidc/start`, callback |
-| Baza | Nina | `AccountDbContext`, unique indeks, migracija | tabela `identity.external_logins`, migracija `AddExternalLogins`, Keycloak realm i Docker profil |
-| Servis | Milica | `AccountRegistrationService` | `ExternalIdentityLinker`, `Oidc:PublicOrigin`, usklađivanje sa ACC-05 |
-| Testovi | Anđela | `AccountRegistrationTests` | `ExternalIdentityLinkerPostgresTests`, `FederatedLoginServiceTests` |
+| Baza | Nina | unique indeks `ux_accounts_email`, migracija | tabela `identity.external_logins`, migracija `AddExternalLogins`, Keycloak realm i Docker profil |
+| Servis | Milica | `AccountRegistrationService`, prebacivanje na `identity.accounts` | `ExternalIdentityLinker`, `Oidc:PublicOrigin`, usklađivanje sa ACC-05 |
+| Testovi | Anđela | `AccountRegistrationTests` (22, nad `identity.accounts`) | `ExternalIdentityLinkerPostgresTests`, `FederatedLoginServiceTests` |
 | Frontend i dokumentacija | Jovana | `CreateAccountForm` | dugme „Sign in with external account (OIDC)“, poruka za `?oidc=failed`, ovaj dokument |
 
 ## 1. Realizovana funkcionalnost i tok upotrebe
@@ -39,7 +40,8 @@
 1. Administrator se prijavljuje lozinkom (IDN-02) i otvara `/access-demo`, formu „Kreiranje naloga (administrator)“.
 2. Forma šalje `POST /api/admin/accounts` sa `{ email, password }`.
 3. ACC-05 middleware traži odluku za radnju `identity.account.create`. Pozivalac dolazi iz session kolačića, nikad iz zaglavlja ili tela. Dozvolu daje samo `CreateAccountPolicy` za naloge iz `Identity:AdminAccountIds`.
-4. `AccountRegistrationService` normalizuje email, proverava format i dužine, primenjuje pravila lozinke (najmanje 12 znakova, veliko i malo slovo, broj, specijalan znak), hešira lozinku preko ASP.NET Identity-ja i upisuje nalog.
+4. `AccountRegistrationService` normalizuje email, proverava format i dužine, primenjuje pravila lozinke (najmanje 12 znakova, veliko i malo slovo, broj, specijalan znak), hešira lozinku preko `IPasswordHasher` (BCrypt) i upisuje nalog u `identity.accounts` sa ulogom `Student`.
+5. Nalog odmah može da se prijavi lozinkom (IDN-02) i da se poveže sa spoljnim identitetom (IDN-08), jer sve tri komponente koriste istu tabelu.
 
 | Status | Telo | Značenje |
 |---|---|---|
@@ -94,8 +96,8 @@ flowchart LR
   ACCD1 --> POL1[CreateAccountPolicy]
   EP --> SUBJ[IAccessSubjectProvider subjekat iz sesije]
   EP --> REG[IAccountRegistration AccountRegistrationService]
-  REG --> UM[UserManager AppUser]
-  UM --> DB1[(PostgreSQL identity.AspNetUsers)]
+  REG --> HASH[IPasswordHasher BCrypt]
+  REG --> DB2[(PostgreSQL identity.accounts, identity.external_logins)]
 
   USER[Login stranica OidcLoginButton] -->|GET /api/auth/oidc/start| OC[OidcController]
   OC --> ACCD2[IAccessDecision identity.login]
@@ -104,7 +106,7 @@ flowchart LR
   H <-->|code + PKCE / id_token| KC[Keycloak IdP]
   H -->|OnTicketReceived validiran principal| FLS[IFederatedLoginService FederatedLoginService]
   FLS --> LNK[IExternalIdentityLinker ExternalIdentityLinker]
-  LNK --> DB2[(PostgreSQL identity.external_logins, identity.accounts)]
+  LNK --> DB2
   FLS --> SC[ISessionCreator]
   SC --> SS[ISessionStore]
   SS --> DB3[(PostgreSQL identity.sessions)]
@@ -119,7 +121,8 @@ flowchart LR
 |---|---|---|---|
 | `IAccessDecision` | `DefaultDenyAccessDecision` + `CreateAccountPolicy`, `PublicAuthenticationPolicy` | Platform.Access (ACC-05) | Odluka pre svakog endpointa |
 | `IAccessSubjectProvider` | `ResolverAccessSubjectProvider` | Platform.Api | Pozivalac iz session kolačića, nikad iz zahteva |
-| `IAccountRegistration` | `AccountRegistrationService` | Platform.Identity (IDN-01) | Validacija, heširanje, jedinstvenost |
+| `IAccountRegistration` | `AccountRegistrationService` (`PlatformIdentityDbContext`) | Platform.Identity (IDN-01) | Validacija, pravila lozinke, jedinstvenost, upis u `identity.accounts` |
+| `IPasswordHasher` | `BCryptPasswordHasher` | Platform.Identity (IDN-02) | Isti heš pri kreiranju naloga (IDN-01) i proveri lozinke pri prijavi |
 | `IFederatedLoginService` | `FederatedLoginService` | Platform.Api (IDN-08) | Validiran principal → nalog → sesija i audit |
 | `IExternalIdentityLinker` | `ExternalIdentityLinker` | Platform.Identity (IDN-08) | `(issuer, sub)` → tačno jedan nalog |
 | `ISessionCreator`, `ISessionStore`, `ISessionManager` | `StoreSessionCreator`, `SessionStore`, `SessionManager` | IDN-02, IDN-03 | Sesija, provera statusa naloga, opoziv |
@@ -150,7 +153,6 @@ flowchart LR
     P5[5 IExternalIdentityLinker]
     P6[6 ISessionCreator]
     P7[7 ITrustedAuditWriter]
-    D1[(identity.AspNetUsers)]
     D2[(identity.accounts)]
     D3[(identity.external_logins)]
     D4[(identity.sessions)]
@@ -159,7 +161,7 @@ flowchart LR
 
   ADMIN -->|email, lozinka| FORM -->|HTTPS POST + session kolačić| P1
   P1 -->|Allow| P2
-  P2 -->|normalizovan email, heš lozinke| D1
+  P2 -->|normalizovan email, BCrypt heš, uloga Student| D2
   P2 -->|201 400 409 bez tajni| FORM
 
   USER --> PAGE -->|GET /api/auth/oidc/start| P1
@@ -180,7 +182,7 @@ flowchart LR
 **Procesi:**
 
 1. **`IAccessDecision`:** default-deny. Dozvoljava `identity.account.create` samo administratoru, a `identity.login` (pokretanje OIDC prijave) svima, uz rate limiting.
-2. **`IAccountRegistration`:** normalizacija i validacija, heš preko ASP.NET Identity-ja, unique indeks.
+2. **`IAccountRegistration`:** normalizacija i validacija, heš preko `IPasswordHasher` (BCrypt), upis u `identity.accounts` uz unique indeks `ux_accounts_email`.
 3. **`OpenIdConnectHandler`:** biblioteka proverava potpis, `iss`, `aud`, istek, `state`, `nonce` i PKCE.
 4. **`IFederatedLoginService`:** čita claim-ove samo iz validiranog tokena; svako odbijanje daje isti odgovor.
 5. **`IExternalIdentityLinker`:** `(issuer, sub)` → jedan nalog; prvo povezivanje samo preko potvrđenog emaila; nikad ne pravi nalog.
@@ -203,7 +205,8 @@ Demonstracija veza je u odeljku 4: posle OIDC prijave `/api/auth/me` (IDN-02) vr
 
 ### Preostala ograničenja
 
-- **Dva skladišta naloga.** IDN-01 upisuje naloge u `identity.AspNetUsers` (ASP.NET Identity, `AccountDbContext`). Prijava (IDN-02), statusi (IDN-03) i IDN-08 rade nad `identity.accounts` (`PlatformIdentityDbContext`). Nalog napravljen kroz admin formu zato još ne može da se prijavi ni da se poveže preko OIDC-a; demonstracija IDN-08 koristi razvojne naloge iz `identity.accounts`. Plan: prebaciti `AccountRegistrationService` na `identity.accounts` (`UserAccount` + `IPasswordHasher`), uz dogovor sa timom za IDN-02.
+- **Uloga novog naloga:** admin forma šalje samo email i lozinku, pa nov nalog uvek dobija ulogu `Student`. Izbor uloge pri kreiranju nije implementiran.
+- **IDN-04 (drugi tim):** `PasswordChangeService` i dalje menja lozinku preko ASP.NET Identity-ja u `identity.AspNetUsers`, dok prijava čita `identity.accounts`. Ispravka je u nadležnosti tima za IDN-04; `AccountDbContext` je zbog njih zadržan.
 - **Administratori za IDN-01** se zadaju u konfiguraciji (`Identity:AdminAccountIds`), ne preko uloge naloga.
 - **MFA (IDN-06):** kada postane obavezan za privilegovane naloge, federativna prijava mora da primeni istu politiku. Trenutno OIDC prijava daje sesiju nivoa `Active`, kao i prijava lozinkom.
 - **IdP:** podržan je jedan IdP iz konfiguracije. Keycloak služi samo za lokalni razvoj; za produkciju je potreban HTTPS `Authority` i `PublicOrigin` (proverava se pri startu).
@@ -214,7 +217,7 @@ Demonstracija veza je u odeljku 4: posle OIDC prijave `/api/auth/me` (IDN-02) vr
 ### Testovi i rezultati
 
 ```powershell
-dotnet test backend/Platform.Identity.Tests --filter "FullyQualifiedName~AccountRegistrationTests"   # IDN-01
+dotnet test backend/Platform.Identity.Tests --filter "Category=IDN-01"                             # IDN-01: 22/22
 dotnet test backend/Platform.Identity.Tests --filter "Category=IDN-08"                             # IDN-08: 31/31
 dotnet test backend/Platform.Access.Tests --filter "FullyQualifiedName~ApiEndpointCoverageTests|FullyQualifiedName~AccountEndpointAccessTests"
 cd frontend; npm test -- OidcLogin                                                                 # IDN-08 UI: 6/6
@@ -229,8 +232,9 @@ Testovi nad PostgreSQL-om koriste Testcontainers, pa mora da radi Docker Desktop
 | **IDN-01:** kreira se jedinstven nalog | `Guid` kao `Id`, unique indeks na normalizovanom emailu | `Valid_registration_creates_active_account_with_hashed_password` |
 | IDN-01: duplikat se odbija | provera + hvatanje `UniqueViolation` | `Duplicate_email_is_rejected`, `Duplicate_email_differing_only_in_case_or_whitespace_is_rejected` |
 | IDN-01: trka dva zahteva | unique indeks u bazi | `Concurrent_registrations_of_same_email_create_exactly_one_account` |
-| IDN-01: identifikator se ne dodeljuje ponovo | nalozi se ne brišu | `Identifier_of_archived_account_cannot_be_reused` |
-| IDN-01: nevalidan unos | validacija emaila i lozinke | `Invalid_email_is_rejected`, `Weak_password_is_rejected_and_no_account_is_created` |
+| IDN-01: identifikator se ne dodeljuje ponovo | nalozi se ne brišu; arhiviran i blokiran nalog zadržavaju email | `Identifier_of_archived_account_cannot_be_reused` (Archived, Blocked) |
+| IDN-01: nevalidan unos | validacija emaila i lozinke | `Invalid_email_is_rejected`, `Weak_password_is_rejected_and_no_account_is_created`, `Too_long_password_is_rejected` |
+| IDN-01: nalog radi u celoj platformi | jedno skladište `identity.accounts` | `Created_account_can_log_in_with_its_password`, `Created_account_can_be_linked_to_an_external_identity`, `New_account_gets_the_student_role` |
 | IDN-01: samo administrator | `CreateAccountPolicy` preko ACC-05 | `Admin_can_create_account_through_central_access_policy`, `Authenticated_non_admin_cannot_create_account` |
 | **IDN-08:** ponovljeni identitet → jedan nalog | traženje po `(issuer, sub)` | `RepeatedLogin_ReturnsTheSameAccount_WithoutASecondLink`, `RepeatedLogin_AfterTheEmailChangedAtTheProvider_StillMapsToTheSameAccount` |
 | IDN-08: bez dupliranja | unique indeks `(issuer, subject)` | `ConcurrentFirstLogins_OfTheSameIdentity_CreateExactlyOneLink` (10 istovremenih prijava), `Database_RejectsADuplicateIssuerSubject_EvenWithoutTheService` |
@@ -297,6 +301,7 @@ API pri startu primenjuje migracije i pravi razvojne naloge (`admin@`, `student@
 | # | Koraci | Očekivano |
 |---|---|---|
 | 1 | Prijava lozinkom kao `admin@example.com`, `/access-demo`, kreiranje naloga sa novim emailom | `201` i `id` novog naloga |
+| 1a | Odjava, pa prijava lozinkom kao upravo napravljeni nalog | uspešna prijava, `/api/auth/me` vraća `id` iz koraka 1 |
 | 2 | Isti email ponovo, pa sa velikim slovima | `409 identifier_taken` |
 | 3 | Slaba lozinka ili neispravan email | `400 invalid_input`, ništa nije upisano |
 | 4 | Prijava kao `student@example.com`, pa pokušaj kreiranja naloga | `403` |
@@ -319,8 +324,8 @@ Keycloak uvozi realm samo pri prvom pokretanju kontejnera. Posle izmene `infra/k
 
 | Implementirano | Planirano |
 |---|---|
-| IDN-01: servis, validacija, heširanje, unique indeks, admin endpoint preko ACC-05, React forma, testovi | Prebacivanje IDN-01 na `identity.accounts` (jedno skladište naloga sa IDN-02) |
+| IDN-01: servis nad `identity.accounts` (isto skladište kao prijava i OIDC), validacija, BCrypt heš, unique indeks, admin endpoint preko ACC-05, React forma, 22 testa | Izbor uloge pri kreiranju naloga |
 | IDN-08: OIDC prijava (code + PKCE), mapiranje bez dupliranja, ista sesija i audit kao IDN-02 | MFA politika za federativnu prijavu kada IDN-06 postane obavezan |
 | Keycloak test IdP, konfiguracija `Oidc:*` sa proverom pri startu | Ručno povezivanje i raskidanje spoljnog identiteta iz UI-ja |
 | Dugme i generička poruka na login stranici | Podrška za više IdP-ova |
-| 31 backend + 6 frontend testova za IDN-08 | |
+| 31 backend + 6 frontend testova za IDN-08 | Skrivanje admin forme od korisnika koji nisu administratori (server ih već odbija sa 403) |
