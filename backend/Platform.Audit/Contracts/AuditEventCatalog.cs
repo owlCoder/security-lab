@@ -99,6 +99,19 @@ public static class AuditEventCatalog
                 ("newStatus", new AuditDetailField(AuditDetailFormat.AccountStatus)),
                 ("reasonCode", ReasonCode))),
 
+        // IDN-05: administrator unlock. lockoutEnd is the lockout end that was cleared.
+        new AuditEventSchema(
+            AuditEventTypes.AccountUnlocked,
+            PrivilegedChange,
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("lockoutEnd", new AuditDetailField(
+                    AuditDetailFormat.UtcTimestamp,
+                    new[] { AuditOutcome.Success }.ToFrozenSet())),
+                ("reasonCode", ReasonCode))),
+
         new AuditEventSchema(
             AuditEventTypes.CourseMemberRoleChanged,
             PrivilegedChange,

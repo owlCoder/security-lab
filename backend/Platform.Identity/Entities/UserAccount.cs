@@ -23,4 +23,11 @@ public sealed class UserAccount(
     public DateTimeOffset? LockoutEnd { get; private set; }
 
     public void SetPasswordHash(string passwordHash) => PasswordHash = passwordHash;
+
+    /// <summary>IDN-05: administrator unlock. Ends the lockout and restarts the failure counter.</summary>
+    public void ClearLockout()
+    {
+        FailedLoginCount = 0;
+        LockoutEnd = null;
+    }
 }
