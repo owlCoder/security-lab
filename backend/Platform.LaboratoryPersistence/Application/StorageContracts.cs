@@ -28,5 +28,9 @@ public interface ILabPrerequisiteStore
 {
     Task AddAsync(Guid laboratoryId, Guid prerequisiteLabId, CancellationToken ct = default);
     Task RemoveAsync(Guid laboratoryId, Guid prerequisiteLabId, CancellationToken ct = default);
-    Task<IReadOnlyList<Guid>> GetIdsAsync(Guid laboratoryId, CancellationToken ct = default);
+    Task<IReadOnlyList<Guid>> GetIdsAsync (Guid laboratoryId, CancellationToken ct = default);
+
+    Task<T> RunInPrerequisiteLockAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken ct = default);
 }

@@ -102,6 +102,33 @@ public sealed class PostgresLaboratoryStore(LaboratoryDbContext context)
         await context.LabPrerequisites.AsNoTracking().Where(x => x.LaboratoryId == laboratoryId)
             .Select(x => x.PrerequisiteLabId).ToListAsync(ct);
 
+
+    public const long PrerequisiteLockKey = 2006;
+
+    public async Task<T> RunInPrerequisiteLockAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (context.Database.CurrentTransaction is not null)
+        {
+            await context.Database.ExecuteSqlAsync(
+                $"SELECT pg_advisory_xact_lock({PrerequisiteLockKey})",ct);
+            return await action(ct);
+        }
+
+        await using var transaction =
+            await context.Database.BeginTransactionAsync(ct);
+
+        await context.Database.ExecuteSqlAsync(
+            $"SELECT pg_advisory_xact_lock({PrerequisiteLockKey})",
+            ct);
+
+        T result = await action(ct);
+        await transaction.CommitAsync(ct);
+        return result;
+    }
     private static StoredLaboratory ToStored(LaboratoryRecord r) =>
         new(r.Id, r.Title, r.Status, r.CreatedBy, r.CreatedAt, r.CourseId);
 }
