@@ -3,6 +3,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
@@ -412,8 +414,9 @@ public sealed class AccountLockoutTests
     private async Task UnlockAsync(Guid id)
     {
         using var scope = _provider.CreateScope();
-        var statusStore = new Platform.Api.Services.Identity.EfAccountStatusStore(
-            scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>());
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var sessionManager = new SessionManager(db, Options.Create(new SessionOptions()), _clock);
+        var statusStore = new EfAccountStatusStore(db, sessionManager);
         await using var work = await statusStore.BeginAsync();
         var account = await work.FindForUpdateAsync(id);
         Assert.That(await work.ClearLockoutAsync(account!, _clock.GetUtcNow()), Is.Not.Null, "the account was locked");
