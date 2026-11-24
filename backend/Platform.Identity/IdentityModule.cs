@@ -34,6 +34,7 @@ public static class IdentityModule
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
         services.AddScoped<IExternalIdentityLinker, ExternalIdentityLinker>();
+        services.AddScoped<IAccountRegistration, AccountRegistrationService>();
 
         return services;
     }

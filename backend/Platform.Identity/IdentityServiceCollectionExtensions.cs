@@ -24,8 +24,6 @@ public static class IdentityServiceCollectionExtensions
                 options.Password.RequiredLength = 12;
             })
             .AddEntityFrameworkStores<AccountDbContext>();
-            
-            services.AddScoped<IAccountRegistration, AccountRegistrationService>();
 
         return services;
     }
