@@ -110,6 +110,23 @@ public sealed class AccessDenialAuditPostgresTests
         }
     }
 
+    [Test]
+    public async Task Denial_ResponseCorrelationMatchesStoredEvent_AndIgnoresClientHeader()
+    {
+        var deniedCourse = Guid.NewGuid();
+        await using var factory = new AuditHostFactory(connectionString, OrderingBudget);
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Correlation-ID", "s17-client-supplied-id");
+        using var response = await AccessDenialRequests.PostAsync(client, deniedCourse);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        var correlation = response.Headers.GetValues("X-Correlation-ID").Single();
+        var rows = await LoadDenialsAsync(deniedCourse);
+        Assert.That(rows, Has.Count.EqualTo(1));
+        Assert.That(correlation, Is.Not.EqualTo("s17-client-supplied-id"));
+        Assert.That(rows.Single().CorrelationId, Is.EqualTo(correlation));
+    }
+
     private async Task<List<AuditEventRow>> LoadDenialsAsync(Guid courseId)
     {
         await using var context = new AuditDbContext(

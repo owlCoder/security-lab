@@ -77,6 +77,24 @@ public sealed class AuditHostPostgresTests
         Assert.That(await new PostgresAuditEventStore(context).FindAsync(draft.EventId.Value), Is.Null);
     }
 
+    [Test]
+    public async Task HttpRetry_IsIdempotent_AndConflictingPayloadCannotOverwriteTheEvent()
+    {
+        var draft = StatusChange() with { EventId = Guid.NewGuid() };
+        using var first = await client.PostAsJsonAsync(AuditHostFactory.ProbePath, draft);
+        using var retry = await client.PostAsJsonAsync(AuditHostFactory.ProbePath, draft);
+        var changed = draft with { Details = Details(("oldStatus", "active"), ("newStatus", "archived")) };
+        using var conflict = await client.PostAsJsonAsync(AuditHostFactory.ProbePath, changed);
+
+        Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That(retry.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That(conflict.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        await using var context = OpenContext();
+        Assert.That(await context.Events.CountAsync(row => row.Id == draft.EventId), Is.EqualTo(1));
+        var stored = await new PostgresAuditEventStore(context).FindAsync(draft.EventId!.Value);
+        Assert.That(stored!.Details["newStatus"], Is.EqualTo("blocked"));
+    }
+
     private AuditDbContext OpenContext() =>
         new(new DbContextOptionsBuilder<AuditDbContext>().UseNpgsql(connectionString).Options);
 }

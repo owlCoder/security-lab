@@ -1,5 +1,8 @@
 # Audit integration tests (S-09)
 
+S-17 adds regressions and the executable T01-T13 evidence report:
+[S-17 testing and remaining dependencies](S17-TESTING.md).
+
 From the repository root, with the .NET 10 SDK, PowerShell 7.4+ and a running Docker
 engine in Linux containers mode:
 
