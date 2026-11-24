@@ -12,8 +12,11 @@ public sealed class InMemoryActionCatalog : IActionCatalog
         new(StringComparer.Ordinal);
     private readonly object registrationLock = new();
     private bool isFrozen;
+    private IReadOnlyCollection<ActionDefinition>? frozenDefinitions;
 
-    public InMemoryActionCatalog(IEnumerable<ActionDefinition>? additionalDefinitions = null)
+    public InMemoryActionCatalog(
+        IEnumerable<ActionDefinition>? additionalDefinitions = null,
+        bool freezeAfterConstruction = false)
     {
         var definitions = AccessActions.All
             .Concat(additionalDefinitions ?? [])
@@ -24,9 +27,23 @@ public sealed class InMemoryActionCatalog : IActionCatalog
         {
             Register(action);
         }
+
+        if (freezeAfterConstruction)
+        {
+            Freeze();
+        }
     }
 
-    public IReadOnlyCollection<ActionDefinition> Definitions => actions.Values;
+    public IReadOnlyCollection<ActionDefinition> Definitions
+    {
+        get
+        {
+            lock (registrationLock)
+            {
+                return frozenDefinitions ?? actions.Values.ToArray();
+            }
+        }
+    }
 
     public void Register(string action)
     {
@@ -56,6 +73,7 @@ public sealed class InMemoryActionCatalog : IActionCatalog
     {
         lock (registrationLock)
         {
+            frozenDefinitions = Array.AsReadOnly(actions.Values.ToArray());
             isFrozen = true;
         }
     }
@@ -71,6 +89,9 @@ public sealed class InMemoryActionCatalog : IActionCatalog
             return false;
         }
 
-        return actions.TryGetValue(action, out definition);
+        lock (registrationLock)
+        {
+            return actions.TryGetValue(action, out definition);
+        }
     }
 }

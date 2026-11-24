@@ -16,11 +16,10 @@ public static class CatalogEndpoints
         this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/catalog")
-            .WithTags("Laboratory catalog")
-            .WithMetadata(new DelegatedAuthorizationAttribute());
+            .WithTags("Laboratory catalog");
 
-        group.MapGet("/", ListAsync);
-        group.MapGet("/{id:guid}", DetailAsync);
+        group.MapGet("/", ListAsync).RequireAccess(CatalogReadPolicy.ActionId);
+        group.MapGet("/{id:guid}", DetailAsync).RequireAccess(CatalogReadPolicy.ActionId);
 
         return app;
     }

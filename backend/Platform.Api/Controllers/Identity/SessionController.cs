@@ -1,13 +1,14 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Platform.Access.AspNet;
 using Platform.Api.Interfaces.Identity;
+using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Services.Identity;
 
 namespace Platform.Api.Controllers.Identity;
 
-// ACC-05: both actions authenticate the caller themselves (401 without a session) and only
-// ever touch the caller's own sessions, so the strict Access middleware delegates to them.
-[DelegatedAuthorization]
+// ACC-05 / IDN-07: each action is gated by the central Access middleware (RequireAccess, deny by default).
+// The subject comes from the server-side session (IdentitySessionSubjectProvider), so a caller can only
+// ever list or revoke their own sessions; the handlers repeat the 401 check as a second line of defence.
 [ApiController]
 [Route("api/auth/sessions")]
 public class SessionController(IIdentityContext identity, ISessionManager sessionManager) : ControllerBase
@@ -15,6 +16,7 @@ public class SessionController(IIdentityContext identity, ISessionManager sessio
     private readonly IIdentityContext _identity = identity;
     private readonly ISessionManager _sessionManager = sessionManager;
 
+    [RequireAccess(IdentityAccessActions.SessionList)]
     [HttpGet]
     public async Task<IActionResult> GetMySessions(CancellationToken ct)
     {
@@ -30,6 +32,7 @@ public class SessionController(IIdentityContext identity, ISessionManager sessio
         return Ok(sessions);
     }
 
+    [RequireAccess(IdentityAccessActions.SessionRevoke)]
     [HttpDelete("{handle:guid}")]
     public async Task<IActionResult> RevokeSession(Guid handle, CancellationToken ct)
     {

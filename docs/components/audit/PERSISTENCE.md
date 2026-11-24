@@ -148,8 +148,9 @@ No API startup migration or database deletion is performed.
   was removed afterward. They do not prove runtime privileges or business-rights rollback.
 
 The migration is owned by the local bootstrap role, separate from the runtime role.
-The shared business transaction guarantee is still pending; no claim of a complete
-AUD-01 integration is made.
+That initial check covered only Audit storage. IDN-03 now supplies the shared transaction;
+the additional runtime protection and database-state evidence are described in
+[S16-RUNTIME-TRANSACTIONS.md](S16-RUNTIME-TRANSACTIONS.md).
 
 ## Restricted local runtime role
 
@@ -244,7 +245,7 @@ try {
 }
 ```
 
-Do not print the connection string. Without this environment variable, the 7 database
+Do not print the connection string. Without this environment variable, database
 tests are explicitly skipped. With it set, a failed database connection or migration fails
 the tests. The S-09 [test runner](S09-TESTING.md) configures both database connections
 in shared CI and checks that the PostgreSQL fixtures actually ran.

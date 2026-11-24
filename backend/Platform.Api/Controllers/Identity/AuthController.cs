@@ -6,6 +6,7 @@ using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Security.IdentityAccess;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Platform.Api.Controllers.Identity;
@@ -19,7 +20,7 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
     private readonly ILogoutService _logout = logout;
 
     [AllowAnonymous]
-    [AllowPublic]
+    [RequireAccess(IdentityAccessActions.Login)]
     [EnableRateLimiting(RateLimitPolicies.Login)]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest body, CancellationToken ct)
@@ -43,7 +44,7 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
     }
 
     [AllowAnonymous]
-    [DelegatedAuthorization]
+    [RequireAccess(IdentityAccessActions.Logout)]
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
@@ -56,7 +57,7 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
         return NoContent();
     }
 
-    [DelegatedAuthorization]
+    [RequireAccess(IdentityAccessActions.SessionRead)]
     [HttpGet("me")]
     public IActionResult Me()
     {
