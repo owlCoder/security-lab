@@ -24,6 +24,9 @@ public sealed class CourseDelegation
     public DateTimeOffset? RevokedAt { get; private set; }
     public Guid? RevokedBy { get; private set; }
 
+    /// <summary>ACC-07-8: kada je istek upisan u audit (pozadinski posao). Null dok se ne upiše.</summary>
+    public DateTimeOffset? ExpiryRecordedAt { get; private set; }
+
     public static CourseDelegation Grant(
         Guid courseId,
         Guid granteeId,
@@ -112,5 +115,25 @@ public sealed class CourseDelegation
 
         RevokedAt = now.ToUniversalTime();
         RevokedBy = revokedBy;
+    }
+
+    /// <summary>
+    /// ACC-07-8: beleži da je istek već upisan u audit, da se isti istek ne bi beležio dvaput.
+    /// Važi samo za isteklu (ne opozvanu) delegaciju.
+    /// </summary>
+    public void MarkExpiryRecorded(DateTimeOffset now)
+    {
+        if (StateAt(now) != DelegationState.Expired)
+        {
+            throw new InvalidOperationException(
+                "Only an expired delegation can have its expiry recorded.");
+        }
+
+        if (ExpiryRecordedAt is not null)
+        {
+            throw new InvalidOperationException("The expiry is already recorded.");
+        }
+
+        ExpiryRecordedAt = now.ToUniversalTime();
     }
 }
