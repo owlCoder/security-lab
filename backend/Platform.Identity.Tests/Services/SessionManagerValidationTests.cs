@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using NUnit.Framework.Internal;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -163,6 +164,32 @@ public class SessionManagerValidationTests
         Assert.That(await _manager.ValidateAsync(token[..^1]), Is.Null);
     }
 
+    [Test]
+
+    public async Task MfaTimeOutRejection()
+    {
+        var (token, session) = await CreateSessionAsync(Guid.NewGuid(), AuthLevel.MfaPending);
+        
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.MfaPendingTimeoutMinutes + 1));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Null);
+
+    }
+    [Test]
+
+    public async Task InactivityTimeExpired()
+    {
+        var (token, _) = await CreateSessionAsync(Guid.NewGuid());
+        
+        _clock.Advance(TimeSpan.FromMinutes(1));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.ActivityTimeoutMinutes));
+
+         Assert.That(await _manager.ValidateAsync(token), Is.Null);
+
+    }
     // Sessions are created and revoked through their own contexts, like separate requests would do.
     private async Task<(string Token, Session Session)> CreateSessionAsync(Guid userId, AuthLevel level = AuthLevel.Active)
     {

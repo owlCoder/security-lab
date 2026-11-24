@@ -13,12 +13,7 @@ using Platform.Api.Modules.Identity.SessionLimiting;
 public sealed class StoreSessionCreator(ISessionStore store,IOptions<SessionOptions> sessionOptions,ILogger<StoreSessionCreator> logger) : ISessionCreator
 {
     private readonly SessionOptions options = sessionOptions.Value;
-    // US-14 moves this into configuration and adds the inactivity timeout.
     
-
-
-
-
     public async Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default)
     {
         var storedLevel = ToStoredLevel(level);
