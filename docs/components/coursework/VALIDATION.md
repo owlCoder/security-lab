@@ -1,3 +1,6 @@
+> Current Access integration verification (2026-11-14): see [ACCESS-185.md](ACCESS-185.md).
+> The PR #36 results below are historical; they do not certify the current integration branch or its CI.
+
 # Validation after the second current-main integration
 
 Reviewed source: PR #36 head `3d751274493141202f85c3d686378aedada012c2` merged with main `0a4f3d1325ef340f19dea25d230209105dfa67b0`. Scope remains **ACC-04 / ADM-08**, Team 8.

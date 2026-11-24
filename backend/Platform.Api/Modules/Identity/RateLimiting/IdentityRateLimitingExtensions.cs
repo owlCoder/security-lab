@@ -5,6 +5,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using Platform.Api.Services.Identity;
 
 namespace Platform.Api.Modules.Identity.RateLimiting;
 
@@ -112,12 +113,55 @@ public static class IdentityRateLimitingExtensions
             "Rate limit exceeded. Policy={Policy} Client={Client} CorrelationId={CorrelationId}",
             policy, ClientPartitionKey(http.Connection.RemoteIpAddress), correlation);
 
+        if (policy == RateLimitPolicies.Login)
+            await AuditThrottledLoginAsync(http, correlation);
+
         // Isti odgovor bez obzira na nalog, da se ne bi otkrilo da li postoji (IDN-04, OPS-07).
         await http.Response.WriteAsJsonAsync(new
         {
             code = "rate_limited",
             message = "Previse pokusaja. Pokusajte ponovo kasnije."
         }, cancellationToken);
+    }
+
+    private static async Task AuditThrottledLoginAsync(HttpContext http, string correlation)
+    {
+        var logger = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger(LogCategory);
+        // The rejection has happened even if the client disconnects. Bound the audit attempt
+        // independently of RequestAborted; an unavailable writer must not change the 429.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        Task? write = null;
+        try
+        {
+            write = WriteInScopeAsync(http.RequestServices.GetRequiredService<IServiceScopeFactory>(),
+                correlation, timeout.Token);
+            await write.WaitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            logger.LogError("Throttled login audit timed out. CorrelationId={CorrelationId}", correlation);
+        }
+        catch (Exception)
+        {
+            // Provider exception text may contain sensitive data.
+            logger.LogError("Throttled login audit unavailable. CorrelationId={CorrelationId}", correlation);
+        }
+        finally
+        {
+            if (write is { IsCompleted: false })
+                _ = write.ContinueWith(static task => { _ = task.Exception; }, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+        }
+
+        static async Task WriteInScopeAsync(IServiceScopeFactory scopes, string correlation, CancellationToken ct)
+        {
+            // The task owns its scope until the writer finishes, even if an adapter ignores
+            // cancellation and outlives the response. It never retains the HttpContext.
+            await using var scope = scopes.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<IdentityAuditProducer>()
+                .LoginThrottledAsync(correlation, ct);
+        }
     }
 
     /// <summary>

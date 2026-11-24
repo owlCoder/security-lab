@@ -1,11 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Access.AspNet;
+using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.Infrastructure.Catalog;
-using Platform.Access.Infrastructure.Policies;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Security.RevisionAuthorization;
 
@@ -17,6 +16,12 @@ public static class ReviewEndpoints
 
     public static IServiceCollection AddRevisionReviews(this IServiceCollection services)
     {
+        services.AddAccessAction<RevisionEntryPolicy>(
+            new ActionDefinition(
+                EntryAction,
+                ActionScope.Authenticated,
+                null,
+                false));
         services.TryAddScoped<IPublicationSource, StoredPublicationSource>();
         services.AddScoped<ReviewService>();
         services.AddScoped<DraftRevisionService>();
@@ -25,11 +30,6 @@ public static class ReviewEndpoints
 
     public static IEndpointRouteBuilder MapRevisionReviews(this IEndpointRouteBuilder app)
     {
-        var catalog = app.ServiceProvider.GetRequiredService<InMemoryActionCatalog>();
-        catalog.Register(EntryAction);
-        app.ServiceProvider.GetRequiredService<InMemoryAccessPolicyRegistry>()
-            .Register(EntryAction, new RevisionEntryPolicy());
-
         // The central middleware requires an active account. The services then check each
         // operation on its concrete resource, including course IDs in the body and list rows.
         var group = app.MapGroup("/api/revisions").WithTags("Revision review").RequireAccess(EntryAction);

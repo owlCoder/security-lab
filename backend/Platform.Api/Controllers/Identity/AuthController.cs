@@ -6,13 +6,11 @@ using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Security.IdentityAccess;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Platform.Api.Controllers.Identity;
 
-// ACC-05: login/logout are reachable without a session and /me checks the session itself,
-// so the strict Access middleware delegates authorization to these handlers.
-[DelegatedAuthorization]
 [ApiController]
 [Route("api/auth")]
 public class AuthController(ILoginService login, ILogoutService logout, IIdentityContext identity) : ControllerBase
@@ -22,6 +20,7 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
     private readonly ILogoutService _logout = logout;
 
     [AllowAnonymous]
+    [RequireAccess(IdentityAccessActions.Login)]
     [EnableRateLimiting(RateLimitPolicies.Login)]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest body, CancellationToken ct)
@@ -45,6 +44,7 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
     }
 
     [AllowAnonymous]
+    [RequireAccess(IdentityAccessActions.Logout)]
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
@@ -57,6 +57,7 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
         return NoContent();
     }
 
+    [RequireAccess(IdentityAccessActions.SessionRead)]
     [HttpGet("me")]
     public IActionResult Me()
     {

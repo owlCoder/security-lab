@@ -3,6 +3,7 @@ using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Membership.Contracts;
 using Platform.Membership.Domain;
+using Platform.Audit.Contracts;
 namespace Platform.Membership.Application;
 
 public sealed class MembershipService(
@@ -77,14 +78,18 @@ public sealed class MembershipService(
         MemberRole.Student,
         actorId,
         clock.GetUtcNow());
-        var added = await store.AddAsync(member, cancellationToken);
-        // TODO(ACC-02, AUD-01, spec. 2.1): upis je promena prava i treba da ostavi audit zapis.
-        // Katalog Platform.Audit već ima odgovarajući tip: course.member.role.changed,
-        // CourseId = kurs, Resource = (Account, student), oldRole = "none", newRole = "student".
-        // Upisuje se kada audit modul registruje IAuditWriter (AddAudit je za sada prazan),
-        // u istoj transakciji sa upisom (dogovor S11-06).
-        return added == AddMemberResult.Added
-        ? EnrollmentResult.Enrolled(member)
-        : EnrollmentResult.Of(EnrollmentOutcome.AlreadyEnrolled);
+
+        var added = await store.AddAsync(
+            member,
+            // Akter i korelacioni ID dolaze sa servera (AUD-04), nikad iz tela zahteva.
+            new AuditContext(AuditActor.ForUser(actorId), correlationId),
+            cancellationToken);
+
+        return added switch
+        {
+            AddMemberResult.Added => EnrollmentResult.Enrolled(member),
+            AddMemberResult.AlreadyActive => EnrollmentResult.Of(EnrollmentOutcome.AlreadyEnrolled),
+            _ => EnrollmentResult.Of(EnrollmentOutcome.Unavailable)
+        };
     }
 }

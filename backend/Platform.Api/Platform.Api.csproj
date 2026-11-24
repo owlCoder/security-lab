@@ -19,6 +19,7 @@
     <ProjectReference Include="..\Team21.Acc.Api\Team21.Acc.Api.csproj" />
     <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
+    <ProjectReference Include="..\Platform.Competencies\Platform.Competencies.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,5 +31,9 @@
   <ItemGroup Label="Laboratories">
     <ProjectReference Include="..\Platform.Laboratories.Domain\Platform.Laboratories.Domain.csproj" />
     <ProjectReference Include="..\Platform.Laboratories.Infrastructure\Platform.Laboratories.Infrastructure.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Modules/Administration/Persistence/Migrations/*.sql" />
+    <EmbeddedResource Include="Modules/Administration/Persistence/runtime-permissions.sql" />
   </ItemGroup>
 </Project>

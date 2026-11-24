@@ -36,17 +36,15 @@ public static class AuthoringEndpoints
 {
     public static IEndpointRouteBuilder MapAuthoringEndpoints(this IEndpointRouteBuilder app)
     {
-        // Both handlers call AuthorizeAsync and the authoring service rechecks access.
-        app.MapGet("/api/authoring/templates", ListTemplatesAsync)
-            .DelegatesToLegacyAuthorization();
-        app.MapPost("/api/authoring/templates/{templateId:guid}/drafts", CopyTemplateAsync)
-            .DelegatesToLegacyAuthorization();
+        app.MapGet("/api/authoring/templates", ListTemplatesAsync).RequireAccess(AuthoringActions.TemplateList);
+        app.MapPost("/api/authoring/templates/{templateId:guid}/drafts", CopyTemplateAsync).RequireAccess(AuthoringActions.TemplateCopy, AuthoringActions.TemplateResourceType, "templateId");
         return app;
     }
 
     public static async Task<IResult> ListTemplatesAsync(
         HttpContext context,
-        IRequestSubjectResolver subjectResolver,
+        //IRequestSubjectResolver subjectResolver,
+        [FromKeyedServices("AuthoringSession")] IRequestSubjectResolver subjectResolver,
         AuthoringAccessDecision accessDecision,
         [FromServices] TemplateCatalogService catalog,
         CancellationToken cancellationToken)
@@ -73,7 +71,8 @@ public static class AuthoringEndpoints
     public static async Task<IResult> CopyTemplateAsync(
         Guid templateId,
         HttpContext context,
-        IRequestSubjectResolver subjectResolver,
+        //IRequestSubjectResolver subjectResolver,
+        [FromKeyedServices("AuthoringSession")] IRequestSubjectResolver subjectResolver,
         AuthoringAccessDecision accessDecision,
         [FromServices] DraftService drafts,
         CancellationToken cancellationToken)

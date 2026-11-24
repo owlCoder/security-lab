@@ -11,7 +11,8 @@ public enum EnrollmentOutcome
     CourseArchived,
     AccountNotFound,
     AccountNotActive,
-    AlreadyEnrolled
+    AlreadyEnrolled,
+    Unavailable
 }
 public sealed record EnrollmentResult(EnrollmentOutcome Outcome, CourseMember? Member = null)
 {

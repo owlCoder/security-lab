@@ -4,11 +4,9 @@ import type { TestUser } from '../../api/labs'
 // u zaglavlju X-Test-User; server ga prihvata samo u Development režimu.
 export const TEST_USERS: { value: string; label: string; user: TestUser }[] = [
   { value: 'none', label: 'Bez korisnika (anonimno)', user: null },
-  { value: 'student', label: 'ana – Student', user: { id: 'ana', role: 'Student' } },
-  { value: 'teacher', label: 'marko – Nastavnik', user: { id: 'marko', role: 'Teacher' } },
+  { value: 'student', label: 'ana – Student', user: { id: '22222222-2222-2222-2222-222222222222', role: 'Student' } },
+  { value: 'teacher', label: 'marko – Nastavnik', user: { id: '11111111-1111-1111-1111-111111111111', role: 'Teacher' } },
 ]
-
-const ROLE_NAMES = { Student: 'student', Teacher: 'nastavnik' } as const
 
 interface Props {
   value: string
@@ -16,7 +14,7 @@ interface Props {
 }
 
 export default function TestUserPicker({ value, onChange }: Props) {
-  const current = TEST_USERS.find(u => u.value === value)?.user ?? null
+  const current = TEST_USERS.find(u => u.value === value)
   return (
     <fieldset className="labs-session">
       <legend>Razvojna sesija <span className="badge-fake">FAKE</span></legend>
@@ -33,7 +31,7 @@ export default function TestUserPicker({ value, onChange }: Props) {
           </select>
         </div>
         <p className="labs-session-current">
-          Trenutno: <strong>{current ? `${current.id} (${ROLE_NAMES[current.role]})` : 'anonimno'}</strong>
+          Trenutno: <strong>{current?.user ? current.label : 'anonimno'}</strong>
         </p>
       </div>
       <p id="labs-test-user-hint" className="hint">

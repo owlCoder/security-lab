@@ -15,10 +15,11 @@ internal sealed partial class AuditDraftValidator
     private static readonly string[] ForbiddenKeyParts =
         ["password", "passwd", "secret", "token", "authorization", "apikey", "cookie", "session"];
 
-    [GeneratedRegex(@"^[A-Za-z0-9._-]{1,64}$", RegexOptions.CultureInvariant)]
+    // \z, not $: in .NET, $ also matches before a final "\n", so "id\n" would pass.
+    [GeneratedRegex(@"^[A-Za-z0-9._-]{1,64}\z", RegexOptions.CultureInvariant)]
     private static partial Regex CorrelationIdPattern();
 
-    [GeneratedRegex(@"^[A-Za-z0-9_-]{1,64}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[A-Za-z0-9_-]{1,64}\z", RegexOptions.CultureInvariant)]
     private static partial Regex ResourceIdPattern();
 
     public AuditRejectionCode Validate(AuditEventDraft draft, AuditContext context)

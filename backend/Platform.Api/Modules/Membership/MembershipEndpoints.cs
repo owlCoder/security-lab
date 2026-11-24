@@ -30,7 +30,7 @@ public static class MembershipEndpoints
     CancellationToken cancellationToken)
     {
         // AUD-04: isti ID kao u zaglavlju X-Correlation-ID, da se zahtev prati kroz module.
-        var correlationId = correlation.CorrelationId ?? context.TraceIdentifier;
+        var correlationId = correlation.CorrelationId ?? Guid.NewGuid().ToString("N");
         var result = await memberships.EnrollStudentAsync(
         subjectResolver.Resolve(context),
         courseId,
@@ -71,6 +71,8 @@ public static class MembershipEndpoints
             Error(StatusCodes.Status422UnprocessableEntity, "account_not_eligible", correlationId),
             EnrollmentOutcome.AlreadyEnrolled =>
             Error(StatusCodes.Status409Conflict, "already_enrolled", correlationId),
+            EnrollmentOutcome.Unavailable =>
+Error(StatusCodes.Status503ServiceUnavailable, "unavailable", correlationId),
             _ =>
             Error(StatusCodes.Status500InternalServerError, "unexpected", correlationId)
         };

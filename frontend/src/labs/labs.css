@@ -1,0 +1,37 @@
+.lab-visibility-section > div,
+.lab-visibility-section > form {
+  margin-top: 16px;
+}
+
+.lab-visibility-section label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.lab-visibility-section select {
+  padding: 10px 12px;
+  border: 1px solid #bccce0;
+  border-radius: 8px;
+  font: inherit;
+  max-width: 100%;
+}
+
+.lab-visibility-section [role="group"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.lab-visibility-section [aria-pressed="true"] {
+  outline: 3px solid #173b66;
+  outline-offset: 3px;
+}
+
+.lab-visibility-section .lab-preview-banner {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-left: 4px solid #315f8c;
+  border-radius: 6px;
+  background: #eaf1f8;
+  color: #173b66;
+}
