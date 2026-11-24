@@ -9,10 +9,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $groups = @(Get-Content -Raw -LiteralPath $MatrixPath | ConvertFrom-Json)
 if ($groups.Count -eq 0 -or @($groups.id | Sort-Object -Unique).Count -ne $groups.Count -or
-    @($groups | Where-Object { [string]::IsNullOrWhiteSpace($_.id) -or @($_.fixtures).Count -eq 0 }).Count -gt 0) {
-    throw 'S-17 matrix must contain uniquely named groups with required fixtures.'
+    @($groups | Where-Object { [string]::IsNullOrWhiteSpace($_.id) -or @($_.methods).Count -eq 0 }).Count -gt 0) {
+    throw 'S-17 matrix must contain uniquely named groups with required methods.'
 }
-$requiredFixtures = @($groups.fixtures | Sort-Object -Unique)
+foreach ($group in $groups) {
+    foreach ($method in $group.methods) {
+        if ($method -notmatch '^[A-Za-z_][A-Za-z0-9_.]+\.[A-Za-z_][A-Za-z0-9_]*$') {
+            throw "Invalid fully qualified method in group $($group.id)."
+        }
+    }
+}
+$requiredFixtures = @($groups.methods | ForEach-Object {
+    $_.Substring(0, $_.LastIndexOf('.'))
+} | Sort-Object -Unique -CaseSensitive)
 $cases = [Collections.Generic.List[object]]::new()
 $problems = [Collections.Generic.List[string]]::new()
 $files = @(Get-ChildItem -LiteralPath $ResultsDirectory -Filter '*.trx' -Recurse)
@@ -34,8 +43,10 @@ foreach ($file in $files) {
     $seen = @{}
     foreach ($test in $document.SelectNodes('/t:TestRun/t:TestDefinitions/t:UnitTest', $ns)) {
         $fixture = ($test.TestMethod.className -split ',', 2)[0]
-        if ($fixture -in $requiredFixtures) {
-            $definitions[$test.id] = $test
+        # NUnit puts parameter values in TestMethod.name; the matrix identifies the C# method.
+        $method = ([string]$test.TestMethod.name -split '\(', 2)[0]
+        $definitions[$test.id] = @{
+            fixture = $fixture; method = $method; fullMethod = "$fixture.$method"; name = [string]$test.name
         }
     }
     foreach ($result in $document.SelectNodes('/t:TestRun/t:Results/t:UnitTestResult', $ns)) {
@@ -45,9 +56,11 @@ foreach ($file in $files) {
         if (-not $definitions.ContainsKey($result.testId)) { continue }
         $definition = $definitions[$result.testId]
         $seen[$result.testId] = $true
+        if ($definition.fixture -cnotin $requiredFixtures) { continue }
         $cases.Add([ordered]@{
-            fixture = ($definition.TestMethod.className -split ',', 2)[0]
-            method = [string]$definition.TestMethod.name
+            fixture = $definition.fixture
+            method = $definition.method
+            fullMethod = $definition.fullMethod
             name = [string]$result.testName
             outcome = [string]$result.outcome
             trx = [IO.Path]::GetRelativePath($ResultsDirectory, $file.FullName)
@@ -56,22 +69,32 @@ foreach ($file in $files) {
     foreach ($id in $definitions.Keys) {
         if (-not $seen.ContainsKey($id)) {
             $problems.Add("Defined test has no result: $($definitions[$id].name).")
+            $definition = $definitions[$id]
+            if ($definition.fixture -cin $requiredFixtures) {
+                $cases.Add([ordered]@{
+                    fixture = $definition.fixture; method = $definition.method; fullMethod = $definition.fullMethod
+                    name = $definition.name; outcome = 'MissingResult'
+                    trx = [IO.Path]::GetRelativePath($ResultsDirectory, $file.FullName)
+                })
+            }
         }
     }
 }
 $summary = @(
     foreach ($group in $groups) {
-        $selected = @($cases | Where-Object { $_.fixture -in $group.fixtures })
-        $missing = @($group.fixtures | Where-Object { $_ -notin $selected.fixture })
+        $fixtures = @($group.methods | ForEach-Object { $_.Substring(0, $_.LastIndexOf('.')) } | Sort-Object -Unique -CaseSensitive)
+        $selected = @($cases | Where-Object { $_.fixture -cin $fixtures })
+        $missing = @($group.methods | Where-Object { $_ -cnotin $selected.fullMethod })
         $notPassed = @($selected | Where-Object outcome -NE 'Passed')
-        foreach ($fixture in $missing) { $problems.Add("$($group.id): missing fixture $fixture.") }
+        foreach ($method in $missing) { $problems.Add("$($group.id): missing required method $method.") }
         foreach ($test in $notPassed) { $problems.Add("$($group.id): $($test.name) is $($test.outcome).") }
         $status = if ($missing.Count -gt 0 -or $notPassed.Count -gt 0) { 'NotVerified' }
             elseif ($group.pending.Count -gt 0) { 'Partial' } else { 'Passed' }
         [ordered]@{
             id = $group.id; requirement = $group.requirement; status = $status
             passed = @($selected | Where-Object outcome -EQ 'Passed').Count
-            notPassed = $notPassed.Count; missingFixtures = $missing; pending = @($group.pending)
+            notPassed = $notPassed.Count; requiredMethods = @($group.methods); missingMethods = $missing
+            pending = @($group.pending)
         }
     }
 )

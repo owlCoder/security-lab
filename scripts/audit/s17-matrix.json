@@ -1,80 +1,159 @@
 [
   {
     "id": "T01",
-    "requirement": "OPS-05: DI scope and startup",
-    "fixtures": ["Platform.Audit.Tests.CompositionScopeTests", "Platform.Audit.Tests.HostStartupScopeTests", "Platform.Audit.Tests.AuditRegressionPostgresTests"],
+    "requirement": "OPS-01/OPS-02: startup and DI scope regression",
+    "methods": [
+      "Platform.Audit.Tests.CompositionScopeTests.AccessAndAuditRegistrations_PassScopeAndBuildValidation",
+      "Platform.Audit.Tests.CompositionScopeTests.CaptiveDependency_IsRejectedByValidation",
+      "Platform.Audit.Tests.HostStartupScopeTests.Host_StartsWithScopeValidation_AndHealthResponds",
+      "Platform.Audit.Tests.HostStartupScopeTests.Host_WithCaptiveDependency_FailsToStart",
+      "Platform.Audit.Tests.AuditRegressionPostgresTests.ConcurrentScopes_PersistOnlyTheirOwnActorAndCorrelation"
+    ],
     "pending": []
   },
   {
     "id": "T02",
     "requirement": "AUD-01: trusted actor and server time",
-    "fixtures": ["Platform.Audit.Tests.AuditWriterTests", "Platform.Audit.Tests.AuditHostPostgresTests", "Platform.Identity.Tests.Services.IdentityAuditProducerTests", "Platform.Identity.Tests.Services.IdentityAuditPostgresIntegrationTests"],
+    "methods": [
+      "Platform.Audit.Tests.AuditWriterTests.WriteAsync_WhenDraftIsValid_WritesTrustedImmutableEventWithServerUtcTime",
+      "Platform.Audit.Tests.AuditWriterTests.TrustedWriteAsync_WhenAnonymousContextIsValid_RecordsWithoutActorId",
+      "Platform.Audit.Tests.AuditHostPostgresTests.Write_PersistsTrustedContextThroughHostAndRestrictedStore",
+      "Platform.Identity.Tests.Services.IdentityAuditProducerTests.InvalidCredentials_UsesAnonymousActorAndStableReasonCode",
+      "Platform.Identity.Tests.Services.IdentityAuditProducerTests.Logout_ContainsNoSessionIdentifier",
+      "Platform.Identity.Tests.Services.IdentityAuditPostgresIntegrationTests.LoginAndLogoutHttpFlow_PersistsTrustedAuditEventsAndRevokesSession"
+    ],
     "pending": []
   },
   {
     "id": "T03",
     "requirement": "AUD-03: catalog, secrets and payload limits",
-    "fixtures": ["Platform.Audit.Tests.AuditDraftValidatorTests", "Platform.Audit.Tests.AuditEventCatalogTests", "Platform.Audit.Tests.AuditWriterTests"],
+    "methods": [
+      "Platform.Audit.Tests.AuditEventCatalogTests.EveryEventTypeConstant_HasExactlyOneSchema",
+      "Platform.Audit.Tests.AuditEventCatalogTests.NoSchema_AllowsADetailKeyThatLooksLikeASecret",
+      "Platform.Audit.Tests.AuditDraftValidatorTests.Validate_WhenDraftMatchesCatalog_AcceptsIt",
+      "Platform.Audit.Tests.AuditDraftValidatorTests.Validate_WhenEventTypeIsNotInCatalog_RejectsUnknownEventType",
+      "Platform.Audit.Tests.AuditDraftValidatorTests.Validate_WhenOutcomeIsNotAllowedForType_RejectsOutcome",
+      "Platform.Audit.Tests.AuditDraftValidatorTests.Validate_WhenDetailKeyLooksLikeASecret_RejectsForbiddenKey",
+      "Platform.Audit.Tests.AuditWriterTests.WriteAsync_EnforcesTwentyDetailKeySizeGate",
+      "Platform.Audit.Tests.AuditWriterTests.WriteAsync_EnforcesExactUtf8JsonSizeGate"
+    ],
     "pending": []
   },
   {
     "id": "T04",
     "requirement": "SEC-02: safe logs and rejected values",
-    "fixtures": ["Platform.Audit.Tests.AuditHostPostgresTests", "Platform.Audit.Tests.AccessDenialAuditFailureTests", "Platform.Audit.Tests.CorrelationContextTests"],
+    "methods": [
+      "Platform.Audit.Tests.AuditHostPostgresTests.Write_RejectsForbiddenDetailWithoutEchoingOrPersistingIt",
+      "Platform.Audit.Tests.AccessDenialAuditFailureTests.AuditStoreDown_EveryDenialIsStill403_AndRaisesExactlyOneLostAlarm",
+      "Platform.Audit.Tests.CorrelationContextTests.Request_LogsWrittenDuringRequestCarryCorrelationScope"
+    ],
     "pending": []
   },
   {
     "id": "T05",
     "requirement": "AUD-01: append-only permissions and history trigger",
-    "fixtures": ["Platform.Audit.Tests.AuditRuntimePermissionsTests", "Platform.Audit.Tests.PostgresAuditEventStoreTests"],
+    "methods": [
+      "Platform.Audit.Tests.AuditRuntimePermissionsTests.Runtime_UsesUnprivilegedLoginWithoutRoleMemberships",
+      "Platform.Audit.Tests.AuditRuntimePermissionsTests.Runtime_CanReadPersistedEventAcrossConnections",
+      "Platform.Audit.Tests.AuditRuntimePermissionsTests.Runtime_RejectsForbiddenSqlWithoutChangingEvent",
+      "Platform.Audit.Tests.PostgresAuditEventStoreTests.Trigger_RejectsHistoryChangesEvenForTableOwner"
+    ],
     "pending": []
   },
   {
     "id": "T06",
     "requirement": "AUD-01: failure, rollback, retries and cancellation",
-    "fixtures": ["Platform.Audit.Tests.AuditRegressionPostgresTests", "Platform.Audit.Tests.PostgresAuditEventStoreTests", "Platform.Identity.Tests.Integration.AccountStatusChangeIntegrationTests", "Platform.Identity.Tests.Services.IdentityAuditPostgresIntegrationTests"],
+    "methods": [
+      "Platform.Audit.Tests.AuditRegressionPostgresTests.CancelBeforeWrite_DoesNotPersistAnEvent",
+      "Platform.Audit.Tests.AuditRegressionPostgresTests.RetryAfterRecorded_InNewScope_PreservesOneOriginalEvent",
+      "Platform.Audit.Tests.AuditRegressionPostgresTests.RetryWithDifferentActorOrCorrelation_IsRejectedWithoutChangingHistory",
+      "Platform.Audit.Tests.PostgresAuditEventStoreTests.Rollback_RemovesUncommittedAuditInsert",
+      "Platform.Audit.Tests.PostgresAuditEventStoreTests.ConcurrentRetries_InsertExactlyOneEvent",
+      "Platform.Identity.Tests.Integration.AccountStatusChangeIntegrationTests.Block_RevokesActiveSession_RefusesNextRequestAndLogin_AndRecordsAudit",
+      "Platform.Identity.Tests.Integration.AccountStatusChangeIntegrationTests.AuditFailure_RollsBackStatusSessionRevocationAndAuditRow",
+      "Platform.Identity.Tests.Services.IdentityAuditPostgresIntegrationTests.Login_WhenAuditWriteFails_PersistsOnlyARevokedSession"
+    ],
     "pending": ["The IDN-03 transaction proof does not establish atomicity for every other privileged producer."]
   },
   {
     "id": "T07",
     "requirement": "AUD-06: course isolation and minimal DTO",
-    "fixtures": ["Platform.Audit.Tests.PostgresCourseAuditQueryTests", "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests"],
+    "methods": [
+      "Platform.Audit.Tests.PostgresCourseAuditQueryTests.Query_CourseK_ReturnsOnlyEventsOfK",
+      "Platform.Audit.Tests.PostgresCourseAuditQueryTests.Query_CourseL_DoesNotSeeKAndCountsOnlyL",
+      "Platform.Audit.Tests.PostgresCourseAuditQueryTests.Query_DtoContainsNoDetailsAndKeepsUtc",
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.ActiveTeacher_SeesTheirCourse",
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.TeacherInK_StudentInL_DoesNotInheritTeacherPermissionInL"
+    ],
     "pending": ["S-14/S-15 HTTP course view is not merged (PR #182); SQL filtering and policy tests are not a completed authorized query/API flow."]
   },
   {
     "id": "T08",
     "requirement": "ACC-03/ACC-07: current membership and delegation",
-    "fixtures": ["Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests", "Platform.Audit.Tests.Authorization.CourseAuditAccessDecisionTests"],
+    "methods": [
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.ActiveAssistant_WithCurrentExactActionDelegation_IsAllowed",
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.AssistantWithoutDelegatedAction_IsDenied",
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.MembershipRevokedBetweenRequests_IsDeniedWithoutRestart",
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.DelegatedActionRevokedByProvider_IsDeniedOnNextEvaluation",
+      "Platform.Audit.Tests.Authorization.CourseAuditReadPolicyTests.CurrentRightsProviderFiltersValidity_AndPolicyDoesNotCacheItsResult",
+      "Platform.Audit.Tests.Authorization.CourseAuditAccessDecisionTests.ProductionDefaultMembershipFallback_KeepsRegisteredAuditActionDenied"
+    ],
     "pending": ["Real membership/delegation provider and revocation on the next AUD-06 HTTP request require S-15; current policy tests use doubles."]
   },
   {
     "id": "T09",
     "requirement": "AUD-04: correlation propagation and parallel isolation",
-    "fixtures": ["Platform.Audit.Tests.CorrelationContextTests", "Platform.Audit.Tests.AccessDenialAuditPostgresTests", "Platform.Audit.Tests.AuditRegressionPostgresTests"],
+    "methods": [
+      "Platform.Audit.Tests.CorrelationContextTests.Request_GetsServerIdInContextTraceIdentifierAndHeader",
+      "Platform.Audit.Tests.CorrelationContextTests.Request_WithClientCorrelationHeader_IgnoresClientValue",
+      "Platform.Audit.Tests.AccessDenialAuditPostgresTests.Denial_ResponseCorrelationMatchesStoredEvent_AndIgnoresClientHeader",
+      "Platform.Audit.Tests.AuditRegressionPostgresTests.ConcurrentScopes_PersistOnlyTheirOwnActorAndCorrelation"
+    ],
     "pending": []
   },
   {
     "id": "T10",
     "requirement": "AUD-01/ACC-05: one denial record, no recursion, fail closed",
-    "fixtures": ["Platform.Audit.Tests.AccessDenialAuditPostgresTests", "Platform.Audit.Tests.AccessDenialAuditFailureTests", "Platform.Audit.Tests.Authorization.CourseAuditAccessDecisionTests"],
+    "methods": [
+      "Platform.Audit.Tests.AccessDenialAuditPostgresTests.ManyIdenticalDenials_AreEachStoredAsOwnRecord_AndNoneIsLostWhenTheHostStops",
+      "Platform.Audit.Tests.AccessDenialAuditPostgresTests.EachDenial_IsStoredBeforeItsResponseIsReturned",
+      "Platform.Audit.Tests.AccessDenialAuditFailureTests.AuditStoreDown_EveryDenialIsStill403_AndRaisesExactlyOneLostAlarm",
+      "Platform.Audit.Tests.Authorization.CourseAuditAccessDecisionTests.PublicComposition_UsesRealAccessDecision_AndAuditsEachDecisionOnce"
+    ],
     "pending": []
   },
   {
     "id": "T11",
     "requirement": "AUD-06/SEC-04: bounded filters and stable paging",
-    "fixtures": ["Platform.Audit.Tests.CourseAuditQueryNormalizerTests", "Platform.Audit.Tests.CourseAuditQueryServiceTests", "Platform.Audit.Tests.PostgresCourseAuditQueryTests"],
+    "methods": [
+      "Platform.Audit.Tests.CourseAuditQueryNormalizerTests.Normalize_WithPageSizeInRange_Accepts",
+      "Platform.Audit.Tests.CourseAuditQueryNormalizerTests.Normalize_WithInvalidPageSize_IsRefused",
+      "Platform.Audit.Tests.CourseAuditQueryNormalizerTests.Normalize_WithExactly31Days_Accepts",
+      "Platform.Audit.Tests.CourseAuditQueryServiceTests.Query_WhenStorageFails_ReturnsUnavailableWithoutDetails",
+      "Platform.Audit.Tests.PostgresCourseAuditQueryTests.Query_WithEqualTimes_SortsByIdDescending",
+      "Platform.Audit.Tests.PostgresCourseAuditQueryTests.Query_PagesHaveNoGapOrOverlapAndLastPageHasNoNext"
+    ],
     "pending": ["S-14 HTTP filter validation, viewed-event failure (503 before data), and production load/timeout measurements remain to be verified."]
   },
   {
     "id": "T12",
     "requirement": "SEC-01: production excludes test identity and probes",
-    "fixtures": ["Platform.Audit.Tests.AuditProductionIsolationTests", "Platform.Audit.Tests.HostStartupScopeTests"],
+    "methods": [
+      "Platform.Audit.Tests.AuditProductionIsolationTests.Production_DoesNotExposeAuditProbeOrAccessDemo",
+      "Platform.Audit.Tests.AuditProductionIsolationTests.Production_RejectsDevIdentityHeaderOnProtectedRoute",
+      "Platform.Audit.Tests.HostStartupScopeTests.Host_StartsWithScopeValidation_AndHealthResponds"
+    ],
     "pending": []
   },
   {
     "id": "T13",
-    "requirement": "OPS-01/OPS-04: migrations, health and restore",
-    "fixtures": ["Platform.Audit.Tests.PostgresAuditEventStoreTests", "Platform.Audit.Tests.HostStartupScopeTests", "Platform.Audit.Tests.AuditRestorePostgresTests"],
+    "requirement": "OPS-01/OPS-04/OPS-10: migrations, process health and restore",
+    "methods": [
+      "Platform.Audit.Tests.PostgresAuditEventStoreTests.MigrateAgain_PreservesExistingEvent",
+      "Platform.Audit.Tests.PostgresAuditEventStoreTests.UpgradeFromInitialSchema_PreservesHistoryAndEnablesTrigger",
+      "Platform.Audit.Tests.HostStartupScopeTests.Host_StartsWithScopeValidation_AndHealthResponds",
+      "Platform.Audit.Tests.AuditRestorePostgresTests.RestoreThenBootstrap_PreservesEventsTriggerAndEnforcesExplicitRuntimePrivileges"
+    ],
     "pending": []
   }
 ]

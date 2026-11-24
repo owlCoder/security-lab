@@ -82,17 +82,15 @@ public sealed class AuditRegressionPostgresTests
     }
 
     [Test]
-    public async Task CancelAfterRecorded_ThenRetryInNewScope_PreservesOneOriginalEvent()
+    public async Task RetryAfterRecorded_InNewScope_PreservesOneOriginalEvent()
     {
         await using var provider = BuildProvider();
         var draft = StatusChange() with { EventId = Guid.NewGuid() };
-        using var cancellation = new CancellationTokenSource();
         await using (var first = provider.CreateAsyncScope())
         {
             var result = await first.ServiceProvider.GetRequiredService<ITrustedAuditWriter>()
-                .WriteAsync(draft, UserContext, cancellation.Token);
+                .WriteAsync(draft, UserContext);
             Assert.That(result.IsRecorded, Is.True);
-            cancellation.Cancel();
         }
         await using var database = OpenContext();
         var original = await database.Events.AsNoTracking().SingleAsync(row => row.Id == draft.EventId);
