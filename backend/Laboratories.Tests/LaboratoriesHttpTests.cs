@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -647,6 +648,74 @@ public sealed class LaboratoriesHttpTests
         Assert.That(updated, Is.EqualTo(created with { Title = "Novi naslov" }));
     }
 
+    // ---------- Poruke o greskama ne otkrivaju interne detalje ----------
+
+    // Za svaki tip odbijanja (400, 401, 403, 404) proverava se da odgovor:
+    //  - ima samo poznata polja (kod i poruka, ili standardni ProblemDetails),
+    //  - ne sadrzi tip izuzetka, stack trace ni imena internih klasa,
+    //  - ne vraca nazad unos klijenta ni podatke o tudjoj laboratoriji ili kursu,
+    //  - nista ne menja u skladistu.
+    [TestCase(ErrorScenario.InvalidTitle, HttpStatusCode.BadRequest)]
+    [TestCase(ErrorScenario.InvalidCourse, HttpStatusCode.BadRequest)]
+    [TestCase(ErrorScenario.InvalidBody, HttpStatusCode.BadRequest)]
+    [TestCase(ErrorScenario.Unauthenticated, HttpStatusCode.Unauthorized)]
+    [TestCase(ErrorScenario.ForbiddenRole, HttpStatusCode.Forbidden)]
+    [TestCase(ErrorScenario.ForbiddenCourse, HttpStatusCode.Forbidden)]
+    [TestCase(ErrorScenario.NotFoundMissing, HttpStatusCode.NotFound)]
+    [TestCase(ErrorScenario.NotFoundForeign, HttpStatusCode.NotFound)]
+    public async Task ErrorResponses_DoNotRevealInternalDetailsOrInput(ErrorScenario scenario, HttpStatusCode expectedStatus)
+    {
+        const string secretTitle = "Tajni nacrt nastavnika";
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        LaboratoryResponse lab = await CreateLabAsync(client, Teacher, secretTitle);
+        string probe = $"probe-{Guid.NewGuid():N}";
+        Guid missingId = Guid.NewGuid();
+
+        using HttpRequestMessage request = scenario switch
+        {
+            ErrorScenario.InvalidTitle => CreateJsonRequest("POST", Route, Teacher, new { title = probe + new string('x', 201), courseId = CourseId }),
+            ErrorScenario.InvalidCourse => CreateJsonRequest("POST", Route, Teacher, new { title = probe, courseId = (Guid?)null }),
+            ErrorScenario.InvalidBody => CreateRawRequest("POST", Route, Teacher, "{\"title\":\"" + probe),
+            ErrorScenario.Unauthenticated => CreateRequest("GET", $"{Route}{lab.Id}", null),
+            ErrorScenario.ForbiddenRole => CreateRequest("GET", $"{Route}{lab.Id}", Student),
+            ErrorScenario.ForbiddenCourse => CreateJsonRequest("POST", Route, OtherTeacher, new { title = probe, courseId = CourseId }),
+            ErrorScenario.NotFoundMissing => CreateRequest("GET", $"{Route}{missingId}", Teacher),
+            ErrorScenario.NotFoundForeign => CreateJsonRequest("PATCH", $"{Route}{lab.Id}/title", OtherTeacher, new { title = probe }),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        using var response = await client.SendAsync(request);
+        string body = await response.Content.ReadAsStringAsync();
+
+        Assert.That(response.StatusCode, Is.EqualTo(expectedStatus));
+        Assert.That(response.Content.Headers.ContentType?.MediaType, Does.EndWith("json"));
+        using JsonDocument json = JsonDocument.Parse(body);
+        Assert.That(json.RootElement.ValueKind, Is.EqualTo(JsonValueKind.Object));
+        Assert.Multiple(() =>
+        {
+            foreach (JsonProperty property in json.RootElement.EnumerateObject())
+            {
+                Assert.That(AllowedErrorFields, Does.Contain(property.Name), $"Neocekivano polje u odgovoru: {property.Name}");
+            }
+
+            foreach (string marker in InternalMarkers)
+            {
+                Assert.That(body, Does.Not.Contain(marker));
+            }
+
+            Assert.That(body, Does.Not.Contain(probe));
+            Assert.That(body, Does.Not.Contain(secretTitle));
+            Assert.That(body, Does.Not.Contain(lab.Id.ToString()));
+            Assert.That(body, Does.Not.Contain(CourseId.ToString()));
+            Assert.That(body, Does.Not.Contain(missingId.ToString()));
+        });
+
+        // Odbijen zahtev nista ne menja.
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(1));
+        Assert.That(await StoredTitleAsync(factory, lab.Id), Is.EqualTo(secretTitle));
+    }
+
     // ---------- Neocekivana greska ----------
 
     [Test]
@@ -702,6 +771,34 @@ public sealed class LaboratoriesHttpTests
         HttpRequestMessage request = CreateRequest(method, path, testUser);
         request.Content = JsonContent.Create(body);
         return request;
+    }
+
+    private static HttpRequestMessage CreateRawRequest(string method, string path, string? testUser, string body)
+    {
+        HttpRequestMessage request = CreateRequest(method, path, testUser);
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        return request;
+    }
+
+    // Polja koja odgovor o gresci sme da ima: nas ApiErrorResponse (code, message)
+    // ili standardni ProblemDetails (type, title, status) sa ID-em zahteva za podrsku.
+    private static readonly string[] AllowedErrorFields =
+        ["code", "message", "type", "title", "status", "traceId", "correlationId"];
+
+    // Tragovi internih detalja koji nikad ne smeju da stignu do klijenta.
+    private static readonly string[] InternalMarkers =
+        ["Exception", " at ", "StackTrace", "Platform.", "System.", "Microsoft.", "Npgsql"];
+
+    public enum ErrorScenario
+    {
+        InvalidTitle,
+        InvalidCourse,
+        InvalidBody,
+        Unauthenticated,
+        ForbiddenRole,
+        ForbiddenCourse,
+        NotFoundMissing,
+        NotFoundForeign,
     }
 
     private sealed class LaboratoriesHostFactory(
