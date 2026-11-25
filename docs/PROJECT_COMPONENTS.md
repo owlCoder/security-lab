@@ -5,7 +5,7 @@ Components and requirements are defined by the Security Lab project specificatio
 | Team | Component 1 (ID) | Component 2 (ID) | Notes |
 | --- | --- | --- | --- |
 | Team 1 | IDN-02 Secure login and logout | IDN-06 MFA for selected user groups | Denis Djuris (PR 14/2023): IDN-02; |
-| Team 2 | IDN-03 Account status | | Igor Cvijić (PR 21/2023): IDN-03; Vladimir Radlovački (PR 23/2023); Nebojša Golušin (PR 17/2023); |
+| Team 2 | IDN-03 Account status | IDN-07 Session review and selective revocation | Igor Cvijić (PR 21/2023): IDN-03; Vladimir Radlovački (PR 23/2023); Nebojša Golušin (PR 17/2023); [IDN-03](IDN-03_ACCOUNT_STATUS.md), [IDN-07](IDN-07-SESSION-REVIEW-REVOKE.md) |
 | Team 3 | ACC-05 — podrazumevano odbijanje | ACC-08 — kontekstualne politike pristupa | [ACC-05 i ACC-08](components/ACC-05-ACC-08.md) |
 | Team 4 | IDN-05 Per-account lockout | | milanmilosev1: IDN-05 lockout, [IDN-05 lockout](components/identity/IDN-05-lockout.md); administrator unlock: [IDN-05 admin unlock](components/identity/IDN-05-admin-unlock.md); per-IP limiting: [IDN-05](components/identity/IDN-05.md) |
 | … |  |  |  |
