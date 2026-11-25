@@ -168,6 +168,9 @@ with `EventIdConflict` and never replaces the stored record.
 | `auth.login` | Identity (IDN-02) | Success, Failure | Success: `User`. Failure: `Anonymous`, or `User` when the credentials were valid but the account is not active | forbidden | optional `Account` (the account that logged in) | `reasonCode` |
 | `auth.logout` | Identity (IDN-02) | Success | `User` | forbidden | none | none |
 | `auth.login.throttled` | Identity (IDN-05) | Denied | `Anonymous` | forbidden | none | none |
+| `auth.mfa.enrollment.started` | Identity (IDN-06, US-17) | Success | `User` | forbidden | `Account` (required) | none |
+| `auth.mfa.enabled` | Identity (IDN-06, US-17, enrollment confirmed) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` (Failure only) |
+| `auth.mfa.verify` | Identity (IDN-06, US-18, second factor of a login) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` (Failure only) |
 | `account.status.changed` | Identity (IDN-03), Admin (ADM-01) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `oldStatus`, `newStatus`, `reasonCode` |
 | `account.unlocked` | Identity (IDN-05, administrator unlock) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `lockoutEnd` (Success only), `reasonCode` |
 | `course.member.role.changed` | Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
