@@ -127,7 +127,37 @@ public sealed class MfaKeyRingTests
         var settings = Settings();
         settings["Identity:DataProtection:CertificatePath"] = Path.Combine(_root, "missing.pfx");
 
-        Assert.Throws<InvalidOperationException>(() => BuildProvider(settings));
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(settings));
+
+        Assert.That(error!.Message, Does.Contain("does not point to a file"));
+    }
+
+    [Test]
+    public void CertificateWithoutPrivateKey_StopsTheStart()
+    {
+        // Same certificate, exported without its private key: it could encrypt new keys but never decrypt them.
+        using var full = X509CertificateLoader.LoadPkcs12FromFile(_certificate, Password);
+        using var publicOnly = X509CertificateLoader.LoadCertificate(full.RawData);
+        var path = Path.Combine(_root, "public-only.pfx");
+        File.WriteAllBytes(path, publicOnly.Export(X509ContentType.Pfx, Password));
+        var settings = Settings();
+        settings["Identity:DataProtection:CertificatePath"] = path;
+
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(settings));
+
+        Assert.That(error!.Message, Does.Contain("must contain a private key"));
+    }
+
+    [Test]
+    public void KeysPathThatCannotBeCreated_StopsTheStart()
+    {
+        // A directory cannot be created under a regular file, on any OS and for any user.
+        var settings = Settings();
+        settings["Identity:DataProtection:KeysPath"] = Path.Combine(_certificate, "keys");
+
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(settings));
+
+        Assert.That(error!.Message, Does.Contain("KeysPath cannot be created"));
     }
 
     // The real host: Program.cs registers the key ring, so a Production start without settings fails.
