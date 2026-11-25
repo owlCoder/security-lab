@@ -27,7 +27,7 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
 
         if (sessions.Count == 0) return 0;
 
-        var now = clock.GetUtcNow(); 
+        var now = clock.GetUtcNow();
         foreach (var session in sessions)
             session.Revoke(now);
 

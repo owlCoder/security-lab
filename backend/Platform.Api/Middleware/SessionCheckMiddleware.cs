@@ -41,7 +41,10 @@ public class SessionCheckMiddleware
         // Development-only routes of other modules that authenticate callers themselves or are anonymous demos:
         // /api/laboratories and its /api/labs alias (LAB-01 test header), /api/kt1 (ACC-04/ADM-08 synthetic KT1 cookie)
         // /api/access/demo-deny (Access default-deny demo), and /api/courses with /api/materials (Team 21 test header).
-        if (context.RequestServices is not null
+        // IDN-07: the bypass applies only to requests without a session cookie. A request that presents one is
+        // validated like any other, so a revoked or expired session is refused here too, never silently accepted.
+        if (string.IsNullOrEmpty(token)
+            && context.RequestServices is not null
             && context.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() == true
             && (context.Request.Path.StartsWithSegments("/api/laboratories")
                 || (context.Request.Path.StartsWithSegments("/api/labs")

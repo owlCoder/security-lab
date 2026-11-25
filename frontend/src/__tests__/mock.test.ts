@@ -39,6 +39,13 @@ describe('mock REV-05 pravila', () => {
     expect(first.body.decisions.filter((x: { type: string }) => x.type === 'Approved')).toHaveLength(1)
   })
 
+  it('komentar uz odobrenje se odbija kao u pravom API-ju (400 invalid_input)', async () => {
+    const d = (await call('GET', '/api/revisions/rev-sql', PETAR)).body
+    const r = await call('POST', '/api/revisions/rev-sql/approve', PETAR, { rowVersion: d.rowVersion, contentHash: d.contentHash, comment: 'ok' })
+    expect(r.status).toBe(400)
+    expect(r.body.code).toBe('invalid_input')
+  })
+
   it('neispravan evaluator blokira objavu (REV-02)', async () => {
     const d = (await call('GET', '/api/revisions/rev-csrf', ANA)).body
     const r = await call('POST', '/api/revisions/rev-csrf/approve', ANA, { rowVersion: d.rowVersion, contentHash: d.contentHash })

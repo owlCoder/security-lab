@@ -64,7 +64,7 @@ export default function RevisionDetailPage({ revisionId, onBack, onChanged }: Pr
     setSuccess(null)
     const key = keys.current[action] ?? (keys.current[action] = newIdempotencyKey())
 
-    const r = await runRevisionAction(revision, action, key, action === 'submit' ? undefined : comment)
+    const r = await runRevisionAction(revision, action, key, action === 'return' ? comment : undefined)
     setBusy(null)
 
     if (r.ok) {
@@ -90,7 +90,7 @@ export default function RevisionDetailPage({ revisionId, onBack, onChanged }: Pr
   if (!revision) return <section className="card"><p className="muted">Učitavanje…</p></section>
 
   const can = (a: RevisionAction) => revision.allowedActions.includes(a)
-  const isStale = actionError?.code === 'revision_changed' || actionError?.code === 'invalid_state'
+  const isStale = ['revision_changed', 'invalid_state', 'idempotency_key_reused'].includes(actionError?.code ?? '')
   const commentTooLong = comment.length > COMMENT_MAX_LENGTH
 
   return (
@@ -152,17 +152,20 @@ export default function RevisionDetailPage({ revisionId, onBack, onChanged }: Pr
 
         {mode !== 'idle' && (
           <div className="decision-form">
-            <label>
-              {mode === 'return' ? 'Komentar za autora (obavezno)' : 'Komentar (opciono)'}
-              <textarea
-                rows={4}
-                value={comment}
-                onChange={e => setComment(e.target.value)}
-                maxLength={COMMENT_MAX_LENGTH + 100}
-                aria-invalid={commentTooLong}
-              />
-            </label>
-            <p className={`small ${commentTooLong ? 'error-text' : 'muted'}`}>{comment.length} / {COMMENT_MAX_LENGTH}</p>
+            {/* Komentar postoji samo uz vracanje; API odbija komentar uz odobrenje. */}
+            {mode === 'return' && <>
+              <label>
+                Komentar za autora (obavezno)
+                <textarea
+                  rows={4}
+                  value={comment}
+                  onChange={e => setComment(e.target.value)}
+                  maxLength={COMMENT_MAX_LENGTH + 100}
+                  aria-invalid={commentTooLong}
+                />
+              </label>
+              <p className={`small ${commentTooLong ? 'error-text' : 'muted'}`}>{comment.length} / {COMMENT_MAX_LENGTH}</p>
+            </>}
             {mode === 'approve' && (
               <p className="small muted">
                 Odobravate sadržaj sa hešom <code>{shortHash(revision.contentHash)}</code>. Ako se sadržaj u međuvremenu promeni, server će odbiti odobrenje.
@@ -171,7 +174,7 @@ export default function RevisionDetailPage({ revisionId, onBack, onChanged }: Pr
             <div className="actions">
               <button
                 onClick={() => run(mode)}
-                disabled={busy != null || commentTooLong || (mode === 'return' && comment.trim() === '')}
+                disabled={busy != null || (mode === 'return' && (commentTooLong || comment.trim() === ''))}
               >
                 {busy === mode ? 'Slanje…' : mode === 'approve' ? 'Potvrdi odobrenje i objavi' : 'Vrati na doradu'}
               </button>
