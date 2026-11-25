@@ -1,3 +1,4 @@
+import AccountStatusForm from './AccountStatusForm'
 import CreateAccountForm from './CreateAccountForm'
 
 export default function ProtectedApp() {
@@ -5,5 +6,6 @@ export default function ProtectedApp() {
     <h1>Security Lab</h1>
     <p>An interactive laboratory platform for the Fundamentals of Information Security course. Develop features through the assigned project components.</p>
     <section><h2>Kreiranje naloga (administrator)</h2><CreateAccountForm /></section>
+    <section><h2>Promena statusa naloga (administrator)</h2><AccountStatusForm /></section>
   </>
 }

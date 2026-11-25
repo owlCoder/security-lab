@@ -17,6 +17,7 @@ import DraftsPage from './pages/DraftsPage'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
 import CompetenciesPage from './pages/CompetenciesPage'
+import SessionsPage from './pages/SessionsPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -72,8 +73,8 @@ function RevisionsSection() {
         ? <RevisionListPage
             key="pending"
             title="Revizije na čekanju"
-            description="Revizije koje čekaju vaše odobrenje. Sopstvene revizije se ovde ne prikazuju kada politika zahteva drugog odobravaoca."
-            emptyText="Nema revizija koje čekaju vaše odobrenje."
+            description="Revizije predate na pregled u kursevima u kojima imate pravo pregleda. Sopstvenu reviziju ne možete sami da odobrite kada politika kursa zahteva drugog odobravaoca."
+            emptyText="Nema revizija koje čekaju pregled."
             load={getPendingReviews}
             onOpen={id => setView({ tab: 'pending', revisionId: id })}
           />
@@ -106,6 +107,7 @@ export default function App() {
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="laboratories/:laboratoryId/competencies" element={<CompetenciesPage />} />
+          <Route path="account/sessions" element={<SessionsPage />} />
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
           {/*
             AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).

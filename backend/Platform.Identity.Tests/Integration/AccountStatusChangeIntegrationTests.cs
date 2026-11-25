@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -74,6 +75,42 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That(await RevokedAtAsync(first.Session.Id), Is.Not.Null);
         Assert.That(await RevokedAtAsync(second.Session.Id), Is.Not.Null);
+    }
+
+    [Test]
+    public async Task ExcessiveStatusChanges_AreRefusedWith429_AndChangeNothing()
+    {
+        // SEC-04: the limit sits on PUT /api/admin/accounts/{id}/status; a refused request never reaches the handler.
+        var (admin, student) = await ArrangeAdminAndStudentAsync();
+        var adminSession = await SessionTestData.CreateAsync(Factory, admin.Id);
+
+        using var limited = Factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("RateLimiting:AccountStatusChange:PermitLimit", "2");
+            builder.UseSetting("RateLimiting:AccountStatusChange:WindowSeconds", "60");
+        });
+        using var client = limited.CreateClient();
+
+        async Task<HttpResponseMessage> PutAsync(string status)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(student.Id))
+            {
+                Content = JsonContent.Create(new { status })
+            };
+            request.Headers.Add("Cookie", $"{SessionCookie.Name}={adminSession.RawToken}");
+            return await client.SendAsync(request);
+        }
+
+        Assert.That((await PutAsync("BLOCKED")).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await PutAsync("ACTIVE")).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var refused = await PutAsync("BLOCKED");
+
+        Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests));
+        Assert.That(refused.Headers.RetryAfter?.Delta, Is.Not.Null);
+        Assert.That(await refused.Content.ReadAsStringAsync(), Does.Contain("rate_limited"));
+        Assert.That((await UserTestData.GetAsync(Factory, student.Id))!.Status, Is.EqualTo(AccountStatus.Active));
+        Assert.That(await AuditRowsAsync(student.Id), Has.Count.EqualTo(2), "only the two permitted changes are recorded");
     }
 
     [TestCase(0)]

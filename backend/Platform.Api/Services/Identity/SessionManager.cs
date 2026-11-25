@@ -23,7 +23,7 @@ public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? t
 
         if (sessions.Count == 0) return 0;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         foreach (var session in sessions)
             session.Revoke(now);
 
@@ -42,7 +42,7 @@ public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? t
 
         if (session is null) return false;
 
-        session.Revoke(DateTimeOffset.UtcNow);
+        session.Revoke(clock.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -93,7 +93,7 @@ public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? t
     {
         if (userId == Guid.Empty) throw new ArgumentException("userId is required", nameof(userId));
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         return await db.Sessions
             .Where(session =>
                 session.UserId == userId && 

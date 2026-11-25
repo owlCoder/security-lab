@@ -13,12 +13,15 @@ public static class AdministrationSchema
         // Serialize migrations in this producer schema; do not lock another team's tables.
         await using (var guard = new NpgsqlCommand("SELECT pg_advisory_xact_lock(80408001)", connection, transaction))
             await guard.ExecuteNonQueryAsync(ct);
-        await using var stream = typeof(AdministrationSchema).Assembly.GetManifestResourceStream(
-            "Platform.Api.Modules.Administration.Persistence.Migrations.001_administration.sql")
-            ?? throw new InvalidOperationException("The ADM-08 migration resource is missing.");
-        using var reader = new StreamReader(stream);
-        await using var command = new NpgsqlCommand(await reader.ReadToEndAsync(ct), connection, transaction);
-        await command.ExecuteNonQueryAsync(ct);
+        foreach (var name in new[] { "001_administration.sql", "002_delivery_receipts.sql" })
+        {
+            await using var stream = typeof(AdministrationSchema).Assembly.GetManifestResourceStream(
+                "Platform.Api.Modules.Administration.Persistence.Migrations." + name)
+                ?? throw new InvalidOperationException("An ADM-08 migration resource is missing.");
+            using var reader = new StreamReader(stream);
+            await using var command = new NpgsqlCommand(await reader.ReadToEndAsync(ct), connection, transaction);
+            await command.ExecuteNonQueryAsync(ct);
+        }
         await transaction.CommitAsync(ct);
     }
 

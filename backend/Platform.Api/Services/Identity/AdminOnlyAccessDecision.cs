@@ -8,4 +8,8 @@ public sealed class AdminOnlyAccessDecision(IAdminDirectory admins) : IAccessDec
 {
     public bool CanChangeAccountStatus(CallerIdentity caller) =>
         caller.IsAuthenticated && admins.IsAdministrator(caller.UserId ?? Guid.Empty);
+
+    // IDN-05: same administrator source as the REV-05 account.unlock permission (IAdminDirectory).
+    public bool CanUnlockAccount(CallerIdentity caller) =>
+        caller.IsAuthenticated && admins.IsAdministrator(caller.UserId ?? Guid.Empty);
 }
