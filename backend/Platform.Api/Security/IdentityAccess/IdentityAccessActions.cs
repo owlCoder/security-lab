@@ -20,6 +20,18 @@ public static class IdentityAccessActions
     /// <summary>IDN-07: the caller revokes one of their own sessions (<c>DELETE /api/auth/sessions/{handle}</c>).</summary>
     public const string SessionRevoke = "identity.session.revoke";
 
+    /// <summary>IDN-06: a fully signed-in user starts TOTP enrollment (<c>POST /api/auth/mfa/enroll</c>).</summary>
+    public const string MfaEnroll = "identity.mfa.enroll";
+
+    /// <summary>IDN-06: a fully signed-in user confirms TOTP enrollment (<c>POST /api/auth/mfa/enroll/confirm</c>).</summary>
+    public const string MfaEnrollConfirm = "identity.mfa.enroll.confirm";
+
+    /// <summary>
+    /// IDN-06: the second login step (<c>POST /api/auth/mfa/verify</c>). Public like login: the caller only has an
+    /// <c>MfaPending</c> session, which gives no Access subject. <c>MfaService</c> validates that session itself.
+    /// </summary>
+    public const string MfaVerify = "identity.mfa.verify";
+
     /// <summary>
     /// IDN-03: central catalog action (System scope, privileged). A constant, because attributes need one;
     /// it must equal <c>AccessActions.AccountStatusChange.Id</c>, otherwise policy registration fails at startup.
@@ -45,6 +57,8 @@ public static class IdentityAccessActions
             SessionRead,
             SessionList,
             SessionRevoke,
+            MfaEnroll,
+            MfaEnrollConfirm,
         };
 
     /// <summary>Actions whose subject is the caller identified by the server-side session cookie.</summary>
@@ -57,6 +71,8 @@ public static class IdentityAccessActions
             SessionRead,
             SessionList,
             SessionRevoke,
+            MfaEnroll,
+            MfaEnrollConfirm,
             // #185: /student-view i /preview (tim 6) dobijaju subjekat iz prave sesije, ne iz razvojnog zaglavlja.
             LabVisibilityActions.Entry,
             CatalogReadPolicy.ActionId,

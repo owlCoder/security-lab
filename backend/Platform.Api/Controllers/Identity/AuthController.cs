@@ -78,7 +78,7 @@ public class AuthController(
         return Ok(new MeResponse(caller.UserId!.Value, caller.Level.ToString()));
     }
 
-    [DelegatedAuthorization]
+    [RequireAccess(IdentityAccessActions.MfaEnroll)]
     [HttpPost("mfa/enroll")]
     public async Task<IActionResult> MfaEnroll(CancellationToken ct)
     {
@@ -95,7 +95,7 @@ public class AuthController(
         };
     }
 
-    [DelegatedAuthorization]
+    [RequireAccess(IdentityAccessActions.MfaEnrollConfirm)]
     [HttpPost("mfa/enroll/confirm")]
     public async Task<IActionResult> MfaEnrollConfirm([FromBody] MfaVerifyRequest request, CancellationToken ct)
     {
@@ -111,7 +111,7 @@ public class AuthController(
         };
     }
 
-    [DelegatedAuthorization]
+    [RequireAccess(IdentityAccessActions.MfaVerify)]
     [HttpPost("mfa/verify")]
     public async Task<IActionResult> MfaVerify([FromBody] MfaVerifyRequest request, CancellationToken ct)
     {
