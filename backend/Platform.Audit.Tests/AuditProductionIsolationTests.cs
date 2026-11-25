@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -48,6 +49,6 @@ public sealed class AuditProductionIsolationTests
     private sealed class ProductionHostFactory : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder) =>
-            builder.UseEnvironment(Environments.Production);
+            builder.UseEnvironment(Environments.Production).UseMfaTestKeyRing();
     }
 }

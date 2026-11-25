@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -38,7 +39,7 @@ public sealed class LockoutEndpointTests
         {
             // The real Program supplies the same strict Access policies as production.
             // Only database/configuration are isolated here; authorization is not replaced.
-            builder.UseEnvironment("Testing");
+            builder.UseEnvironment("Testing").UseMfaTestKeyRing();
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting("ConnectionStrings:Identity", connectionString);
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);

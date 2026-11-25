@@ -83,6 +83,8 @@ builder.Services.AddIdentityModule();
 
 // IDN-02: prijava, odjava i sesije
 builder.Services.AddIdentityModule(builder.Configuration);
+// IDN-06: trajan i sertifikatom šifrovan key ring za TOTP tajne; van Development-a start pada bez njega.
+builder.Services.AddMfaKeyRing(builder.Configuration, builder.Environment);
 
 if (builder.Environment.IsDevelopment())
 {

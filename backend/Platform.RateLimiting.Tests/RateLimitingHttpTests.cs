@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
@@ -335,7 +336,7 @@ public sealed class ProgramRateLimitingTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment("Production");
+            builder.UseEnvironment("Production").UseMfaTestKeyRing();
             builder.ConfigureLogging(logging => logging.ClearProviders());
             foreach (var (key, value) in settings) builder.UseSetting(key, value);
         }

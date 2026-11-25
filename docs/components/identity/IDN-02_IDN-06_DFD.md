@@ -194,7 +194,7 @@ The phone (E2) is outside all boundaries. The TOTP secret leaves the server once
 | `SessionHandle` | F12, F15, F16 | Public identifier, not a secret, safe to list and to put in the `auth.logout` audit event |
 | Password hash | D1, F6 | Read only inside `CredentialVerifier`, never written by login, never returned, never logged |
 | `failed_login_count`, `lockout_end` | D1, F6 | Not secret, but they reveal account state. Never returned to E1 and never put in an audit event, which carries only the account id and the detail `account locked` |
-| TOTP secret | F3 once, D6 | Shown once at enrollment (in the `otpauth://` URI), stored protected with ASP.NET Core Data Protection (`SecurityLab / Identity / MfaTotpSecret / v1`), never logged, audited or returned again |
+| TOTP secret | F3 once, D6 | Shown once at enrollment (in the `otpauth://` URI), stored protected with ASP.NET Core Data Protection (`SecurityLab / Identity / MfaTotpSecret / v1`, only through `ITotpSecretProtector`), never logged, audited or returned again. The key ring is persistent (`Identity:DataProtection:KeysPath`) and encrypted with a certificate; outside Development the API does not start without both |
 | TOTP code | F2, F3 | Never logged or audited. Each step is accepted once; wrong codes are limited by the MFA lockout |
 | CSRF token | F4 | Planned (US-15) |
 

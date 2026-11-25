@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -20,7 +21,7 @@ public sealed class LabVisibilityEndpointMetadataTests
     public void LabRoute_HasExactlyOneEntryRequirement_WithoutMigrationMarkers(string route)
     {
         using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            builder.UseEnvironment("Production"));
+            builder.UseEnvironment("Production").UseMfaTestKeyRing());
         using var client = host.CreateClient();
 
         var endpoint = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
@@ -43,7 +44,7 @@ public sealed class LabVisibilityEndpointMetadataTests
     public void EntryAction_IsSessionBound_AndLabActionsUseRealPolicies()
     {
         using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            builder.UseEnvironment("Production"));
+            builder.UseEnvironment("Production").UseMfaTestKeyRing());
         using var client = host.CreateClient();
 
         var catalog = host.Services.GetRequiredService<IActionCatalog>();

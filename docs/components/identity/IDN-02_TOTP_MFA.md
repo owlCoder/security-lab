@@ -14,7 +14,8 @@ US-17 pokriva:
 - čuvanje pending enrollment-a bez aktiviranja MFA;
 - potvrdu enrollment-a kodom;
 - odbijanje ponovnog enrollment-a kada je MFA već aktivan;
-- odbijanje novog enrollment-a dok prethodni pending enrollment nije istekao;
+- odbijanje novog enrollment-a dok prethodni pending enrollment nije istekao (jedan `INSERT ... ON CONFLICT`, pa i
+  pod paralelnim zahtevima);
 - zaštitu tajne u bazi i `Cache-Control: no-store` odgovore;
 - audit enrollment događaja bez tajne, URI-ja, koda ili ciphertext-a.
 
@@ -110,15 +111,35 @@ mfa_failed_attempts
 mfa_locked_until
 ```
 
-TOTP tajna se ne hash-uje jer je server mora dešifrovati. Data Protection
-provider koristi stabilan application name i purpose:
+TOTP tajna se ne hash-uje jer je server mora dešifrovati. Šifruje je samo
+`ITotpSecretProtector` (`DataProtectionTotpSecretProtector`), sa stabilnim application name-om i purpose-om:
 
 ```text
 SecurityLab / Identity / MfaTotpSecret / v1
 ```
 
-Development koristi lokalni key ring. Production mora koristiti persistentan
-i zaštićen key ring; ephemeral ključevi nisu dovoljni za restart aplikacije.
+U kontejneru nije registrovan običan `IDataProtector`, pa nijedan drugi modul ne može slučajno da dobije MFA
+purpose. Drugi moduli prave sopstveni protector iz `IDataProtectionProvider`, sa svojim purpose-om.
+
+### Key ring
+
+Gubitak Data Protection ključeva znači da se nijedna sačuvana TOTP tajna ne može dešifrovati, a bez recovery
+kodova i admin reseta svi MFA nalozi ostaju zaključani. Zato `AddMfaKeyRing` (`Program.cs`) traži:
+
+| Podešavanje | Značenje |
+|-|-|
+| `Identity:DataProtection:KeysPath` | direktorijum za ključeve; mora da preživi restart i da bude u backup-u zajedno sa bazom (ADM-03, OPS-04) |
+| `Identity:DataProtection:CertificatePath` | PFX sa privatnim ključem; njime se šifruje svaki ključ upisan u `KeysPath` |
+| `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu ili user-secrets, nikad u repou (ADM-04) |
+
+- Van Development okruženja oba prva podešavanja su obavezna. Ako nedostaju, ako fajl ne postoji, ako lozinka
+  nije dobra ili sertifikat nema privatni ključ, API se ne pokreće (poruka ne sadrži lozinku).
+- U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring. Ako je podešeno samo jedno
+  od dva, start pada i tada.
+- Za restore na drugom hostu potrebni su i `KeysPath` i isti sertifikat. Kopija ključeva bez sertifikata ne
+  otvara tajne (`MfaKeyRingTests.WithoutTheCertificate_TheStoredKeysCannotBeUsed`).
+- Test hostovi koji rade kao Production ili Testing uključuju test key ring preko `UseMfaTestKeyRing()`
+  (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu.
 
 ## 6. Audit i poverljivi podaci
 
@@ -185,7 +206,10 @@ US-18 i audit testovi (`MfaServiceTests`, `MfaIntegrationTests` na PostgreSQL-u)
 - prag pogrešnih kodova, pa nova prijava lozinkom i ispravan kod (`401`), i uspeh posle `LockoutMinutes`;
 - paralelne pogrešne kodove (tačan brojač, lockout tačno na pragu);
 - nedostupan audit pri potvrdi i verifikaciji (`503`, ništa nije promenjeno);
-- zapise `auth.mfa.enabled` i `auth.mfa.verify` u `audit` šemi bez koda, tajne i e-maila.
+- zapise `auth.mfa.enabled` i `auth.mfa.verify` u `audit` šemi bez koda, tajne i e-maila;
+- potvrdu bez enrollment-a (`401`) i dva paralelna enroll-a (jedan `200`, jedan `409`, nijedan `500`);
+- key ring (`MfaKeyRingTests`): nova instanca sa istim ključevima dešifruje sačuvanu tajnu, ključevi na disku su
+  šifrovani sertifikatom, a start van Development okruženja pada bez podešavanja.
 
 ## 9. Budući rad
 
