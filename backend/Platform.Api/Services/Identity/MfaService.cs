@@ -163,6 +163,17 @@ public sealed class MfaService(
         var credentials = await _mfaCredentialsStore.GetAsync(session.UserId, ct);
         if (credentials is null || !credentials.MfaEnabled)
             return MfaOutcome.Unauthorized;
+
+        // US-18 lockout: while it lasts no code is checked, not even a correct one. The answer is the same
+        // 401 invalid_mfa as for a wrong code, so it does not tell an attacker that the account is locked.
+        // TryConsumeTimeStepAsync repeats this condition in its WHERE as the second line of defence.
+        if (credentials.MfaLockedUntil is { } lockedUntil && lockedUntil > _clock.GetUtcNow())
+        {
+            await _sessionStore.RevokeByTokenAsync(rawToken, ct);
+            WriteAudit(session.UserId, "auth.mfa.verify", "failure", correlationId, "locked");
+            return MfaOutcome.InvalidCode;
+        }
+
         if (credentials.TotpSecretCiphertext is null
             || credentials.TotpSecretKeyVersion != SecretKeyVersion)
             return MfaOutcome.Unavailable;
@@ -181,10 +192,12 @@ public sealed class MfaService(
         var result = TotpHelpers.Verify(code, secret);
         if (!result.success || IsReplayed(credentials, result.timeStepMatched))
         {
+            var now = _clock.GetUtcNow();
             var locked = await _mfaCredentialsStore.RecordFailedAttemptAsync(
                 session.UserId,
                 _lockout.MaxFailedAccessAttempts,
-                _clock.GetUtcNow().AddMinutes(_lockout.LockoutMinutes),
+                now,
+                now.AddMinutes(_lockout.LockoutMinutes),
                 ct);
             if (locked)
                 await _sessionStore.RevokeByTokenAsync(rawToken, ct);

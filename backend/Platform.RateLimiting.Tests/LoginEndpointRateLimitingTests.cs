@@ -453,6 +453,7 @@ internal sealed class NoMfaCredentialsStore : IMfaCredentialsStore
     public Task<bool> RecordFailedAttemptAsync(
         Guid userId,
         int maxAttempts,
+        DateTimeOffset now,
         DateTimeOffset lockedUntil,
         CancellationToken ct) =>
         Task.FromResult(false);

@@ -58,19 +58,31 @@ public class EfMfaCredentialsStore(
     public async Task<bool> RecordFailedAttemptAsync(
         Guid userId,
         int maxAttempts,
+        DateTimeOffset now,
         DateTimeOffset lockedUntil,
         CancellationToken ct)
     {
-        var credentials = await GetAsync(userId, ct);
-        if (credentials is null || !credentials.MfaEnabled)
-            return false;
+        // One statement, so the row lock serializes parallel failures and each one sees the count of the one
+        // before it. WHERE skips an account that is still locked, so any lockout left in a matching row has
+        // expired: the counter starts again at 1 and the old lockout end is cleared. SET sees the old row, so
+        // the new count is written out twice.
+        var lockedAfter = await _db.Database.SqlQuery<bool>($"""
+            UPDATE identity.mfa_credentials
+            SET mfa_failed_attempts =
+                    CASE WHEN mfa_locked_until IS NULL THEN mfa_failed_attempts + 1 ELSE 1 END,
+                mfa_locked_until =
+                    CASE WHEN (CASE WHEN mfa_locked_until IS NULL THEN mfa_failed_attempts + 1 ELSE 1 END) >= {maxAttempts}
+                         THEN {lockedUntil}
+                         ELSE NULL
+                    END
+            WHERE user_id = {userId}
+              AND mfa_enabled
+              AND (mfa_locked_until IS NULL OR mfa_locked_until <= {now})
+            RETURNING mfa_locked_until IS NOT NULL AS "Value"
+            """).ToListAsync(ct);
 
-        credentials.MfaFailedAttempts++;
-        if (credentials.MfaFailedAttempts >= maxAttempts)
-            credentials.MfaLockedUntil = lockedUntil;
-
-        await _db.SaveChangesAsync(ct);
-        return credentials.MfaFailedAttempts >= maxAttempts;
+        // No row: MFA is not enabled, or the account is still locked. Nothing was counted; refuse as locked.
+        return lockedAfter.Count == 0 || lockedAfter[0];
     }
 
     public async Task<IMfaUnitOfWork> BeginAsync(CancellationToken ct) =>

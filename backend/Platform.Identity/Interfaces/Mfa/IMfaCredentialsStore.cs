@@ -15,9 +15,17 @@ public interface IMfaCredentialsStore
         DateTimeOffset expiresAt,
         CancellationToken ct);
 
+    /// <summary>
+    /// US-18: counts one wrong second factor in a single UPDATE, so parallel wrong codes cannot skip the threshold.
+    /// A lockout that has expired at <paramref name="now"/> starts the counter again at 1. When the counter reaches
+    /// <paramref name="maxAttempts"/>, <c>mfa_locked_until</c> is set to <paramref name="lockedUntil"/>.
+    /// An account that is still locked is not counted. Returns true when the account is locked after this call
+    /// (also when nothing was counted because it was already locked).
+    /// </summary>
     Task<bool> RecordFailedAttemptAsync(
         Guid userId,
         int maxAttempts,
+        DateTimeOffset now,
         DateTimeOffset lockedUntil,
         CancellationToken ct);
 
