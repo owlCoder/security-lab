@@ -555,6 +555,31 @@ public sealed class LaboratoriesHttpTests
         Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
     }
 
+    [TestCase("{ not json", "application/json")]
+    [TestCase("", "application/json")]
+    [TestCase("[]", "application/json")]
+    [TestCase("{\"title\":\"Novi naslov\"}", "text/plain")]
+    public async Task PatchLabTitle_WhenBodyIsMalformed_Returns400AndKeepsTitle(string body, string contentType)
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Originalni naslov");
+        using var request = CreateRequest("PATCH", $"{Route}{created.Id}/title", Teacher);
+        request.Content = new StringContent(body, Encoding.UTF8, contentType);
+
+        using var response = await client.SendAsync(request);
+        string responseBody = await response.Content.ReadAsStringAsync();
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        Assert.Multiple(() =>
+        {
+            Assert.That(responseBody, Does.Contain(LabErrorCodes.InvalidBody));
+            Assert.That(responseBody, Does.Not.Contain("Exception"));
+            Assert.That(responseBody, Does.Not.Contain(" at "));
+        });
+        Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
+    }
+
     [Test]
     public async Task PatchLabTitle_WhenLabDoesNotExist_Returns404()
     {
