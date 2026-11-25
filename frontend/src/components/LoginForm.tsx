@@ -1,5 +1,7 @@
 import { SubmitEvent, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext'
+import { parseRetryAfter } from '../api/http'
+import { formatSeconds, useCountdown } from '../hooks/useCountdown'
 
 type Props = {
   onSuccess: () => boolean
@@ -14,25 +16,33 @@ export default function LoginForm({ onSuccess }: Props) {
 	const [error, setError] = useState('')
 	const [loading, setLoading] = useState(false)
 	const inFlight = useRef(false)
+	// IDN-05: posle 429 forma ceka Retry-After. Ovo je samo UX; limit sprovodi server.
+	const [blockedUntil, setBlockedUntil] = useState<number | null>(null)
+	const remaining = useCountdown(blockedUntil)
+	const throttled = remaining > 0
 
 	const handleSubmit = async (e: SubmitEvent<HTMLFormElement>): Promise<boolean> => {
 		e.preventDefault()
-		if(inFlight.current) return false
+		if(inFlight.current || throttled) return false
 		inFlight.current = true
 		setLoading(true)
 		setError('')
 
-		const ok = await request('/api/auth/login', {
+		const result = await request('/api/auth/login', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ email, password })
 		})
-      	.then(r => r.ok)
-      	.catch(() => false)
+      	.then(r => ({ ok: r.ok, status: r.status, retryAfter: r.headers.get('Retry-After') }))
+      	.catch(() => ({ ok: false, status: 0, retryAfter: null }))
 
 		inFlight.current = false
 		setLoading(false)
-		if(ok) return onSuccess()
+		if(result.ok) return onSuccess()
+		if(result.status === 429) {
+			setBlockedUntil(Date.now() + parseRetryAfter(result.retryAfter) * 1000)
+			return false
+		}
 		setError(GENERIC_ERROR)
 		return false
 	}
@@ -46,14 +56,17 @@ export default function LoginForm({ onSuccess }: Props) {
 
 		<div className="login-field">
 			<label htmlFor="login-password">Password:</label>
-			<input id="login-password" type="password" required 
+			<input id="login-password" type="password" required
 				value={password} onChange={e => setPassword(e.target.value)} />
 		</div>
 
-		{error !== '' && <p className="login-error" role="alert">{error}</p>}
+		{throttled && <p className="login-error" role="alert" data-testid="throttle-message">
+			Too many login attempts. Please try again later (in <strong>{formatSeconds(remaining)}</strong>).
+		</p>}
+		{!throttled && error !== '' && <p className="login-error" role="alert">{error}</p>}
 
-		<button type="submit" disabled={loading}>
-			{loading ? "Logging in..." : "Log in"}
+		<button type="submit" disabled={loading || throttled}>
+			{loading ? "Logging in..." : throttled ? `Wait ${formatSeconds(remaining)}` : "Log in"}
 		</button>
 
 	</form>

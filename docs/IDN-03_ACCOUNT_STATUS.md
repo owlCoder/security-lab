@@ -106,8 +106,9 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 |Blocked account keeps a session|sessions revoked in the same transaction|`Block_RevokesActiveSession_RefusesNextRequestAndLogin_AndRecordsAudit`, `Archive_RevokesAllSessionsOfTheAccount`|
 |Blocked account signs in|login reads `identity.accounts`|same integration test (login returns 401)|
 |Session created behind the revocation|refused at issue (row lock), and status checked on every request|`LoginThatStartedBeforeTheBlock_IsRefusedAtIssue_SoReactivationCannotRevive_ItsToken`, `LoginsRacingWithABlock_NeverLeaveATokenThatWorksAfterReactivation`, `SessionOfAccountBlockedBehindTheRevocation_IsStillRefused`, `AccountBlockedAfterTheStatusCheck_IsRefused_LikeAnyBlockedLogin_AndNoSuccessIsAudited`|
-|Audit unavailable|whole change rolled back, 503|`AuditNotRecorded_RollsBackStatusAndSessions`, `AuditUnavailable_RollsBackStatusAndSessionRevocation`|
+|Audit unavailable|whole change rolled back, 503|`AuditNotRecorded_RollsBackStatusAndSessions`, `AuditFailure_RollsBackStatusSessionRevocationAndAuditRow`|
 |Database failure|nothing stored, 503|`DatabaseFailure_ReturnsUnavailable_AndStoresNothing`|
+|Excessive requests (SEC-04)|controlled 429 with `Retry-After`, nothing changes|`ExcessiveStatusChanges_AreRefusedWith429_AndChangeNothing`|
 |Secrets or session ids in the Audit record|details limited to status names|`AuditRecord_HasNoFreeTextOrIdentifiersOfSessions`|
 |Reactivation wrongly revokes sessions|revoke only for Blocked and Archived|`Admin_ActivatesBlockedAccount_DoesNotTouchSessions`|
 
@@ -115,8 +116,9 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 
 * Branch: `fix/idn-03-persistent-status-change`.
 * Changed: `Services/Identity/ChangeAccountStatus.cs`, `EfAccountStatusStore.cs`, `SessionManager.cs`; `Interfaces/Identity/IAccountStatusStore.cs`; `Controllers/Identity/AdminAccountsController.cs`; `Program.cs`. Removed: `IAccountRepository`, `InMemoryAccountRepository`, the duplicate `ISessionManager` registration.
-* Tests: `Platform.Identity.Tests/Services/ChangeAccountStatusTests.cs` (unit, 23 cases) and `Platform.Identity.Tests/Integration/AccountStatusChangeIntegrationTests.cs` (real PostgreSQL, 6 cases).
+* Tests: `Platform.Identity.Tests/Services/ChangeAccountStatusTests.cs` (unit, 25 cases) and `Platform.Identity.Tests/Integration/AccountStatusChangeIntegrationTests.cs` (real PostgreSQL, 12 cases).
 * Run (PowerShell, repository root): `dotnet test backend\Platform.Identity.Tests --filter "Category=IDN-03"`.
+* Full run on 2026-11-24, after merging `main` (`dotnet test backend/SecurityLab.slnx -c Release`, .NET SDK 10.0.404, Docker available): 0 failed in every project; `Platform.Identity.Tests` 485 passed, 0 skipped. Skips elsewhere in that run are PostgreSQL fixtures that need an environment variable and are not part of IDN-03: `Platform.Audit.Tests` 36 and `Platform.Competencies.Tests` 8 (`AUDIT_TEST_*` / `PRG04_TEST_ADMIN_CONNECTION_STRING`, set by `scripts/audit/test-postgres.ps1` and `scripts/test-competencies-postgres.ps1`); with those scripts the same fixtures run and pass (Audit 328/328, Competencies 83/83). Frontend: `tsc --noEmit` clean, `vitest run` 195 passed (Node 22).
 
 ## Implementation status
 
@@ -135,5 +137,5 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 * `identity` and `audit` must stay in one database. Moving Audit to a separate database requires an outbox or a different integration.
 * The `reason` text is not stored (see above). If a reason is required, ask Team 12 for an allowed structured field.
 * Any status can change to any other different status, including `ARCHIVED` back to `ACTIVE`. This is a conscious simplification.
-* No rate limiting on the administrative endpoint (SEC-04).
+* Rate limiting (SEC-04) is per client IP: `identity-account-status-change`, default 20 requests per 60 s (`RateLimiting__AccountStatusChange__*`, see `Modules/Identity/RateLimiting/README.md`). It runs after the Access middleware, so only requests of an authorized administrator are counted; a refused request gets `429` with `Retry-After` and reaches neither the handler nor Audit.
 * Selective revocation and listing of own sessions (IDN-07) is the next task; it reuses `SessionManager.RevokeSession` and `ListForUser`.

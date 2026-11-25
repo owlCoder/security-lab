@@ -23,4 +23,8 @@ Actions: `course.admin.read`, `course.settings.update`, `course.delegation.creat
 
 A delegation is Active or Revoked. Creation version is 1; revocation increments it. Concurrent writes compare the captured active authority under the same simulator lock as the mutation. An account is checked again on every request; no capability is trusted from cookie claims, headers, query or request body.
 
-Architecture and DFD: `diagrams/adm08-architecture.svg` and `diagrams/adm08-dfd.svg`. Database persistence, root provisioning, real identity integration and provider contract acceptance remain planned.
+Architecture and DFD: `diagrams/adm08-architecture.svg` and `diagrams/adm08-dfd.svg`. The older diagrams describe KT1. KT2 now includes PostgreSQL persistence, real
+Identity/session and ACC-01 catalog adapters, an explicit first-root operator and
+supported central Audit delivery. See `KT2.md` for their exact scope, startup and
+remaining provider/catalog agreements; there is no HTTP root provisioning or
+claim of an ACC-01 catalog rename.

@@ -112,7 +112,7 @@ public sealed class AdministrationPostgresTests
     {
         await Sql("CREATE SCHEMA neighbor; CREATE TABLE neighbor.marker(value text); INSERT INTO neighbor.marker VALUES ('preserve');");
         await AdministrationSchema.MigrateAsync(connectionString);
-        Assert.That(await Sql("SELECT count(*) FROM coursework_admin.schema_versions"), Is.EqualTo(1L));
+        Assert.That(await Sql("SELECT count(*) FROM coursework_admin.schema_versions"), Is.EqualTo(2L));
         Assert.That(await Sql("SELECT count(*) FROM coursework_admin.grants"), Is.EqualTo(2L));
         Assert.That(await Sql("SELECT value FROM neighbor.marker"), Is.EqualTo("preserve"));
     }

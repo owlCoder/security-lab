@@ -1,21 +1,20 @@
 # Frontend
 
-- `npm run dev` — pravi backend (`http://localhost:5080` preko Vite proxy-ja)
-- `npm run dev:mock` — mock API dok IDN-05 / REV-05 backend nije gotov (samo dev, ne ulazi u build)
+- `npm run dev` — frontend uz pravi backend (`http://localhost:5080` preko Vite proxy-ja); pokretanje backenda i baze je u `docs/DEVELOPMENT.md`
+- `npm run dev:mock` — mock API u browseru (samo dev, ne ulazi u build); koristi ga i LAB demo
 - `npm test` — unit testovi (vitest)
+- `npm run build` — provera tipova i produkcioni build
 
-## Mock nalozi (lozinka `demo-lozinka`)
+## IDN-05 / REV-05 UI
 
-| Nalog | Uloga |
-|-|-|
-| `student@example.com` | student, nema pristup revizijama (404) |
-| `nastavnik@example.com` | Petar, autor `rev-xss`, `rev-pwd` (nacrt), `rev-csrf` |
-| `nastavnik2@example.com` | Ana, autor `rev-sql`, odobrava Petrove revizije |
+- Forma za prijavu (`src/components/LoginForm.tsx`): na `429` prikazuje „try again later" sa odbrojavanjem po `Retry-After` i blokira slanje do isteka. Sesija je HttpOnly kolačić; UI ne čuva token.
+- Revizije (posle prijave): lista na čekanju, moje revizije, detalj sa radnjama Predaj / Odobri / Vrati sa komentarom i istorija odluka.
+- API: `docs/components/REV-05-use-cases-api.md`. Opis komponente: `docs/components/IDN-05-REV-05-UI.md`.
 
-- 5 pogrešnih lozinki zaredom: `429` + `Retry-After: 30` (IDN-05)
+## Mock za revizije (`src/api/mock.ts`)
+
+Prijava u aplikaciji uvek ide na pravi backend (`/api/auth/me`, kolačić), pa se ekrani za revizije ručno proveravaju uz `npm run dev`. Mock pravila za revizije prate pravi API i proveravaju se u `src/__tests__/mock.test.ts`:
+
 - `rev-csrf` pri odobrenju vraća `422` (REV-02, neispravan evaluator)
-- `409 revision_changed`: u konzoli browsera `__mock.editRevision("rev-xss")` dok je revizija otvorena
-
-Mock se uključuje samo sa `npm run dev:mock` (`vite --mode mock`) i ne ulazi u produkcioni build.
-
-API ugovor za revizije je predlog (v0.2) poslat Marku. Kad ga potvrdi, biće u `docs/contracts/REV-05-API.md`.
+- autor ne može da odobri sopstvenu reviziju (`403 self_approval_forbidden`)
+- zastarela verzija daje `409 revision_changed`; komentar uz odobrenje daje `400 invalid_input`

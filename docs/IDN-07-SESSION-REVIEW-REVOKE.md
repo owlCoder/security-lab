@@ -38,7 +38,8 @@
   - `SessionCheckMiddleware` also runs ahead of the Access middleware for the routes of this module (`UseWhen` in `Program.cs`, recognised by their `RequireAccess` action). Without it Access would answer a bad session with its generic `401`, and the stable `session_invalid` code and the cleared cookie would be lost. A valid session without permission keeps Access's `403` (`ProblemDetails`). The later `SessionCheckMiddleware` pass reuses the validated session from `HttpContext.Items`.
   - `SessionManager.ListForUser` filters by user ownership, revocation, and expiration.
   - `SessionManager.RevokeSession` revokes one session only when it belongs to the given owner. `Session.IsActiveAt` is the single definition of "not revoked and not expired"; there is no schema change and no migration.
-  - `SessionManager` takes an optional `TimeProvider` so expiry can be tested.
+  - `SessionManager` takes an optional `TimeProvider`. Validation, listing and both revoke methods read it, so expiry and revocation times are tested with a fake clock (`SessionManagerValidationTests`).
+  - Development bypass: in the `Development` environment `SessionCheckMiddleware` lets `/api/laboratories`, `/api/labs` (except `student-view` and `preview`), `/api/kt1`, `/api/courses`, `/api/materials` and `/api/access/demo-deny` through when the request carries **no** session cookie, because those modules authenticate callers themselves or are anonymous demos. A request that does present the session cookie is validated like any other, so a revoked or expired session gets `401` there too (and the cookie is cleared). In `Production` the bypass does not exist and every route that runs the middleware refuses a revoked session.
   - `SessionControllerTests` cover controller behavior with a mocked `ISessionManager`.
   - `SessionManagerTests` and `SessionManagerValidationTests` cover the real query implementation with an EF Core InMemory context.
   - `SessionCheckMiddlewareTests` cover the middleware branches with a mocked `ISessionManager`.
@@ -195,7 +196,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   - `SessionCheckMiddlewareTests` test the middleware branches with a mocked `ISessionManager`.
   - `SessionReviewRevokeIntegrationTests` send real HTTP requests through the whole pipeline to the real `SessionManager` and PostgreSQL. They confirm that no session is `401 session_invalid`, a valid session without permission is `403`, a revoked session is `401` on its next request (also in the `Production` environment) while the caller's other sessions stay valid, and another user's handle is `404`. The `403` route is the IDN-03 admin endpoint `PUT /api/admin/accounts/{id}/status`.
   - To check that these tests can fail, `Session.IsActiveAt` was temporarily changed to ignore revocation; four of the nine tests failed, and the change was reverted.
-  - Full backend run (`dotnet test backend/SecurityLab.slnx -c Release`): 0 failed in all test projects; `Platform.Identity.Tests` 345 passed.
+  - Full backend run (`dotnet test backend/SecurityLab.slnx -c Release`): 0 failed in all test projects; `Platform.Identity.Tests` 485 passed, 0 skipped (re-run on 2026-11-24, after merging `main` with .NET SDK 10.0.404 and Docker; the earlier figure of 345 was out of date).
   - The runtime application uses PostgreSQL; InMemory is used only for deterministic service tests.
 
 - Scope of the end-to-end evidence:
@@ -205,4 +206,3 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
 - Next steps:
 
   - Confirm with the IDN-02 team whether `MfaPending` sessions should be included in the session list. The current query filters revocation and expiration but not `AuthLevel` (TODO in `SessionManager.ListForUser`, depends on IDN-06 / TYP-05).
-  - Remove the old `StoreSessionManager` registration when `SessionManager` becomes the sole official implementation.

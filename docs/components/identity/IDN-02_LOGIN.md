@@ -38,7 +38,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 | Story | What it needs from this change |
 |-|-|
 | US-03 session store | Done. `StoreSessionCreator` connects login to `ISessionStore`. The two level enums have different numeric values, so `StoreSessionCreator` maps them by name. |
-| US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions; `StoreSessionManager.ValidateAsync` refuses them. |
+| US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions; `SessionManager.ValidateAsync` refuses them. |
 | US-07, US-08 frontend | Send the request with credentials included. Read only the status code and `code`; show one generic message for `401`. |
 | US-09 seed users | Done. `DevelopmentAccountSeeder` seeds four accounts into `identity.accounts` with a BCrypt hash and lower-case e-mails (see [`DEVELOPMENT.md`](../../DEVELOPMENT.md)). |
 | IDN-03 | Done. Login reads the status from `identity.accounts`, and `PUT /api/admin/accounts/{id}/status` writes to the same table (`EfAccountStatusStore`), so a blocked or archived account cannot log in. Blocking also revokes its sessions in the same transaction. See [`IDN-03_ACCOUNT_STATUS.md`](../../IDN-03_ACCOUNT_STATUS.md). |
