@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -380,7 +381,7 @@ public sealed class AdministrationHttpTests
         public Func<AccessRequest, Task>? AfterAllow { get; set; }
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(environment);
+            builder.UseEnvironment(environment).UseMfaTestKeyRing();
             builder.UseSetting(AdministrationEndpoints.EnabledSetting, enabled.ToString());
             builder.UseSetting("ConnectionStrings:CourseworkAdministration", connection);
             builder.UseSetting("ConnectionStrings:Identity", connection);

@@ -15,4 +15,10 @@
     <ProjectReference Include="../Platform.Competencies/Platform.Competencies.csproj" />
     <ProjectReference Include="../Platform.Api/Platform.Api.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- IDN-06: test key ring for hosts that run outside Development (see backend/TestShared). -->
+    <Compile Include="..\TestShared\MfaTestKeyRing.cs" Link="Shared\MfaTestKeyRing.cs" />
+  </ItemGroup>
+
 </Project>

@@ -18,4 +18,10 @@
     <ProjectReference Include="..\Platform.Api\Platform.Api.csproj" />
     <Using Include="NUnit.Framework" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- IDN-06: test key ring for hosts that run outside Development (see backend/TestShared). -->
+    <Compile Include="..\TestShared\MfaTestKeyRing.cs" Link="Shared\MfaTestKeyRing.cs" />
+  </ItemGroup>
+
 </Project>

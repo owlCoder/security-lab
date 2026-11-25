@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 ﻿using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -49,7 +50,7 @@ public sealed class StudentLabViewTests
     {
         factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
-                builder.UseEnvironment(environment);
+                builder.UseEnvironment(environment).UseMfaTestKeyRing();
 
                 builder.ConfigureTestServices(services =>
                 {

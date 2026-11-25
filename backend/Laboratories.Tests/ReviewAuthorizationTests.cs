@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 
 using System.Net;
 using System.Net.Http.Json;
@@ -28,7 +29,7 @@ public sealed class ReviewAuthorizationTests
     {
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
         {
-            host.UseEnvironment("Production");
+            host.UseEnvironment("Production").UseMfaTestKeyRing();
             host.ConfigureTestServices(services =>
             {
                 services.RemoveAll<ISessionManager>();
@@ -58,7 +59,7 @@ public sealed class ReviewAuthorizationTests
     {
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
         {
-            host.UseEnvironment("Production");
+            host.UseEnvironment("Production").UseMfaTestKeyRing();
 
             host.ConfigureTestServices(services =>
             {

@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -17,7 +18,7 @@ public sealed class RevisionEndpointMetadataTests
     public void RevisionRoutes_RequireCentralAccess_WithoutLegacyDelegation()
     {
         using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            builder.UseEnvironment("Production"));
+            builder.UseEnvironment("Production").UseMfaTestKeyRing());
         using var client = host.CreateClient();
         var endpoints = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
@@ -48,7 +49,7 @@ public sealed class RevisionEndpointMetadataTests
         string route, string action, ActionScope scope)
     {
         using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-            builder.UseEnvironment("Production"));
+            builder.UseEnvironment("Production").UseMfaTestKeyRing());
         using var client = host.CreateClient();
         var endpoint = host.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>().Single(value => value.RoutePattern.RawText == route);
