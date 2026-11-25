@@ -342,6 +342,119 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
     }
 
+    // MFA (IDN-06): each case breaks one rule of the auth.mfa.* schemas.
+
+    private static readonly string[] MfaEventTypes =
+    [
+        AuditEventTypes.AuthMfaEnrollmentStarted,
+        AuditEventTypes.AuthMfaEnabled,
+        AuditEventTypes.AuthMfaVerify
+    ];
+
+    private static readonly string[] MfaEventTypesWithFailure =
+    [
+        AuditEventTypes.AuthMfaEnabled,
+        AuditEventTypes.AuthMfaVerify
+    ];
+
+    private static AuditEventDraft Mfa(
+        string eventType,
+        AuditOutcome outcome = AuditOutcome.Success,
+        IReadOnlyDictionary<string, string>? details = null) =>
+        new(eventType, outcome, Resource: TargetAccount, Details: details);
+
+    [TestCaseSource(nameof(MfaEventTypesWithFailure))]
+    public void Validate_MfaFailureWithReasonCode_AcceptsIt(string eventType)
+    {
+        var draft = Mfa(eventType, AuditOutcome.Failure, Details(("reasonCode", "invalid_code")));
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenMfaOutcomeIsDenied_RejectsOutcome(string eventType)
+    {
+        Assert.That(_validator.Validate(Mfa(eventType, AuditOutcome.Denied), UserContext),
+            Is.EqualTo(AuditRejectionCode.OutcomeNotAllowed));
+    }
+
+    [Test]
+    public void Validate_WhenEnrollmentStartIsAFailure_RejectsOutcome()
+    {
+        var draft = Mfa(AuditEventTypes.AuthMfaEnrollmentStarted, AuditOutcome.Failure);
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.OutcomeNotAllowed));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenMfaActorIsAnonymous_RejectsContext(string eventType)
+    {
+        // Every MFA step runs on a session of a known user.
+        Assert.That(_validator.Validate(Mfa(eventType), AnonymousContext), Is.EqualTo(AuditRejectionCode.InvalidContext));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenMfaActorIsAService_RejectsContext(string eventType)
+    {
+        Assert.That(_validator.Validate(Mfa(eventType), ServiceContext), Is.EqualTo(AuditRejectionCode.InvalidContext));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenCourseIsGivenForMfa_RejectsCourseNotAllowed(string eventType)
+    {
+        var draft = Mfa(eventType) with { CourseId = CourseId };
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.CourseNotAllowed));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenAccountIsMissingForMfa_RejectsResource(string eventType)
+    {
+        var draft = Mfa(eventType) with { Resource = null };
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidResource));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenMfaResourceIsNotAnAccount_RejectsResource(string eventType)
+    {
+        var draft = Mfa(eventType) with { Resource = new AuditResourceRef(AuditResourceTypes.Course, CourseId.ToString()) };
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidResource));
+    }
+
+    [TestCaseSource(nameof(MfaEventTypes))]
+    public void Validate_WhenReasonCodeIsGivenOnMfaSuccess_RejectsUnknownKey(string eventType)
+    {
+        var draft = Mfa(eventType, details: Details(("reasonCode", "invalid_code")));
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.UnknownDetailKey));
+    }
+
+    // AUD-03: nothing about the code or the secret fits into an MFA record.
+    [TestCase("code", "123456")]
+    [TestCase("totpSecret", "JBSWY3DPEHPK3PXP")]
+    [TestCase("uri", "otpauth")]
+    [TestCase("email", "student")]
+    public void Validate_WhenMfaFailureCarriesAnotherDetail_RejectsIt(string key, string value)
+    {
+        var draft = Mfa(AuditEventTypes.AuthMfaVerify, AuditOutcome.Failure,
+            Details(("reasonCode", "invalid_code"), (key, value)));
+
+        Assert.That(_validator.Validate(draft, UserContext),
+            Is.AnyOf(AuditRejectionCode.UnknownDetailKey, AuditRejectionCode.ForbiddenDetailKey));
+    }
+
+    [TestCase("123456")]
+    [TestCase("Invalid Code")]
+    [TestCase("otpauth://totp/x")]
+    public void Validate_WhenMfaReasonCodeIsNotACode_RejectsValue(string value)
+    {
+        var draft = Mfa(AuditEventTypes.AuthMfaVerify, AuditOutcome.Failure, Details(("reasonCode", value)));
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
+    }
+
     [Test]
     public void Validate_WhenMoreThan20DetailKeys_RejectsTooLarge()
     {
