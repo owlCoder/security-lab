@@ -308,6 +308,41 @@ public sealed class LaboratoriesHttpTests
         Assert.That(await repository.GetByIdAsync(created!.Id), Is.Not.Null);
     }
 
+    // Klijent pokusava da sam zada Id, autora i status, i to u razlicitim oblicima:
+    // camelCase, PascalCase i status kao broj. Server mora sve da ignorise.
+    [TestCase("{\"title\":\"Lab\",\"courseId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\",\"id\":\"11111111-1111-1111-1111-111111111111\",\"createdBy\":\"22222222-2222-2222-2222-222222222222\",\"status\":\"Archived\"}")]
+    [TestCase("{\"Title\":\"Lab\",\"CourseId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\",\"Id\":\"11111111-1111-1111-1111-111111111111\",\"CreatedBy\":\"22222222-2222-2222-2222-222222222222\",\"Status\":\"Archived\"}")]
+    [TestCase("{\"title\":\"Lab\",\"courseId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\",\"id\":\"11111111-1111-1111-1111-111111111111\",\"createdBy\":\"22222222-2222-2222-2222-222222222222\",\"status\":1}")]
+    public async Task PostLabs_WhenClientSetsIdCreatorOrStatus_StoredLabHasServerValues(string body)
+    {
+        Guid clientSuppliedId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        Guid clientSuppliedCreator = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        using var request = CreateRequest("POST", Route, Teacher);
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        var created = await response.Content.ReadFromJsonAsync<LaboratoryResponse>();
+        Assert.That(created, Is.Not.Null);
+
+        // Proverava se ono sto je stvarno sacuvano, ne samo odgovor servera.
+        var repository = factory.Services.GetRequiredService<ILaboratoryRepository>();
+        Laboratory? stored = await repository.GetByIdAsync(created!.Id);
+        Assert.That(stored, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(stored!.Id, Is.Not.EqualTo(clientSuppliedId));
+            Assert.That(stored.CreatedBy, Is.EqualTo(UserGuid("marko")));
+            Assert.That(stored.CreatedBy, Is.Not.EqualTo(clientSuppliedCreator));
+            Assert.That(stored.Status, Is.EqualTo(LabStatus.Draft));
+        });
+        Assert.That(await repository.GetByIdAsync(clientSuppliedId), Is.Null);
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(1));
+    }
+
     [Test]
     public async Task PostLabs_TwoCreatesWithSameTitle_GetDifferentIds()
     {
