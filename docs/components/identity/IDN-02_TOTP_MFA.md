@@ -1,8 +1,8 @@
-# TOTP MFA enrollment
+# TOTP MFA enrollment i verifikacija
 
 **Komponenta:** Identity
-**Story:** US-17 — MFA uključivanje na backendu
-**Status:** US-17 enrollment je implementiran; MFA login verifikacija je izdvojena u US-18.
+**Story:** US-17 — MFA uključivanje na backendu; US-18 — MFA provera pri prijavi
+**Status:** US-17 i US-18 su implementirani u istom PR-u (#196). Obavezno uključivanje MFA (US-19) nije u obuhvatu.
 
 ## 1. Obuhvat
 
@@ -18,9 +18,8 @@ US-17 pokriva:
 - zaštitu tajne u bazi i `Cache-Control: no-store` odgovore;
 - audit enrollment događaja bez tajne, URI-ja, koda ili ciphertext-a.
 
-US-18 (Tim 1) implementira proveru MFA koda tokom prijave, `MfaPending` tok,
-promociju sesije u `Active`, ograničavanje pokušaja i replay zaštitu tokom
-login verifikacije.
+US-18 pokriva proveru MFA koda tokom prijave (`MfaPending` tok), promociju sesije u
+`Active`, ograničavanje pokušaja (lockout) i replay zaštitu (odeljak 7).
 
 ## 2. TOTP parametri
 
@@ -89,6 +88,10 @@ Potvrda:
 - postavlja poslednji potvrđeni time-step;
 - briše pending ciphertext, verziju i rok.
 
+Uključivanje je jedan uslovni `UPDATE` (`mfa_enabled = false`, isti pending ciphertext, neistekao rok) u
+transakciji sa audit zapisom `auth.mfa.enabled`. Od dve paralelne potvrde prolazi samo jedna. Ako audit
+zapis nije upisan, transakcija se ne commit-uje: MFA ostaje isključen, a odgovor je `503 mfa_unavailable`.
+
 Neuspešni odgovori ne otkrivaju da li je problem bio u tajni, sesiji ili kodu.
 
 ## 5. Čuvanje tajne
@@ -119,9 +122,20 @@ i zaštićen key ring; ephemeral ključevi nisu dovoljni za restart aplikacije.
 
 ## 6. Audit i poverljivi podaci
 
-Enrollment i potvrda pišu audit preko postojećeg API `IAuditWriter` ugovora.
-Audit sadrži korisnika, akciju, ishod, korelacioni ID i bezbedan generički
-detail. Ne sme sadržati:
+MFA audit ide kroz Audit modul (AUD-01), preko `IdentityAuditProducer`, jedine granice mapiranja
+Identity ishoda u Audit katalog:
+
+| Događaj | Ishodi | Kako se upisuje |
+|-|-|-|
+| `auth.mfa.enrollment.started` | Success | `ITrustedAuditWriter`, posle čuvanja pending enrollment-a (ništa još nije uključeno) |
+| `auth.mfa.enabled` | Success | `ITransactionalAuditWriter`, u istoj transakciji kao uključivanje |
+| `auth.mfa.enabled` | Failure (`already_enabled`, `no_valid_enrollment`, `invalid_enrollment`, `invalid_code`) | `ITrustedAuditWriter` |
+| `auth.mfa.verify` | Success | `ITransactionalAuditWriter`, u istoj transakciji kao consume koraka i promocija sesije |
+| `auth.mfa.verify` | Failure (`invalid_code`, `replayed`, `locked`, `invalid_secret`, `session_inactive`) | `ITrustedAuditWriter`, sa `CancellationToken.None` |
+
+Uspeh bez audit zapisa ne postoji: ako zapis nije `Recorded`, nema commit-a i odgovor je `503`.
+Odbijanje ostaje odbijanje i kada audit ne uspe (pravilo 2 iz `docs/components/audit/CONTRACTS.md`).
+Zapis sadrži akter (`User`), nalog kao resurs, ishod, korelacioni ID i najviše `reasonCode`. Ne sme sadržati:
 
 - Base32 tajnu;
 - `otpauth://` URI;
@@ -129,17 +143,27 @@ detail. Ne sme sadržati:
 - ciphertext;
 - session token.
 
-## 7. Granica prema US-18
+## 7. Verifikacija pri prijavi (US-18)
 
-`VerifyAsync` je namerno placeholder i trenutno vraća nedostupnost. US-18,
-koji implementira Tim 1, treba da doda:
+```http
+POST /api/auth/mfa/verify
+Content-Type: application/json
+Cookie: SecurityLab.Session=<mfa-pending-session>
 
-- login sa `MfaEnabled` nalogom koji kreira `MfaPending` sesiju;
-- proveru koda samo za `MfaPending` sesiju;
-- promociju sesije u `Active`;
-- odbijanje pogrešnog, istekao i ponovljenog koda;
-- ograničavanje pokušaja i opoziv/blokadu nakon praga;
-- replay zaštitu preko `LastTotpTimeStep`.
+{ "code": "123456" }
+```
+
+- Login naloga sa uključenim MFA kreira `MfaPending` sesiju; kod se proverava samo za nju.
+- **Lockout:** dok je `mfa_locked_until` u budućnosti, kod se ne proverava (ni ispravan), pending sesija se
+  opoziva, a odgovor je isti `401 invalid_mfa` kao za pogrešan kod.
+- **Pogrešan kod:** jedan `UPDATE` povećava `mfa_failed_attempts`, a na pragu
+  (`IdentityLockout:MaxFailedAccessAttempts`) postavlja `mfa_locked_until` na
+  `IdentityLockout:LockoutMinutes`. Zaključan nalog se ne broji; posle isteka lockout-a brojač kreće od 1.
+  Na pragu se pending sesija opoziva.
+- **Replay:** korak koji nije noviji od `last_totp_time_step` se odbija (isti i stariji).
+- **Uspeh:** jedna transakcija: `UPDATE` koji upisuje korak samo ako je noviji i nalog nije zaključan
+  (i briše brojač i lockout), `UPDATE` sesije `MfaPending -> Active` (neopozvana, neistekla) i audit zapis.
+  Paralelni zahtev sa istim kodom čeka zaključan red, ponovo proverava `WHERE` i ne menja ništa.
 
 ## 8. Testovi
 
@@ -154,7 +178,14 @@ US-17 negativni testovi pokrivaju:
 - neispravan Data Protection ciphertext;
 - odsustvo tajne u audit događajima.
 
-Login verifikacioni testovi pripadaju US-18.
+US-18 i audit testovi (`MfaServiceTests`, `MfaIntegrationTests` na PostgreSQL-u) pokrivaju i:
+
+- isti kod iz dve paralelne `MfaPending` sesije (tačno jedan uspeh) i stariji kod posle novijeg;
+- dve paralelne potvrde enrollment-a (jedan uspeh);
+- prag pogrešnih kodova, pa nova prijava lozinkom i ispravan kod (`401`), i uspeh posle `LockoutMinutes`;
+- paralelne pogrešne kodove (tačan brojač, lockout tačno na pragu);
+- nedostupan audit pri potvrdi i verifikaciji (`503`, ništa nije promenjeno);
+- zapise `auth.mfa.enabled` i `auth.mfa.verify` u `audit` šemi bez koda, tajne i e-maila.
 
 ## 9. Budući rad
 

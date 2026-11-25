@@ -1,3 +1,4 @@
+using Platform.Audit.Composition;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -413,7 +414,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
     }
 
     private static IdentityAuditProducer CreateProducer(ITrustedAuditWriter writer) =>
-        new(writer, NullLogger<IdentityAuditProducer>.Instance);
+        new(writer, new PostgresTransactionalAuditWriter(TimeProvider.System), NullLogger<IdentityAuditProducer>.Instance);
 
     private sealed class UnavailableAuditWriter : ITrustedAuditWriter
     {

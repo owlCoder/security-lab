@@ -1,12 +1,13 @@
 using System.Data.Common;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using OtpNet;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
-using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
@@ -24,7 +25,7 @@ public sealed class MfaServiceTests
     private readonly DateTimeOffset _now = new(2026, 11, 14, 17, 0, 0, TimeSpan.Zero);
     private Mock<ISessionStore> _sessions = null!;
     private Mock<IMfaCredentialsStore> _credentials = null!;
-    private Mock<IAuditWriter> _audit = null!;
+    private RecordingAudit _audit = null!;
     private Mock<TimeProvider> _clock = null!;
     private IDataProtector _protector = null!;
     private FakeUnitOfWork _work = null!;
@@ -35,16 +36,16 @@ public sealed class MfaServiceTests
     {
         _sessions = new Mock<ISessionStore>(MockBehavior.Strict);
         _credentials = new Mock<IMfaCredentialsStore>(MockBehavior.Strict);
-        _audit = new Mock<IAuditWriter>(MockBehavior.Strict);
+        _audit = new RecordingAudit();
         _clock = new Mock<TimeProvider>(MockBehavior.Strict);
         _clock.Setup(clock => clock.GetUtcNow()).Returns(_now);
-        _audit.Setup(writer => writer.Write(It.IsAny<AuditEvent>()));
         _work = new FakeUnitOfWork();
         _credentials.Setup(store => store.BeginAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_work);
         _protector = new EphemeralDataProtectionProvider()
             .CreateProtector("SecurityLab", "Identity", "MfaTotpSecret", "v1");
-        _service = new MfaService(_credentials.Object, _sessions.Object, _audit.Object, _clock.Object, _protector,
-            Options.Create(new IdentityLockoutOptions()));
+        _service = new MfaService(_credentials.Object, _sessions.Object,
+            new IdentityAuditProducer(_audit, _audit, NullLogger<IdentityAuditProducer>.Instance),
+            _clock.Object, _protector, Options.Create(new IdentityLockoutOptions()), NullLogger<MfaService>.Instance);
     }
 
     [Test]
@@ -54,7 +55,7 @@ public sealed class MfaServiceTests
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unauthorized));
         Assert.That(result.Uri, Is.Null);
-        _audit.Verify(writer => writer.Write(It.IsAny<AuditEvent>()), Times.Never);
+        Assert.That(_audit.Writes, Is.Empty);
     }
 
     [Test]
@@ -88,7 +89,7 @@ public sealed class MfaServiceTests
         _credentials.Verify(store => store.CreatePendingAsync(
             It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<int>(),
             It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never);
-        VerifyAuditDoesNotContainSecret("already_enabled");
+        Assert.That(_audit.Writes, Is.Empty);
     }
 
     [Test]
@@ -111,6 +112,10 @@ public sealed class MfaServiceTests
         _credentials.Verify(store => store.CreatePendingAsync(
             UserId, It.Is<string>(ciphertext => !string.IsNullOrWhiteSpace(ciphertext)),
             1, _now.AddMinutes(10), It.IsAny<CancellationToken>()), Times.Once);
+        var started = _audit.Writes.Single();
+        Assert.That(started.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthMfaEnrollmentStarted));
+        Assert.That(started.Transaction, Is.Null);
+        Assert.That(started.Context.Actor, Is.EqualTo(AuditActor.ForUser(UserId)));
     }
 
     [Test]
@@ -407,6 +412,89 @@ public sealed class MfaServiceTests
         Assert.That(_work.Committed, Is.True);
     }
 
+    // owlCoder review point 3: a failed Audit write must not give a false success.
+    [Test]
+    public async Task Confirm_WhenAuditIsUnavailable_DoesNotCommit_AndReturnsUnavailable()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupConfirmation(secret, current);
+        _audit.TransactionalResult = AuditWriteResult.Unavailable();
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+
+        var result = await _service.ConfirmEnrollAsync(Token, code, "corr-audit-down", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Unavailable));
+        Assert.That(_work.ConfirmCalls, Is.EqualTo(1));
+        Assert.That(_work.Committed, Is.False);
+        Assert.That(_work.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Confirm_Success_IsAuditedInTheSameTransaction()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupConfirmation(secret, current);
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+
+        await _service.ConfirmEnrollAsync(Token, code, "corr-audited", CancellationToken.None);
+
+        var write = _audit.Writes.Single();
+        Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthMfaEnabled));
+        Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+        Assert.That(write.Transaction, Is.SameAs(_work.Transaction));
+        Assert.That(write.Context.CorrelationId, Is.EqualTo("corr-audited"));
+    }
+
+    [Test]
+    public async Task Verify_WhenAuditIsUnavailable_DoesNotCommit_AndReturnsUnavailable()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupVerification(secret, current);
+        _audit.TransactionalResult = AuditWriteResult.Unavailable();
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+
+        var result = await _service.VerifyAsync(Token, code, "corr-audit-down", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Unavailable));
+        Assert.That(_work.Committed, Is.False);
+        Assert.That(_work.Disposed, Is.True);
+    }
+
+    [Test]
+    public async Task Verify_Success_IsAuditedInTheSameTransaction()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupVerification(secret, current);
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+
+        await _service.VerifyAsync(Token, code, "corr-verified", CancellationToken.None);
+
+        var write = _audit.Writes.Single();
+        Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthMfaVerify));
+        Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+        Assert.That(write.Transaction, Is.SameAs(_work.Transaction));
+    }
+
+    [Test]
+    public async Task Verify_WrongCode_WhenAuditIsUnavailable_IsStillRefused()
+    {
+        var current = DateTimeOffset.UtcNow;
+        SetupVerification(TotpHelpers.GenerateSecret(), current);
+        _audit.TrustedResult = AuditWriteResult.Unavailable();
+        _credentials.Setup(store => store.RecordFailedAttemptAsync(
+                UserId, 5, It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await _service.VerifyAsync(Token, "000000", "corr-refused", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
+        VerifyAuditDoesNotContainSecret("invalid_code", AuditEventTypes.AuthMfaVerify);
+    }
+
     private readonly Guid _sessionId = Guid.NewGuid();
 
     private void SetupSession(AuthLevel authLevel = AuthLevel.Active, DateTimeOffset? now = null)
@@ -453,6 +541,14 @@ public sealed class MfaServiceTests
         SetupPendingCredentials(_protector.Protect(secret), now.AddMinutes(5));
     }
 
+    private sealed class MarkerTransaction : DbTransaction
+    {
+        public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;
+        protected override DbConnection? DbConnection => null;
+        public override void Commit() { }
+        public override void Rollback() { }
+    }
+
     private sealed class FakeUnitOfWork : IMfaUnitOfWork
     {
         public bool ConfirmResult { get; set; } = true;
@@ -464,7 +560,7 @@ public sealed class MfaServiceTests
         public bool Committed { get; private set; }
         public bool Disposed { get; private set; }
 
-        public DbTransaction Transaction => null!;
+        public DbTransaction Transaction { get; } = new MarkerTransaction();
 
         public Task<bool> TryConfirmEnrollmentAsync(
             Guid userId, string pendingCiphertext, long timeStep, DateTimeOffset now, CancellationToken ct)
@@ -500,16 +596,39 @@ public sealed class MfaServiceTests
         }
     }
 
-    private void VerifyAuditDoesNotContainSecret(string expectedDetail)
+    private void VerifyAuditDoesNotContainSecret(string expectedReason, string eventType = AuditEventTypes.AuthMfaEnabled)
     {
-        _audit.Verify(writer => writer.Write(It.Is<AuditEvent>(audit =>
-            audit.Detail == expectedDetail
-            && !audit.Action.Contains("ciphertext", StringComparison.Ordinal)
-            && !audit.Target.Contains("ciphertext", StringComparison.Ordinal)
-            && !audit.Outcome.Contains("ciphertext", StringComparison.Ordinal)
-            && !audit.CorrelationId.Contains("ciphertext", StringComparison.Ordinal)
-            && !audit.Detail!.Contains("ciphertext", StringComparison.Ordinal)
-            && !audit.Detail!.Contains("123456", StringComparison.Ordinal)
-            && !audit.Detail.Contains("000000", StringComparison.Ordinal))), Times.Once);
+        var write = _audit.Writes.Single();
+        Assert.That(write.Draft.EventType, Is.EqualTo(eventType));
+        Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+        Assert.That(write.Draft.Details, Is.EqualTo(new Dictionary<string, string> { ["reasonCode"] = expectedReason }));
+        var serialized = string.Join('|', write.Draft.EventType, write.Draft.Resource?.Id, write.Context.CorrelationId,
+            string.Join(',', write.Draft.Details!.Select(pair => $"{pair.Key}={pair.Value}")));
+        Assert.That(serialized, Does.Not.Contain("ciphertext").And.Not.Contain("123456").And.Not.Contain("000000"));
+    }
+
+    private sealed record AuditWrite(AuditEventDraft Draft, AuditContext Context, DbTransaction? Transaction);
+
+    // Stands in for both Audit writers behind IdentityAuditProducer.
+    private sealed class RecordingAudit : ITrustedAuditWriter, ITransactionalAuditWriter
+    {
+        public List<AuditWrite> Writes { get; } = [];
+        public AuditWriteResult TrustedResult { get; set; } = AuditWriteResult.Recorded(Guid.NewGuid());
+        public AuditWriteResult TransactionalResult { get; set; } = AuditWriteResult.Recorded(Guid.NewGuid());
+
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft, AuditContext context, CancellationToken cancellationToken = default)
+        {
+            Writes.Add(new AuditWrite(draft, context, null));
+            return ValueTask.FromResult(TrustedResult);
+        }
+
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft, AuditContext context, DbTransaction transaction,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Add(new AuditWrite(draft, context, transaction));
+            return ValueTask.FromResult(TransactionalResult);
+        }
     }
 }

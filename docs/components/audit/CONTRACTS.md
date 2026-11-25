@@ -236,14 +236,12 @@ mistake. A rejected value is never copied into a log, exception message or HTTP 
 
 | Team / module | Events | Current state |
 |-|-|-|
-| Identity, Teams 1 and 2 (IDN-02, IDN-03, IDN-05) | `auth.*`, `account.status.changed` | Has its own `IAuditWriter` in `Platform.Api.Services.Identity`, which writes to `ILogger`. Needs an agreed adapter or a switch to this contract. |
+| Identity, Teams 1 and 2 (IDN-02, IDN-03, IDN-05, IDN-06) | `auth.*`, `account.status.changed`, `account.unlocked` | Uses this contract. `IdentityAuditProducer` maps login, logout and MFA outcomes (`ITrustedAuditWriter`; MFA enabled and MFA verified through `ITransactionalAuditWriter` in the identity transaction). Status change and unlock write through `ITransactionalAuditWriter`. The old `LoggerAuditWriter` is removed. |
 | Access, Team 3 (ACC-05, ACC-08) | `access.denied` | Calls `IAccessAuditWriter`; today `NullAccessAuditWriter`. Connected by the host adapter (S-13). |
 | Memberships and delegation (ACC-03, ACC-07) | `course.*` | Not on `main` yet. |
 | Revision publishing (AUD-02) | not in this version | Can add its event type through a catalog change. |
 | Audit query (AUD-06) | `audit.events.viewed` | Our own story S-14/S-15. |
 
-Two interfaces named `IAuditWriter` exist in different namespaces. In `Program.cs` use an alias,
-as is already done for the two `IAccessDecision` interfaces.
 
 ## Test double
 

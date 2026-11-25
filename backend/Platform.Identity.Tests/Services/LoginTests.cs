@@ -73,7 +73,7 @@ public class LoginTests
             _sessions.Object,
             _sessionManager.Object,
             _mfaCredentials.Object,
-            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance));
     }
 
     private void GivenCredentials(CredentialResult result) =>

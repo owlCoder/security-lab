@@ -54,7 +54,7 @@ public class FederatedLoginServiceTests
             _linker.Object,
             _sessions.Object,
             _sessionManager.Object,
-            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance));
     }
 
     // ---------- Success ----------

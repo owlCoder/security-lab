@@ -1,12 +1,17 @@
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Web;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using OtpNet;
+using Npgsql;
 using Platform.Api.Contracts.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Audit.Composition;
+using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
@@ -18,6 +23,11 @@ namespace Platform.Identity.Tests.Integration;
 public sealed class MfaIntegrationTests : IntegrationTestBase
 {
     private const string Password = "SecurePassword123!";
+
+    // A successful confirmation or verification is committed only together with its Audit record (same database).
+    [OneTimeSetUp]
+    public async Task MigrateAuditSchema() =>
+        await AuditPersistenceExtensions.MigrateAuditDatabaseAsync(TestDatabaseFixture.ConnectionString);
 
     [Test]
     public async Task Enroll_ActiveSession_ReturnsEnrollmentUri()
@@ -468,6 +478,117 @@ public sealed class MfaIntegrationTests : IntegrationTestBase
         var locked = await GetCredentialsAsync(user.Id);
         Assert.That(locked!.MfaFailedAttempts, Is.EqualTo(MaxFailedAttempts));
         Assert.That(locked.MfaLockedUntil, Is.GreaterThan(DateTimeOffset.UtcNow));
+    }
+
+    // owlCoder review point 3: MFA audit goes to the Audit module, atomically with the change.
+    [Test]
+    [Category("US-17")]
+    public async Task EnrollConfirm_WhenAuditIsUnavailable_Returns503_AndMfaStaysDisabled()
+    {
+        var secret = TotpHelpers.GenerateSecret();
+        var user = await UserTestData.AddAsync(Factory, "mfa-confirm-audit-down@platform.com", Password);
+        await MfaTestData.AddPendingAsync(Factory, user.Id, secret, DateTimeOffset.UtcNow.AddMinutes(5));
+        var session = await SessionTestData.CreateAsync(Factory, user.Id);
+        using var failing = WithUnavailableTransactionalAudit();
+        using var client = failing.CreateClient();
+
+        var response = await PostWithSessionAsync(
+            "/api/auth/mfa/enroll/confirm", session.RawToken, new { Code = CurrentCode(secret) }, client);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+        var credentials = await GetCredentialsAsync(user.Id);
+        Assert.That(credentials!.MfaEnabled, Is.False);
+        Assert.That(credentials.PendingTotpSecretCiphertext, Is.Not.Null, "the enrollment can still be confirmed");
+        Assert.That(await AuditRowsAsync(user.Id, "auth.mfa.enabled"), Is.Empty);
+    }
+
+    [Test]
+    [Category("US-18")]
+    public async Task Verification_WhenAuditIsUnavailable_Returns503_AndSessionStaysPending()
+    {
+        var secret = TotpHelpers.GenerateSecret();
+        var user = await UserTestData.AddAsync(Factory, "mfa-verify-audit-down@platform.com", Password);
+        await MfaTestData.AddEnabledAsync(Factory, user.Id, secret);
+        var session = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+        using var failing = WithUnavailableTransactionalAudit();
+        using var client = failing.CreateClient();
+
+        var response = await PostWithSessionAsync(
+            "/api/auth/mfa/verify", session.RawToken, new { Code = CurrentCode(secret) }, client);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+        Assert.That((await SessionTestData.GetAsync(Factory, session.Session.Id))!.AuthLevel,
+            Is.EqualTo(AuthLevel.MfaPending));
+        Assert.That((await GetCredentialsAsync(user.Id))!.LastTotpTimeStep, Is.Null, "the step is not consumed");
+        Assert.That(await AuditRowsAsync(user.Id, "auth.mfa.verify"), Is.Empty);
+    }
+
+    [Test]
+    [Category("US-17")]
+    [Category("US-18")]
+    public async Task ConfirmAndVerify_AreRecordedInTheAuditModule_WithoutCodeOrSecret()
+    {
+        const string email = "mfa-audit-rows@platform.com";
+        await LoginAsAsync(email);
+        var user = await UserTestData.GetByEmailAsync(Factory, email);
+        var secret = await EnrollAndReadSecretAsync();
+        var confirmCode = CurrentCode(secret);
+        var confirm = await Client.PostAsJsonAsync("/api/auth/mfa/enroll/confirm", new { Code = confirmCode });
+        Assert.That(confirm.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        await Client.PostAsync("/api/auth/logout", null);
+        ClearSessionCookie();
+        SetSessionCookie(await LoginAsync(email));
+        var verifyCode = NextCode(secret);
+        var verify = await Client.PostAsJsonAsync("/api/auth/mfa/verify", new { Code = verifyCode });
+        Assert.That(verify.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var enabled = (await AuditRowsAsync(user!.Id, "auth.mfa.enabled")).Single();
+        var verified = (await AuditRowsAsync(user.Id, "auth.mfa.verify")).Single();
+        foreach (var (row, response) in new[] { (enabled, confirm), (verified, verify) })
+        {
+            Assert.That(row.Outcome, Is.EqualTo("Success"));
+            Assert.That(row.ActorKind, Is.EqualTo("User"));
+            Assert.That(row.ActorId, Is.EqualTo(user.Id));
+            Assert.That(row.CorrelationId, Is.EqualTo(response.Headers.GetValues("X-Correlation-ID").Single()));
+            // AUD-03: no code, no secret, no e-mail in the record.
+            Assert.That(row.Raw, Does.Not.Contain(confirmCode).And.Not.Contain(verifyCode)
+                .And.Not.Contain(secret).And.Not.Contain(email));
+        }
+    }
+
+    private static WebApplicationFactory<Program> WithUnavailableTransactionalAudit() =>
+        Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ITransactionalAuditWriter>();
+            services.AddSingleton<ITransactionalAuditWriter, UnavailableTransactionalAuditWriter>();
+        }));
+
+    private sealed class UnavailableTransactionalAuditWriter : ITransactionalAuditWriter
+    {
+        public ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
+            DbTransaction transaction, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(AuditWriteResult.Unavailable());
+    }
+
+    private sealed record AuditRow(string Outcome, string ActorKind, Guid? ActorId, string CorrelationId, string Raw);
+
+    private static async Task<List<AuditRow>> AuditRowsAsync(Guid userId, string eventType)
+    {
+        await using var connection = new NpgsqlConnection(TestDatabaseFixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT outcome, actor_kind, actor_id, correlation_id, row_to_json(e)::text
+            FROM audit.audit_events e
+            WHERE event_type = @type AND resource_id = @id
+            """, connection);
+        command.Parameters.AddWithValue("type", eventType);
+        command.Parameters.AddWithValue("id", userId.ToString());
+        var rows = new List<AuditRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(new AuditRow(reader.GetString(0), reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetGuid(2), reader.GetString(3), reader.GetString(4)));
+        return rows;
     }
 
     private const int MaxFailedAttempts = 5;

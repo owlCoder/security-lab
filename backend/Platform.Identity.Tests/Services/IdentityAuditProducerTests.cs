@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
@@ -203,6 +204,78 @@ public sealed class IdentityAuditProducerTests
         Assert.That(result.Status, Is.EqualTo(AuditWriteStatus.Unavailable));
     }
 
+    [Test]
+    public async Task MfaEnabled_IsWrittenInTheCallerTransaction_ForTheUserAndTheirAccount()
+    {
+        var writer = new RecordingWriter();
+        using var transaction = new MarkerTransaction();
+
+        var result = await CreateProducer(writer).MfaEnabledAsync(ActorId, CorrelationId, transaction);
+
+        var write = writer.Single();
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(result.IsRecorded, Is.True);
+            Assert.That(write.Transaction, Is.SameAs(transaction));
+            Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthMfaEnabled));
+            Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+            Assert.That(write.Draft.Resource, Is.EqualTo(
+                new AuditResourceRef(AuditResourceTypes.Account, ActorId.ToString())));
+            Assert.That(write.Draft.Details, Is.Null);
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.ForUser(ActorId)));
+            Assert.That(write.Context.CorrelationId, Is.EqualTo(CorrelationId));
+        }
+    }
+
+    [Test]
+    public async Task MfaVerified_IsWrittenInTheCallerTransaction()
+    {
+        var writer = new RecordingWriter();
+        using var transaction = new MarkerTransaction();
+
+        await CreateProducer(writer).MfaVerifiedAsync(ActorId, CorrelationId, transaction);
+
+        var write = writer.Single();
+        Assert.That(write.Transaction, Is.SameAs(transaction));
+        Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthMfaVerify));
+        Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+    }
+
+    [TestCase("enrollment.started")]
+    [TestCase("enabled.failed")]
+    [TestCase("verify.failed")]
+    public async Task MfaEventsOutsideATransaction_UseTheTrustedWriter_AndOnlyAReasonCode(string which)
+    {
+        var writer = new RecordingWriter();
+        var producer = CreateProducer(writer);
+
+        _ = which switch
+        {
+            "enrollment.started" => await producer.MfaEnrollmentStartedAsync(ActorId, CorrelationId),
+            "enabled.failed" => await producer.MfaEnableFailedAsync(ActorId, "invalid_code", CorrelationId),
+            _ => await producer.MfaVerifyFailedAsync(ActorId, "locked", CorrelationId)
+        };
+
+        var write = writer.Single();
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(write.Transaction, Is.Null);
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.ForUser(ActorId)));
+            Assert.That(write.Draft.Resource!.Id, Is.EqualTo(ActorId.ToString()));
+            Assert.That(write.Draft.Details?.Keys ?? [], Is.SubsetOf(new[] { "reasonCode" }));
+        }
+    }
+
+    [Test]
+    public async Task MfaVerified_WhenTheTransactionalWriterThrows_ReturnsUnavailable()
+    {
+        using var transaction = new MarkerTransaction();
+
+        var result = await CreateProducer(new ThrowingWriter()).MfaVerifiedAsync(ActorId, CorrelationId, transaction);
+
+        Assert.That(result.Status, Is.EqualTo(AuditWriteStatus.Unavailable));
+    }
+
     private static string Serialized(RecordedWrite write) =>
         string.Join('|',
             write.Draft.EventType,
@@ -214,12 +287,12 @@ public sealed class IdentityAuditProducerTests
             write.Context.CorrelationId);
 
     private static IdentityAuditProducer CreateProducer(ITrustedAuditWriter writer) =>
-        new(writer, NullLogger<IdentityAuditProducer>.Instance);
+        new(writer, writer as ITransactionalAuditWriter ?? new ThrowingWriter(), NullLogger<IdentityAuditProducer>.Instance);
 
-    private sealed record RecordedWrite(AuditEventDraft Draft, AuditContext Context);
+    private sealed record RecordedWrite(AuditEventDraft Draft, AuditContext Context, DbTransaction? Transaction = null);
 
     private sealed class RecordingWriter(
-        AuditWriteResult? result = null) : ITrustedAuditWriter
+        AuditWriteResult? result = null) : ITrustedAuditWriter, ITransactionalAuditWriter
     {
         private readonly AuditWriteResult _result =
             result ?? AuditWriteResult.Recorded(Guid.Parse("44444444-4444-4444-4444-444444444444"));
@@ -235,15 +308,40 @@ public sealed class IdentityAuditProducerTests
             return ValueTask.FromResult(_result);
         }
 
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft,
+            AuditContext context,
+            DbTransaction transaction,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Add(new RecordedWrite(draft, context, transaction));
+            return ValueTask.FromResult(_result);
+        }
+
         public RecordedWrite Single() => Writes.Single();
     }
 
-    private sealed class ThrowingWriter : ITrustedAuditWriter
+    private sealed class ThrowingWriter : ITrustedAuditWriter, ITransactionalAuditWriter
     {
         public ValueTask<AuditWriteResult> WriteAsync(
             AuditEventDraft draft,
             AuditContext context,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("sensitive storage diagnostic");
+
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft,
+            AuditContext context,
+            DbTransaction transaction,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("sensitive storage diagnostic");
+    }
+
+    private sealed class MarkerTransaction : DbTransaction
+    {
+        public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;
+        protected override DbConnection? DbConnection => null;
+        public override void Commit() { }
+        public override void Rollback() { }
     }
 }
