@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Platform.Api.Enums.Identity;
-using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Contracts;
 using Platform.Audit.Infrastructure.Persistence;
@@ -21,6 +21,7 @@ using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
 using Platform.Identity.Services;
+using Platform.Identity.Tests.Helpers;
 using Testcontainers.PostgreSql;
 
 namespace Platform.Identity.Tests.Services;
@@ -150,12 +151,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
 
         await using var identity = new PlatformIdentityDbContext(identityOptions);
         var sessionStore = new SessionStore(identity, TimeProvider.System);
-        var sessionOptions = Options.Create(new SessionOptions
-        {
-            AbsoluteLifetimeMinutes = 480,
-            ActivityTimeoutMinutes = 45,
-            MfaPendingTimeoutMinutes = 5
-        });
+        var sessionOptions = SessionOptionsTestDefaults.Create();
         var login = new LoginService(
             new CredentialVerifier(
                 new EfCredentialStore(identity),

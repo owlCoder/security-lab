@@ -1,4 +1,3 @@
-namespace Platform.Api.Services.Identity;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -7,23 +6,29 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
-using Platform.Api.Modules.Identity.SessionLimiting;
+using SessionOptions = Platform.Api.Modules.Identity.SessionExpiry.SessionOptions;
+
+namespace Platform.Api.Services.Identity;
 
 /// <summary>Connects login to the session store (US-03). Fails closed: a database error means no session.</summary>
-public sealed class StoreSessionCreator(ISessionStore store,IOptions<SessionOptions> sessionOptions,ILogger<StoreSessionCreator> logger) : ISessionCreator
+public sealed class StoreSessionCreator(
+    ISessionStore store,
+    IOptions<SessionOptions> sessionOptions,
+    ILogger<StoreSessionCreator> logger) : ISessionCreator
 {
     private readonly SessionOptions options = sessionOptions.Value;
-    
+
     public async Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default)
     {
         var storedLevel = ToStoredLevel(level);
 
         try
         {
-            
-            var Lifetime = storedLevel == AuthLevel.Active ? TimeSpan.FromMinutes(options.AbsoluteLifetimeMinutes) : TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
+            var lifetime = storedLevel == AuthLevel.Active
+                ? TimeSpan.FromMinutes(options.AbsoluteLifetimeMinutes)
+                : TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
             // Re-checks the status under a row lock: login read it earlier and it may have changed since (IDN-03).
-            var created = await store.CreateForActiveAccountAsync(userId, storedLevel, Lifetime, ct);
+            var created = await store.CreateForActiveAccountAsync(userId, storedLevel, lifetime, ct);
             if (created is null) throw new AccountNotActiveException(userId);
 
             var (token, session) = created.Value;

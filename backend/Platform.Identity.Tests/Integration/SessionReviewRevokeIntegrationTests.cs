@@ -3,12 +3,18 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Composition;
+using Platform.Identity.Entities;
+using Platform.Identity.Enums;
+using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Integration;
@@ -118,6 +124,34 @@ public class SessionReviewRevokeIntegrationTests : IntegrationTestBase
             Is.EqualTo(Platform.Identity.Enums.AccountStatus.Active));
     }
 
+    [Test]
+    public async Task BlockingDuringInactiveSessionValidation_Returns401SessionInvalid()
+    {
+        var user = await UserTestData.AddAsync(Factory, "inactive-race@example.com", Password);
+        var session = await SessionTestData.CreateAsync(Factory, user.Id);
+        await SetLastActivityAsync(session.Session.Id, DateTimeOffset.UtcNow.AddMinutes(-46));
+
+        var interceptor = new BlockAccountBeforeSessionRevocationInterceptor(Factory.Services, user.Id);
+        using var host = Factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<DbContextOptions<PlatformIdentityDbContext>>();
+            services.AddDbContext<PlatformIdentityDbContext>(options =>
+                options.UseNpgsql(TestDatabaseFixture.ConnectionString)
+                    .AddInterceptors(interceptor));
+        }));
+        using var client = NewClient(host);
+
+        var response = await SendAsync(client, HttpMethod.Get, MeUrl, session.RawToken);
+
+        await AssertSessionInvalidAsync(response, cookieCleared: true);
+        Assert.That(interceptor.WasTriggered, Is.True, "the block must race with the inactivity revocation");
+        Assert.That((await UserTestData.GetAsync(Factory, user.Id))!.Status,
+            Is.EqualTo(AccountStatus.Blocked));
+        Assert.That(
+            (await SessionTestData.GetAsync(Factory, session.Session.Id))?.RevokedAt,
+            Is.Not.Null);
+    }
+
     // Revoking sessions
 
     [Test]
@@ -219,6 +253,15 @@ public class SessionReviewRevokeIntegrationTests : IntegrationTestBase
     private static HttpClient NewClient(WebApplicationFactory<Program> factory) =>
         factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
 
+    private static async Task SetLastActivityAsync(Guid sessionId, DateTimeOffset lastActivityAt)
+    {
+        using var scope = Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var session = await db.Sessions.SingleAsync(value => value.Id == sessionId);
+        session.Touch(lastActivityAt);
+        await db.SaveChangesAsync();
+    }
+
     private static string StatusUrl(Guid accountId) => $"/api/admin/accounts/{accountId}/status";
 
     private static async Task<HttpResponseMessage> SendAsync(
@@ -252,5 +295,37 @@ public class SessionReviewRevokeIntegrationTests : IntegrationTestBase
             && cookies.Any(cookie => cookie.StartsWith($"{SessionCookie.Name}=", StringComparison.Ordinal)
                                      && cookie.Contains("1970", StringComparison.Ordinal));
         Assert.That(cleared, Is.EqualTo(cookieCleared));
+    }
+
+    private sealed class BlockAccountBeforeSessionRevocationInterceptor(
+        IServiceProvider services,
+        Guid userId) : SaveChangesInterceptor
+    {
+        private int triggered;
+
+        public bool WasTriggered => Volatile.Read(ref triggered) == 1;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            var isInactivityRevocation = eventData.Context is PlatformIdentityDbContext db &&
+                db.ChangeTracker.Entries<Session>().Any(entry =>
+                    entry.State == EntityState.Modified &&
+                    entry.Property(session => session.RevokedAt).IsModified);
+            if (!isInactivityRevocation || Interlocked.CompareExchange(ref triggered, 1, 0) != 0)
+                return result;
+
+            using var scope = services.CreateScope();
+            var store = scope.ServiceProvider.GetRequiredService<IAccountStatusStore>();
+            await using var unitOfWork = await store.BeginAsync(cancellationToken);
+            var account = await unitOfWork.FindForUpdateAsync(userId, cancellationToken)
+                ?? throw new InvalidOperationException("The account must exist for the concurrency test.");
+            await unitOfWork.ApplyAsync(account, AccountStatus.Blocked, cancellationToken);
+            await unitOfWork.CommitAsync(cancellationToken);
+
+            return result;
+        }
     }
 }

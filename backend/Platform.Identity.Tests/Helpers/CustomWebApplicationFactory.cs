@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Audit.Contracts;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Integration;

@@ -10,7 +10,7 @@ using Platform.Identity.Persistence;
 
 namespace Platform.Api.Services.Identity;
 
-using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Api.Modules.Identity.SessionExpiry;
 
 public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<SessionOptions> sessionOptions,TimeProvider? timeProvider = null) : ISessionManager
 {
@@ -61,8 +61,30 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
             ct);
 
         var now = clock.GetUtcNow();
-        if (session is null || !session.IsActiveAt(now))
+        if (session is null)
             return null;
+
+        var activityTimeout = TimeSpan.FromMinutes(options.ActivityTimeoutMinutes);
+        var mfaPendingTimeout = TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
+        if (!session.IsActiveAt(now, activityTimeout, mfaPendingTimeout))
+        {
+            if (session.RevokedAt is null &&
+                session.ExpiresAt > now &&
+                session.HasExceededInactivityTimeoutAt(now, activityTimeout, mfaPendingTimeout))
+            {
+                session.Revoke(now);
+                try
+                {
+                    await db.SaveChangesAsync(ct);
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    db.Entry(session).State = EntityState.Detached;
+                }
+            }
+
+            return null;
+        }
 
         // SEC-03 / IDN-03: a blocked or archived account is refused on its very next request, even if a session
         // was created after the revocation (a login that raced with the status change).
@@ -71,25 +93,6 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
             .Select(account => (AccountStatus?)account.Status)
             .SingleOrDefaultAsync(ct);
         if (status != AccountStatus.Active) return null;
-        var inactivityTime = TimeSpan.FromMinutes(options.ActivityTimeoutMinutes); 
-        if (session.AuthLevel == AuthLevel.MfaPending)
-        {
-             inactivityTime = TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
-        }
-       
-        if ((now - session.LastActivityAt) >= inactivityTime) {
-            session.Revoke(now);
-            try{
-            await db.SaveChangesAsync(ct);
-            return null;
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                db.Entry(session).State = EntityState.Detached;
-                return null;
-            }
-
-        }
 
         session.Touch(now);
         try
@@ -117,18 +120,22 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
         if (userId == Guid.Empty) throw new ArgumentException("userId is required", nameof(userId));
 
         var now = clock.GetUtcNow();
-        return await db.Sessions
+        var activityTimeout = TimeSpan.FromMinutes(options.ActivityTimeoutMinutes);
+        var mfaPendingTimeout = TimeSpan.FromMinutes(options.MfaPendingTimeoutMinutes);
+        var candidates = await db.Sessions
             .Where(session =>
-                session.UserId == userId && 
+                session.UserId == userId &&
                 session.RevokedAt == null &&
-                    session.ExpiresAt > now)// TODO: Once the MFA/session state model is finalized (IDN-06 / TYP-05),
-                                                 // consider whether only fully authenticated sessions (AuthLevel.Active)
-                                                 // should be included in this list
+                session.ExpiresAt > now)
+            .ToListAsync(ct);
+
+        return candidates
+            .Where(session => session.IsActiveAt(now, activityTimeout, mfaPendingTimeout))
             .Select(session => new SessionInfo(
                 session.SessionHandle,
                 session.CreatedAt,
                 session.LastActivityAt,
                 session.ExpiresAt))
-            .ToListAsync(ct);
+            .ToList();
     }
 }

@@ -25,10 +25,10 @@ Validates a presented session token for the request pipeline, revokes sessions, 
 
 | Method | Implemented behavior |
 |-|-|
-| `Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)` | Returns `null` for a blank, unknown, revoked, or expired token. Otherwise hashes the token with SHA-256 to find the stored session, updates `LastActivityAt`, persists it, and returns its handle, user id, and level. The raw token is not stored. |
+| `Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)` | Returns `null` for a blank, unknown, revoked, expired, or inactive token. Inactivity is measured from `LastActivityAt`: `ActivityTimeoutMinutes` for active sessions and `MfaPendingTimeoutMinutes` for MFA-pending sessions. An inactive session is lazily revoked; a concurrent revocation is treated as an invalid session, not a server error. Otherwise hashes the token with SHA-256 to find the stored session, updates `LastActivityAt`, persists it, and returns its handle, user id, and level. The raw token is not stored. |
 | `Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)` | Revokes every session for the user whose `RevokedAt` is null and returns the number changed; returns `0` if none match. It validates that `userId` is non-empty. The current `SessionManager` does not use or audit `reason`; callers are responsible for any associated audit event. |
 | `Task<bool> RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default)` | Finds a session by both handle and owner and revokes it. Returns `false` for an unknown handle or a handle belonging to another user, and `true` when the owned session exists (including if it was already revoked). Both ids must be non-empty. |
-| `Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default)` | Returns sessions for the user that are not revoked and have not expired. It validates that `userId` is non-empty. |
+| `Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default)` | Returns only sessions for the user that are not revoked, have not expired, and are within the same auth-level-specific inactivity timeout used by `ValidateAsync`. Listing filters inactive sessions but does not revoke them. It validates that `userId` is non-empty. |
 
 The `reason` parameter is retained for the IDN-03 integration but is currently unused by the session manager. Normal missing-session outcomes are represented by `null`, `false`, or `0`; invalid empty identifiers throw `ArgumentException`. Database failures are not converted to successful outcomes.
 
@@ -43,7 +43,7 @@ The contract is for trusted server-side callers and does not authorize them. Cal
 - `SessionManager` is the database-backed implementation of validation, revocation, and listing.
 - `Program.cs` registers only `SessionManager` as `ISessionManager`. The older `StoreSessionManager` stub (no-op revocation and listing) is no longer registered.
 - `ValidateAsync` also refuses a session whose account is not `Active` (IDN-03, SEC-03).
-- `RevokeAllForUser` is awaited by `EfAccountStatusStore` inside the status-change transaction (IDN-03); it must not be called without `await`.
+- `RevokeAllForUser` is awaited by `EfAccountStatusStore` inside the status-change transaction (IDN-03); atomicity relies on the scoped store and `ISessionManager` being resolved from the same DI scope and sharing one `PlatformIdentityDbContext`.
 - Session creation is a separate `ISessionCreator` contract implemented by `StoreSessionCreator`.
 
 ## Consumers

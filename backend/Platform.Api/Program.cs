@@ -25,7 +25,7 @@ using Platform.Api.Endpoints.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
-using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Services.Identity;
 using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
@@ -108,7 +108,7 @@ if (!string.IsNullOrWhiteSpace(competenciesConnectionString))
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
-builder.Services.AddSessionLimiting(builder.Configuration);
+builder.Services.AddSessionExpiry(builder.Configuration);
 builder.Services.AddControllers();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;

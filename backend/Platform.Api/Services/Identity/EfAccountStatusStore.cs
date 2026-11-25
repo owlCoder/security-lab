@@ -10,7 +10,9 @@ namespace Platform.Api.Services.Identity;
 
 /// <summary>
 /// IDN-03: writes the status to <c>identity.accounts</c>, the table login reads. The status change and the
-/// session revocation use one <see cref="PlatformIdentityDbContext"/>, so they share one transaction.
+/// session revocation use one <see cref="PlatformIdentityDbContext"/>, so they share one transaction. This
+/// depends on the scoped store and <see cref="ISessionManager"/> being resolved in the same DI scope so both
+/// receive the same context instance.
 /// </summary>
 public sealed class EfAccountStatusStore(PlatformIdentityDbContext db, ISessionManager sessionManager) : IAccountStatusStore
 {

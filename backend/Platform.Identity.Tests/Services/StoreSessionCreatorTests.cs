@@ -1,14 +1,14 @@
-using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
-using Platform.Api.Modules.Identity.SessionLimiting;
+using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -19,18 +19,13 @@ public class StoreSessionCreatorTests
 
     private FakeStore _store = null!;
     private StoreSessionCreator _creator = null!;
-    private IOptions<Api.Modules.Identity.SessionLimiting.SessionOptions> _options = null!;
+    private IOptions<SessionOptions> _options = null!;
 
     [SetUp]
     public void SetUp()
     {
         _store = new FakeStore();
-        _options = Options.Create(new Api.Modules.Identity.SessionLimiting.SessionOptions
-        {
-            AbsoluteLifetimeMinutes = 480,
-            ActivityTimeoutMinutes = 45,
-            MfaPendingTimeoutMinutes = 5
-        });
+        _options = SessionOptionsTestDefaults.Create();
         _creator = new StoreSessionCreator(_store, _options, NullLogger<StoreSessionCreator>.Instance);
     }
 
