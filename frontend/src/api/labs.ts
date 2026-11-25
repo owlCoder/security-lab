@@ -42,6 +42,7 @@ export type ApiFailure =
   | { kind: 'notFound'; requestId?: string }
   | { kind: 'conflict'; requestId?: string }
   | { kind: 'notImplemented'; requestId?: string }
+  | { kind: 'filtersUnavailable'; requestId?: string }
   | { kind: 'error' }
 
 export type CreateLabOutcome = { kind: 'created'; id: string } | ApiFailure
@@ -67,6 +68,7 @@ const KNOWN_ERRORS: Record<string, string> = {
   INVALID_LANGUAGE: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
   INVALID_DESCRIPTION: 'Opis nije ispravan.',
   INVALID_INSTRUCTIONS: 'Uputstvo nije ispravno.',
+  INVALID_QUERY: `Proverite naziv i izabrane filtere. Naziv je opcion i može imati najviše ${MAX_TITLE_LENGTH} znakova, bez kontrolnih znakova.`,
   title: `Naslov je obavezan i može imati najviše ${MAX_TITLE_LENGTH} znakova.`,
   lang: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
   language: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
@@ -122,6 +124,7 @@ export async function toFailure(res: Response): Promise<ApiFailure> {
     case 404: return { kind: 'notFound', requestId }
     case 409: return { kind: 'conflict', requestId }
     case 501: return { kind: 'notImplemented', requestId }
+    case 503: return body?.code === 'FILTERS_UNAVAILABLE' ? { kind: 'filtersUnavailable', requestId } : { kind: 'error' }
     default: return { kind: 'error' }
   }
 }
@@ -203,4 +206,90 @@ export async function getLabContent(labId: string, language: string, user: TestU
   const content = parseContent(await readJson(res))
   if (!content) return { kind: 'error' }
   return { kind: 'ok', content, usedFallback: content.language !== language.toLowerCase() }
+}
+
+export const MAX_SEARCH_LENGTH = MAX_TITLE_LENGTH
+
+export interface LabSummary {
+  id: string
+  title: string
+  status: string
+  createdAt: string
+}
+
+export type SearchLabsOutcome =
+  | { kind: 'ok'; items: LabSummary[]; truncated: boolean }
+  | ApiFailure
+
+export interface LabSearchFilters {
+  difficulty?: string
+  type?: string
+  tags?: string[]
+}
+
+export interface LabFilterOptions {
+  difficulties: string[]
+  types: string[]
+  tags: string[]
+  metadataAvailable: boolean
+}
+
+export type LabFilterOptionsOutcome = { kind: 'ok'; options: LabFilterOptions } | ApiFailure
+
+export async function getLabFilterOptions(user: TestUser): Promise<LabFilterOptionsOutcome> {
+  let res: Response
+  try {
+    res = await fetch(`${LABS_BASE_PATH}/search/filters`, {
+      headers: headersFor(user, false),
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+  } catch {
+    return { kind: 'error' }
+  }
+  if (res.status !== 200) return toFailure(res)
+
+  const body = await readJson(res)
+  const isStringList = (value: unknown): value is string[] =>
+    Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim().length > 0)
+  if (!body || !isStringList(body.difficulties) || !isStringList(body.types)
+    || !isStringList(body.tags) || typeof body.metadataAvailable !== 'boolean') return { kind: 'error' }
+
+  return {
+    kind: 'ok',
+    options: { difficulties: body.difficulties, types: body.types, tags: body.tags, metadataAvailable: body.metadataAvailable },
+  }
+}
+
+function parseSummary(value: unknown): LabSummary | null {
+  if (value === null || typeof value !== 'object') return null
+  const { id, title, status, createdAt } = value as Record<string, unknown>
+  if (typeof id !== 'string' || typeof title !== 'string' || typeof status !== 'string' || typeof createdAt !== 'string') {
+    return null
+  }
+  return { id, title, status, createdAt }
+}
+
+export async function searchLabs(query: string, user: TestUser, filters: LabSearchFilters = {}): Promise<SearchLabsOutcome> {
+  let res: Response
+  try {
+    const params = new URLSearchParams({ q: query })
+    if (filters.difficulty) params.set('difficulty', filters.difficulty)
+    if (filters.type) params.set('type', filters.type)
+    for (const tag of filters.tags ?? []) params.append('tag', tag)
+    res = await fetch(`${LABS_BASE_PATH}/search?${params.toString()}`, {
+      headers: headersFor(user, false),
+      credentials: 'same-origin',
+      cache: 'no-store',
+    })
+  } catch {
+    return { kind: 'error' }
+  }
+
+  if (res.status !== 200) return toFailure(res)
+
+  const body = await readJson(res)
+  if (!body || !Array.isArray(body.items)) return { kind: 'error' }
+  const items = body.items.map(parseSummary).filter((item): item is LabSummary => item !== null)
+  return { kind: 'ok', items, truncated: body.truncated === true }
 }

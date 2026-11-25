@@ -22,6 +22,7 @@ public static class LaboratoriesModule
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
         services.AddScoped<LaboratoryService>();
+        services.AddScoped<LaboratorySearchService>();
 
         if (environment.IsDevelopment())
         {

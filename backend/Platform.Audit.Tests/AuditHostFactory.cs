@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Platform.Access.Application.Options;
 using Platform.Access.AspNet;
 using Platform.Audit.Application;
 using Platform.Audit.Contracts;
@@ -13,7 +15,10 @@ using Platform.Audit.Infrastructure.Persistence;
 
 namespace Platform.Audit.Tests;
 
-internal sealed class AuditHostFactory(string runtimeConnectionString) : WebApplicationFactory<Program>
+// accessAuditTimeout replaces AccessDecisionOptions.AuditTimeout (default 1 s) for tests that
+// check ordering or completeness of access.denied records rather than the latency budget.
+internal sealed class AuditHostFactory(string runtimeConnectionString, TimeSpan? accessAuditTimeout = null)
+    : WebApplicationFactory<Program>
 {
     // The route carries the synthetic probe course, so the probe can declare RequireAccess (ACC-05).
     internal const string ProbeRoute = "/__test/audit-events/courses/{courseId}";
@@ -32,6 +37,12 @@ internal sealed class AuditHostFactory(string runtimeConnectionString) : WebAppl
             services.AddScoped<AuditDraftValidator>();
             services.AddScoped<IAuditContextProvider>(_ => new SyntheticAuditContextProvider());
             services.AddScoped<IAuditWriter, AuditWriter>();
+
+            if (accessAuditTimeout is { } auditTimeout)
+            {
+                services.RemoveAll<AccessDecisionOptions>();
+                services.AddSingleton(new AccessDecisionOptions { AuditTimeout = auditTimeout });
+            }
         });
     }
 

@@ -31,7 +31,7 @@ using Testcontainers.PostgreSql;
 namespace Platform.Laboratories.IntegrationTests;
 
 [TestFixture, Category("Integration"), NonParallelizable]
-public sealed class RevisionHttpWorkflowTests
+public sealed partial class RevisionHttpWorkflowTests
 {
     private readonly PostgreSqlContainer database = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("rev05_http").WithUsername("rev05_tests").WithPassword(Guid.NewGuid().ToString("N")).Build();

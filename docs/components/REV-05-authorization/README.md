@@ -65,9 +65,13 @@ verziju, hash i validan snapshot. Dozvoljeno samoodobravanje ne daje nedostajuca
 
 ## Audit i atomarnost
 
-AddAuditPersistence registruje stvarni PostgreSQL writer. RevisionAuditForwarder
-cuva postojeci Access audit tok i prosljedjuje odbijene revizijske akcije kroz
-ITrustedAuditWriter. Kratkotrajni scope izbjegava hvatanje scoped writera u singleton
+API host registruje stvarni PostgreSQL Audit writer pozivom
+`AddAudit(builder.Configuration)` u `Program.cs`. Obicni `ITrustedAuditWriter`
+koristi `ConnectionStrings:Audit`, dok `ITransactionalAuditWriter` za REV promjene
+koristi PostgreSQL transakciju koju mu preda pozivalac. Ne treba vracati staru
+API registraciju `AddAuditPersistence` sa Laboratories konekcijom.
+RevisionAuditForwarder cuva postojeci Access audit tok i prosljedjuje odbijene
+revizijske akcije kroz ITrustedAuditWriter. Kratkotrajni scope izbjegava hvatanje scoped writera u singleton
 Access servis. Akter dolazi iz validirane sesije; korelacija iz postojeceg serverskog
 middleware-a. Arbitraran HTTP actor ili correlation header se ne koristi.
 
@@ -98,9 +102,21 @@ za ovu transakcijsku integraciju; nema alternativnog audit skladista niti outbox
 
 ## Priprema baze i prava
 
-Runtime koristi `ConnectionStrings__Laboratories`. Postojece Identity i Authoring
-konekcije ostaju potrebne za njihove funkcije. Migracije se izvrsavaju eksplicitno
+REV poslovno skladiste i dozvole koriste `ConnectionStrings__Laboratories`, a
+obicni Audit writer koristi zasebno podesavanje `ConnectionStrings__Audit`.
+Za jedinstvenu REV audit evidenciju i ovu transakcijsku integraciju obje konekcije
+treba da ciljaju istu fizicku PostgreSQL bazu; migracioni i runtime nalozi i dalje
+moraju imati odvojena prava. `ConnectionStrings__Audit` se ne zamjenjuje Laboratories
+registracijom u kodu. Postojece Identity i Authoring konekcije ostaju potrebne za
+njihove funkcije. Migracije se izvrsavaju eksplicitno
 administratorskim/migracionim nalogom; web host ne migrira produkciju automatski.
+
+Za lokalnu pripremu Audit baze i ogranicene runtime uloge pratiti
+[Local Audit database required by Identity login](../../DEVELOPMENT.md#local-audit-database-required-by-identity-login).
+Postojeci lokalni `.env` treba dopuniti vrijednostima `AUDIT_RUNTIME_PASSWORD` i
+`ConnectionStrings__Audit` iz `.env.example`, izvrsiti migraciju i bootstrap runtime
+uloge, pa restartovati API. Bez uspjesnog trajnog audita ispravna prijava moze vratiti
+`503 login_unavailable`; sama Laboratories konekcija nije dovoljna.
 
 ```powershell
 dotnet tool restore

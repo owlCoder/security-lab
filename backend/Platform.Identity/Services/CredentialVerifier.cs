@@ -25,9 +25,10 @@ public sealed class CredentialVerifier(
         // IDN-05: the attempt is charged before the slow hash. A check made first would let every parallel
         // request pass it, and an abandoned request would be a free guess. A failure stays charged; a success clears it.
         var now = clock.GetUtcNow();
-        await store.ReserveAttemptAsync(normalizedEmail, options.MaxFailedAccessAttempts, now, now + lockoutSpan, ct);
+        var charged = await store.ReserveAttemptAsync(normalizedEmail, options.MaxFailedAccessAttempts, now, now + lockoutSpan, ct);
         var record = await store.FindByEmailAsync(normalizedEmail, ct);
-        var wasLocked = record?.LockoutEnd > now;
+        // An admin unlock can clear lockout_end between these reads; an attempt that was not charged never counts.
+        var wasLocked = record is not null && (!charged || record.LockoutEnd > now);
 
         // Verify runs even when the account is unknown or locked, so timing does not reveal which e-mails exist.
         var passwordMatches = hasher.Verify(password, record?.PasswordHash);

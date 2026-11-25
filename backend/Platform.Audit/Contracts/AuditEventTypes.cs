@@ -16,6 +16,7 @@ public static class AuditEventTypes
     public const string AuthMfaBackupCodeRejected = "auth.mfa.backup_code.rejected";
     public const string AuthMfaBackupCodesRevoked = "auth.mfa.backup_codes.revoked";
     public const string AccountStatusChanged = "account.status.changed";
+    public const string AccountUnlocked = "account.unlocked";
     public const string CourseMemberRoleChanged = "course.member.role.changed";
     public const string CourseDelegationGranted = "course.delegation.granted";
     public const string CourseDelegationRevoked = "course.delegation.revoked";

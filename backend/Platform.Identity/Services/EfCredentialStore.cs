@@ -17,13 +17,21 @@ internal sealed class EfCredentialStore(PlatformIdentityDbContext db) : ICredent
             .FirstOrDefaultAsync(ct);
 
     // Each change below is one UPDATE, so parallel requests see each other's writes.
-    public Task ReserveAttemptAsync(
-        string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default) =>
-        NotLocked(now)
-            .Where(a => a.Email == normalizedEmail)
-            .ExecuteUpdateAsync(set => set
-                .SetProperty(a => a.LockoutEnd, a => a.FailedLoginCount >= maxAttempts ? lockoutEnd : a.LockoutEnd)
-                .SetProperty(a => a.FailedLoginCount, a => a.FailedLoginCount >= maxAttempts ? 0 : a.FailedLoginCount + 1), ct);
+    // ExecuteUpdate reports only the number of rows, which is 1 for a charge and for a lockout alike. RETURNING gives
+    // the counter this UPDATE wrote: a charge leaves at least 1, a lockout restarts it at 0, no row means locked or unknown.
+    public async Task<bool> ReserveAttemptAsync(
+        string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default)
+    {
+        var counters = await db.Database.SqlQuery<int>($"""
+            UPDATE identity.accounts
+            SET lockout_end = CASE WHEN failed_login_count >= {maxAttempts} THEN {lockoutEnd} ELSE lockout_end END,
+                failed_login_count = CASE WHEN failed_login_count >= {maxAttempts} THEN 0 ELSE failed_login_count + 1 END
+            WHERE email = {normalizedEmail} AND (lockout_end IS NULL OR lockout_end <= {now})
+            RETURNING failed_login_count AS "Value"
+            """).ToListAsync(ct);
+
+        return counters is [> 0];
+    }
 
     public async Task<DateTimeOffset?> LockIfLimitReachedAsync(
         string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default)

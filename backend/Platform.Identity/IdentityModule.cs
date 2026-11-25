@@ -43,6 +43,7 @@ public static class IdentityModule
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
         services.AddScoped<IMfaCredentialsStore, EfMfaCredentialsStore>();
+        services.AddScoped<IExternalIdentityLinker, ExternalIdentityLinker>();
 
         return services;
     }

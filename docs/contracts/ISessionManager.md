@@ -41,7 +41,7 @@ The contract is for trusted server-side callers and does not authorize them. Cal
 ## Implementation and registration
 
 - `SessionManager` is the database-backed implementation of validation, revocation, and listing.
-- `Program.cs` registers only `SessionManager` as `ISessionManager`. The older `StoreSessionManager` stub (no-op revocation and listing) is no longer registered.
+- `Program.cs` registers only `SessionManager` as `ISessionManager`. The older `StoreSessionManager` stub has been deleted.
 - `ValidateAsync` also refuses a session whose account is not `Active` (IDN-03, SEC-03).
 - `RevokeAllForUser` is awaited by `EfAccountStatusStore` inside the status-change transaction (IDN-03); it must not be called without `await`.
 - Session creation is a separate `ISessionCreator` contract implemented by `StoreSessionCreator`.
@@ -58,7 +58,7 @@ The contract is for trusted server-side callers and does not authorize them. Cal
 
 ## Verification
 
-Identity tests cover validation/revocation/listing, middleware handling of missing and invalid sessions, and the behavior of `SessionInfo`. Relevant tests include `SessionManagerTests`, `StoreSessionManagerTests`, and `SessionCheckMiddlewareTests` in `backend/Platform.Identity.Tests` (`Services/` and `Middleware/`).
+Identity tests cover validation/revocation/listing, middleware handling of missing and invalid sessions, and the behavior of `SessionInfo`. Relevant tests include `SessionManagerTests`, `SessionManagerValidationTests`, and `SessionCheckMiddlewareTests` in `backend/Platform.Identity.Tests` (`Services/` and `Middleware/`).
 
 ## Change history
 

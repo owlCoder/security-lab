@@ -13,6 +13,7 @@ public sealed class IdentityRateLimitOptions
 
     public WindowLimit Login { get; set; } = new() { PermitLimit = 30, WindowSeconds = 60 };
     public WindowLimit PasswordReset { get; set; } = new() { PermitLimit = 10, WindowSeconds = 900 };
+    public WindowLimit AccountStatusChange { get; set; } = new() { PermitLimit = 20, WindowSeconds = 60 };
 
     /// <summary>Tačne IP adrese reverse proxy-ja čiji se X-Forwarded-For prihvata.</summary>
     public string[] KnownProxies { get; set; } = [];
@@ -38,6 +39,7 @@ public sealed class IdentityRateLimitOptionsValidator : IValidateOptions<Identit
         var errors = new List<string>();
         CheckLimit(errors, nameof(options.Login), options.Login);
         CheckLimit(errors, nameof(options.PasswordReset), options.PasswordReset);
+        CheckLimit(errors, nameof(options.AccountStatusChange), options.AccountStatusChange);
 
         foreach (var proxy in options.KnownProxies)
             if (!IPAddress.TryParse(proxy, out _))

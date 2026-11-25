@@ -98,7 +98,7 @@ public sealed class RevisionTwoStepApprovalHttpTests
         await identity.SaveChangesAsync();
         authorClient = Client(authorToken); reviewerClient = Client(reviewerToken);
 
-        var laboratory = new Laboratory(Guid.NewGuid(), "Two-step revision", author);
+        var laboratory = new Laboratory(course, "Two-step revision", author);
         await scope.ServiceProvider.GetRequiredService<ILaboratoryRepository>().AddAsync(laboratory);
         lab = laboratory.Id;
         var revisions = scope.ServiceProvider.GetRequiredService<LaboratoriesDbContext>();

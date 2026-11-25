@@ -1,124 +1,90 @@
 # PRG-04: Mapiranje laboratorija na kompetencije
 
-**Status: Proposed architecture — implementation not yet available.**
+**Status:** Implementirani su model, PostgreSQL skladište, autorizovan API i React ekran za izbor i prikaz kompetencija.
 
 **Zahtev iz specifikacije:** PRG-04, nivo P, odeljak 4.10. Minimalni kriterijum prihvatanja: jedna vežba može proveravati više kompetencija.
 
-Ovaj dokument opisuje predloženu arhitekturu za povezivanje laboratorija sa kompetencijama. Ne predstavlja opis postojeće implementacije. Detaljni predlog HTTP operacija nalazi se u [PRG-04-mapping.md](PRG-04-mapping.md).
+Jedna laboratorija ima 0..N kompetencija, a ista kompetencija može biti povezana sa više laboratorija. Detaljan HTTP ugovor nalazi se u [PRG-04-mapping.md](PRG-04-mapping.md), a konfiguracija baze i migracija u [PRG-04-storage.md](PRG-04-storage.md).
 
 ## Odgovornosti i granice
 
-- `Platform.Competencies` treba da poseduje katalog kompetencija i veze laboratorija sa kompetencijama.
-- Jedna laboratorija može imati 0..N kompetencija, a ista kompetencija može biti povezana sa više laboratorija.
-- `Competency` treba da sadrži stabilan `Id`, naziv i opcioni opis.
-- `LaboratoryCompetency` treba da sadrži `LaboratoryId` i `CompetencyId`.
-- `LaboratoryId` treba da referencira postojeći trajni identitet iz LAB modula. PRG-04 ne treba da kreira niti kopira laboratorije.
-- Mapiranje opisuje koje kompetencije laboratorija proverava. Ne predstavlja dokaz da je student usvojio kompetenciju.
-- LAB-02 oznake, težina i tip treba da ostanu odvojeni metapodaci.
+- `Platform.Competencies` poseduje katalog i veze laboratorija sa kompetencijama.
+- `Competency` sadrži stabilan `Id`, naziv i opcioni opis. Početni katalog čine **Kontrola pristupa**, **Analiza bezbednosnih logova** i **Bezbedna konfiguracija**.
+- `LaboratoryCompetency` sadrži `LaboratoryId` i `CompetencyId`. Referenca je na trajni identitet laboratorije, bez kopiranja LAB entiteta i bez vezivanja za reviziju ili pokušaj.
+- Mapiranje opisuje koje kompetencije laboratorija proverava; ne beleži da ih je student usvojio. LAB oznake, težina i tip ostaju odvojeni metapodaci.
+- React ekran omogućava izbor više kompetencija ovlašćenom nastavniku i pregled povezanih kompetencija studentu. Uređivanje kataloga, provera usvojenosti, ocenjivanje i analitika napretka ostaju izvan obima.
 
-Predloženi početni katalog:
+## Implementirani ugovori
 
-- Kontrola pristupa
-- Analiza bezbednosnih logova
-- Bezbedna konfiguracija
+| Komponenta | Odgovornost |
+| --- | --- |
+| `CompetenciesPage` | Zaštićena ruta `/laboratories/:laboratoryId/competencies` |
+| `LaboratoryCompetencies` | Prikaz veza i izbor iz kataloga prema serverskom `canManage` |
+| `frontend/src/api/competencies.ts` | HTTP adapter preko `AuthContext.request`, validacija odgovora i prekid zastarelih zahteva |
+| `CompetencyEndpoints` | HTTP ugovor, identitet i bezbedni odgovori |
+| `Prg04SessionIdentity` | Aktivna serverska sesija i aktivan nalog |
+| `CompetencyLinkService` | Provera laboratorije i prava, naslov laboratorije i serverska mogućnost izmene |
+| `ILaboratoryRepository` / `ICourseMembership` | Postojeća laboratorija, njen sačuvani kurs i članstvo |
+| `LabOpenPolicy` | Pravila LAB konteksta za čitanje |
+| `ILabPublicContentReader` | Potvrda objavljenog sadržaja za studentsko čitanje |
+| `CompetencyLinkManagePolicy` / `IAccessDecision` | Posebna ACC radnja za izmene veza |
+| `ICompetencyCatalog` | Čitanje postojećeg kataloga |
+| `ILaboratoryCompetencyStore` | Čitanje, dodavanje i uklanjanje veza |
+| `PostgresLaboratoryCompetencyStore` | EF Core / Npgsql adapter za oba PRG ugovora |
 
-Kompetencije treba da imaju stabilne identifikatore koji se ne menjaju prilikom preimenovanja.
-
-## Predloženi ugovori
-
-| Ugovor / komponenta | Predložena odgovornost | Status |
-| --- | --- | --- |
-| `IIdentityContext` | Dostavljanje serverski razrešenog identiteta | Potrebno uskladiti sa postojećim Identity modulom |
-| `CompetencyEndpoints` | Validacija zahteva i HTTP odgovori | Planirano |
-| `ICompetencyCatalog` | Čitanje kataloga kompetencija | Planirano |
-| `ILaboratoryCompetencyStore` | Čitanje, dodavanje i uklanjanje veza | Planirano |
-| `PostgresLaboratoryCompetencyStore` | PostgreSQL implementacija skladišta | Planirano |
-| LAB / Access integracija | Provera postojanja laboratorije i prava pristupa | Planirano |
-| React ekran | Prikaz i upravljanje vezama | Planirano |
-
-Konkretne ugovore sa LAB i Access modulima potrebno je dogovoriti sa vlasnicima tih komponenti pre implementacije.
-
-## Predloženi dijagram arhitekture
-
-Dijagram prikazuje ciljnu arhitekturu. Nijedna od prikazanih PRG-04 komponenti ne smatra se implementiranom ovim dokumentom.
+## Arhitektura
 
 ```mermaid
 flowchart TB
-  CLIENT["HTTP klijent"]
-  UI["React ekran za kompetencije<br/>planirano"]
-  UI -.-> CLIENT
-
-  subgraph API["Platform.Api — predložena serverska granica"]
-    IDENTITY["IIdentityContext<br/>identitet"]
-    EP["CompetencyEndpoints<br/>planirano"]
-    RESOURCE["Provera laboratorije i prava<br/>planirano"]
-    EP -.-> IDENTITY
-    EP -.-> RESOURCE
-  end
-
-  CLIENT -.->|"HTTP zahtev"| EP
-
-  subgraph PRG["Platform.Competencies — predloženi modul"]
-    CATALOG["ICompetencyCatalog"]
-    LINKS["ILaboratoryCompetencyStore"]
-    STORE["PostgresLaboratoryCompetencyStore"]
-    CONTEXT["CompetenciesDbContext<br/>EF Core / Npgsql"]
-    CATALOG -.-> STORE
-    LINKS -.-> STORE
-    STORE -.-> CONTEXT
-  end
-
-  EP -.-> CATALOG
-  EP -.-> LINKS
-  RESOURCE -.-> LABACCESS["LAB / Access ugovori<br/>planirano"]
-  CONTEXT -.-> DB[("PostgreSQL<br/>prg04.competencies<br/>prg04.laboratory_competencies")]
+  CLIENT["React LaboratoryCompetencies<br/>AuthContext.request"] --> EP["CompetencyEndpoints"]
+  EP --> ID["Prg04SessionIdentity<br/>sesija + status naloga"]
+  EP --> SERVICE["CompetencyLinkService"]
+  SERVICE --> LAB["ILaboratoryRepository<br/>postojanje + sačuvani kurs"]
+  SERVICE --> READ["Čitanje: LabOpenPolicy<br/>ICourseMembership"]
+  READ --> PUBLIC["Student: ILabPublicContentReader<br/>objavljena laboratorija istog kursa"]
+  SERVICE --> EDIT["canManage i izmena: IAccessDecision<br/>CompetencyLinkManagePolicy"]
+  EDIT --> LAB
+  EDIT --> MEMBER["ICourseMembership<br/>nastavnik konkretnog kursa"]
+  SERVICE --> CATALOG["ICompetencyCatalog"]
+  SERVICE --> LINKS["ILaboratoryCompetencyStore"]
+  CATALOG --> STORE["PostgresLaboratoryCompetencyStore"]
+  LINKS --> STORE
+  STORE --> DB[("PostgreSQL / prg04<br/>competencies<br/>laboratory_competencies")]
 ```
 
-## Predloženi tok podataka
+## Tok podataka i prava
 
-Predložena implementacija treba da:
+1. `SessionCheckMiddleware` proverava sesiju pre handlera, osim postojećeg razvojnog izuzetka za `/api/laboratories`. Kada middleware odbije odsutnu ili nevažeću sesiju, vraća `401` sa `{ "code": "session_invalid" }`. Handler zatim razrešava aktivnu sesiju i ponovo proverava da je nalog aktivan; njegovo odbijanje koristi `401` sa `{ "error": "unauthenticated" }`. `X-Test-User`, `X-Stub-User` i vrednosti iz tela zahteva ne mogu da zamene sesiju.
+2. Katalog se čita za prijavljenog korisnika. Za operacije nad vezama servis prvo učitava laboratoriju i njen sačuvani `CourseId`; ne prihvata kurs iz zahteva.
+3. Za čitanje se primenjuju postojeća LAB pravila konteksta. Student dodatno može čitati veze samo ako laboratorija nije arhivirana i `ILabPublicContentReader` vrati objavljen sadržaj sa istim ID-em laboratorije i kursa. Nastavnik koji je autor zadržava pristup i nacrtima. Za izmenu je potrebna posebna ACC radnja: pozivalac mora biti autor laboratorije i nastavnik njenog kursa. Pravo čitanja samo po sebi ne daje pravo izmene.
+4. Tek nakon provere laboratorije i prava pristupa čita se ili menja PRG skladište. Nepostojeća i nedozvoljena laboratorija daju isti `404` odgovor, bez čitanja njenih kompetencija.
+5. Čitanje veza vraća `laboratoryId`, `laboratoryTitle`, `competencies` i `canManage`. Poslednje polje računa ista ACC politika kao pri izmeni; pri nedostajućoj politici čitanje ostaje moguće uz `false`. Svaka izmena ponavlja autorizaciju, bez oslanjanja na ranije poslatu mogućnost. Odgovori PRG handlera imaju `Cache-Control: no-store`.
 
-1. Razreši identitet pozivaoca na serverskoj strani.
-2. Proveri da li laboratorija postoji i da li pozivalac ima odgovarajuće pravo pristupa.
-3. Validira identifikatore kompetencije i laboratorije.
-4. Pročita katalog ili izvrši operaciju nad vezom.
-5. Vrati odgovarajući HTTP odgovor.
+ACC politika je registrovana kao singleton, a repozitorijum i članstvo razrešava u zasebnom opsegu. Ne zadržava scoped `DbContext`. Nedostajuća politika odbija izmenu.
 
-Klijent ne treba da bude izvor informacija o ulozi ili dozvolama pozivaoca.
+## Korisnički ekran
 
-## Predloženi integritet podataka
+Link „Prikaži kompetencije” u rezultatu pretrage i link iz stvarnog studentskog sadržaja otvaraju `/laboratories/:laboratoryId/competencies`. Ekran prati postojeći beli/plavi izgled aplikacije i koristi stvarnu sesiju kroz `AuthContext.request`.
 
-- Složeni ključ `(LaboratoryId, CompetencyId)` treba da spreči dupliranje veza.
-- Strani ključ treba da povezuje `CompetencyId` sa katalogom kompetencija.
-- Ne treba uvoditi strani ključ ka tabelama LAB modula bez prethodnog dogovora o vlasništvu i integraciji.
-- Uklanjanje veze ne treba da briše kompetenciju ili laboratoriju.
-- Čitanje treba da vraća samo kompetencije povezane sa prosleđenim `LaboratoryId`.
-- Dodavanje iste veze više puta treba da bude idempotentno.
+Ovlašćeni nastavnik vidi pretragu kataloga, checkbox izbor i povezane kompetencije. Svaka promena čuva se pojedinačno preko `PUT` ili `DELETE`, a zatim se veze i `canManage` ponovo učitavaju sa servera. Tokom čuvanja izbor je onemogućen. Student dobija samo prikaz povezanih kompetencija sa opisima; bez učitavanja kataloga i bez kontrola izmene.
 
-## Bezbednosni zahtevi
+Postoje stanja učitavanja, greške sa ponovnim pokušajem, praznog kataloga/veza i pretrage bez rezultata. Greška kataloga zadržava postojeći prikaz veza. Posle nepotvrđene izmene traži se ponovno učitavanje sačuvanog stanja. `AbortController` i odvojeno stanje za korisnika/laboratoriju sprečavaju da zastareli zahtevi zamene novi prikaz.
 
-Autentifikacija i autorizacija moraju biti odvojene provere.
+## Integritet i trajnost
 
-Predložena implementacija mora da:
+`CompetenciesDbContext` poseduje samo šemu `prg04`, dve poslovne tabele i svoju istoriju migracija. Složeni primarni ključ `(LaboratoryId, CompetencyId)` sprečava duplikate, a strani ključ ka katalogu štiti postojeće kompetencije. Nema direktnog stranog ključa ka LAB tabelama; postojanje i prava proverava aplikaciona granica.
 
-- Odbije neautentifikovane zahteve.
-- Proveri postojanje laboratorije.
-- Proveri pravo pozivaoca nad konkretnom laboratorijom.
-- Ne dozvoli čitanje ili izmenu veza pre uspešne autorizacije.
-- Ne prihvata klijentske tvrdnje o identitetu ili dozvolama kao dokaz pristupa.
-- Razmotri audit evidenciju i odgovarajuću politiku keširanja.
+Dodavanje koristi parametrizovani `INSERT ... ON CONFLICT DO NOTHING`, pa su ponovljeni i konkurentni upisi idempotentni. Brisanje uklanja samo navedenu vezu. Čitanje filtrira po laboratoriji i deterministički sortira kompetencije.
 
-## Predložena verifikacija
+## Verifikacija
 
-Nakon implementacije potrebno je proveriti:
+| Grupa testova | Obuhvaćeno pravilo |
+| --- | --- |
+| `CompetencyTests` | Stabilni ID-evi, validacija i model veza |
+| `CompetencyModelTests` | Vlasništvo šeme, snapshot, SQL migracije i DI registracija |
+| `CompetencyEndpointsTests` | Stvarni HTTP host i ACC engine, identitet, prava, serverski `canManage`, promena članstva, IDOR, idempotentnost i bezbedne greške; eksterni store adapteri su test zamene |
+| `CompetencyPersistenceTests` | Stvarni PostgreSQL: više kompetencija, trajnost, konkurentni upisi, integritet, migracija i izolacija šeme |
+| `LaboratoryCompetencies.test.tsx` | React izbor, prikaz, studentski režim, čuvanje i oporavak od greške |
+| `competencies.test.ts` | Frontend API ugovor, sesijski poziv, bezbedne greške i prekid zahteva |
 
-- Kreiranje i čitanje kataloga kompetencija.
-- Povezivanje više kompetencija sa jednom laboratorijom.
-- Korišćenje iste kompetencije u više laboratorija.
-- Sprečavanje duplih veza.
-- Uklanjanje jedne veze bez uticaja na ostale.
-- Odbijanje neautentifikovanih zahteva.
-- Odbijanje zahteva bez prava pristupa laboratoriji.
-- Trajnost podataka nakon ponovnog pokretanja aplikacije.
-
-Ovaj dokument definiše predloženu arhitekturu i kriterijume za buduću implementaciju. Ne potvrđuje postojanje API-ja, PostgreSQL adaptera, migracija ili testova.
+PostgreSQL testovi zahtevaju `PRG04_TEST_ADMIN_CONNECTION_STRING`, prave zasebnu privremenu bazu i uklanjaju samo tu bazu. Bez te konfiguracije preskaču se; preskakanje nije dokaz trajnosti. Komande za izvršavanje i istorijski rezultati nalaze se u [PRG-04-storage.md](PRG-04-storage.md).

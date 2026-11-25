@@ -23,18 +23,25 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const bodyOf = (c: Call) => JSON.parse(String(c.init?.body))
 const headersOf = (c: Call) => c.init?.headers as Record<string, string>
 
-beforeEach(() => session.set('tok'))
+beforeEach(() => session.set(null))
 afterEach(cleanup)
 
 describe('runRevisionAction (REV-05 ugovor)', () => {
-  it('salje rowVersion, contentHash, trimovan komentar, Idempotency-Key i token', async () => {
+  it('salje rowVersion, contentHash, trimovan komentar i Idempotency-Key (sesija je kolacic)', async () => {
     const calls = server(() => json(200, base))
     await runRevisionAction(base, 'return', 'key-1', '  dopuni hint  ')
     expect(calls[0].url).toBe('/api/revisions/r1/return')
     expect(calls[0].init?.method).toBe('POST')
     expect(bodyOf(calls[0])).toEqual({ rowVersion: 'v1', contentHash: 'sha256:abcdef1234567890', comment: 'dopuni hint' })
     expect(headersOf(calls[0])['Idempotency-Key']).toBe('key-1')
-    expect(headersOf(calls[0]).Authorization).toBe('Bearer tok')
+    expect(headersOf(calls[0]).Authorization).toBeUndefined()
+  })
+  it('uz approve i submit ne salje komentar (API vraca 400 invalid_input)', async () => {
+    const calls = server(() => json(200, base))
+    await runRevisionAction(base, 'approve', 'k1', 'nesto')
+    await runRevisionAction(base, 'submit', 'k2', 'nesto')
+    expect(bodyOf(calls[0]).comment).toBeUndefined()
+    expect(bodyOf(calls[1]).comment).toBeUndefined()
   })
   it('enkoduje ID u putanji (bez path traversal-a)', async () => {
     const calls = server(() => json(200, base))
@@ -73,16 +80,32 @@ describe('RevisionDetailPage', () => {
     expect(calls.filter(c => c.init?.method === 'POST')).toHaveLength(0)
   })
 
-  it('otkazivanje brise komentar, pa komentar za vracanje ne zavrsi uz odobrenje', async () => {
+  it('odobrenje nema polje za komentar i ne salje komentar', async () => {
     const calls = await openDetail(base, () => json(200, base))
     fireEvent.click(screen.getByText('Vrati sa komentarom'))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'za autora' } })
     fireEvent.click(screen.getByText('Otkaži'))
     fireEvent.click(screen.getByText('Odobri'))
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByRole('textbox')).toBeNull()
     await act(async () => { fireEvent.click(screen.getByText('Potvrdi odobrenje i objavi')) })
     const post = calls.find(c => c.init?.method === 'POST')!
     expect(bodyOf(post).comment).toBeUndefined()
+  })
+
+  it('otkazivanje brise komentar za vracanje', async () => {
+    await openDetail(base, () => json(200, base))
+    fireEvent.click(screen.getByText('Vrati sa komentarom'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'za autora' } })
+    fireEvent.click(screen.getByText('Otkaži'))
+    fireEvent.click(screen.getByText('Vrati sa komentarom'))
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('greska bez poruke (samo code, kao u pravom API-ju) dobija razumljiv tekst', async () => {
+    await openDetail(base, () => json(409, { code: 'policy_missing' }))
+    fireEvent.click(screen.getByText('Odobri'))
+    await act(async () => { fireEvent.click(screen.getByText('Potvrdi odobrenje i objavi')) })
+    expect(screen.getByRole('alert').textContent).toContain('politiku objave')
   })
 
   it('uspesno odobrenje prikazuje broj revizije i istoriju', async () => {

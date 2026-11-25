@@ -36,13 +36,15 @@ public sealed class LaboratoriesAccessTests
         var expected = new Dictionary<string, string>
         {
             ["GET /"] = LabActions.List,
+            ["GET /search"] = LabActions.Search,
+            ["GET /search/filters"] = LabActions.Search,
             ["POST /"] = LabActions.Create,
             ["GET /{id:guid}"] = LabActions.Read,
             ["PATCH /{id:guid}/title"] = LabActions.Rename,
         };
 
-        // Cetiri rute na kanonskoj putanji i cetiri na aliasu.
-        Assert.That(endpoints, Has.Count.EqualTo(8));
+        // Sest ruta na kanonskoj putanji i sest na aliasu (ukljucujuci LAB-05).
+        Assert.That(endpoints, Has.Count.EqualTo(12));
         Assert.Multiple(() =>
         {
             foreach (RouteEndpoint endpoint in endpoints)
@@ -248,6 +250,8 @@ public sealed class LaboratoriesAccessTests
     {
         Guid labId = Guid.NewGuid();
         yield return Request(HttpMethod.Get, $"{basePath}/", testUser);
+        yield return Request(HttpMethod.Get, $"{basePath}/search?q=lab", testUser);
+        yield return Request(HttpMethod.Get, $"{basePath}/search/filters", testUser);
         yield return JsonRequest(HttpMethod.Post, $"{basePath}/", testUser, new { title = "Lab", courseId = Guid.NewGuid() });
         yield return Request(HttpMethod.Get, $"{basePath}/{labId}", testUser);
         yield return JsonRequest(HttpMethod.Patch, $"{basePath}/{labId}/title", testUser, new { title = "Lab" });

@@ -3,6 +3,8 @@ using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Access.Tests.Support;
 using NUnit.Framework;
+using Platform.Access.Contracts;
+using Platform.Access.Infrastructure.Policies;
 
 namespace Platform.Access.Tests;
 
@@ -11,6 +13,43 @@ namespace Platform.Access.Tests;
 public class DefaultDenyEngineTests
 {
     private static readonly string LabRead = AccessActions.LabRead.Id;
+
+    private sealed class CancellationAwareAuditWriter : IAccessAuditWriter
+    {
+        public TaskCompletionSource WriteStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask WriteAsync(
+            AccessRequest request,
+            AccessDecision decision,
+            CancellationToken cancellationToken = default)
+        {
+            WriteStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved.TrySetResult();
+                throw;
+            }
+        }
+    }
+
+    private sealed class SingleActionCatalog(ActionDefinition definition) : IActionCatalog
+    {
+        public bool Contains(string action) =>
+            string.Equals(action, definition.Id, StringComparison.Ordinal);
+
+        public bool TryGet(string action, out ActionDefinition? found)
+        {
+            found = Contains(action) ? definition : null;
+            return found is not null;
+        }
+
+        public IReadOnlyCollection<ActionDefinition> Definitions => [definition];
+    }
 
     public static IEnumerable<string> InvalidActions() =>
     [
@@ -67,6 +106,50 @@ public class DefaultDenyEngineTests
 
         Assert.That(decision.Outcome, Is.EqualTo(AccessOutcome.Deny));
         Assert.That(string.IsNullOrWhiteSpace(decision.CorrelationId), Is.False);
+    }
+
+    [Test]
+    public async Task ACC05_CourseActionWithoutResource_DeniedAsPolicyError()
+    {
+        var decision = await DecideWithDefinition(
+            new ActionDefinition("test.course.read", ActionScope.Course, "laboratory", false),
+            resource: null);
+
+        Assert.That(decision.DenialReason, Is.EqualTo(AccessDenialReason.PolicyError));
+    }
+
+    [Test]
+    public async Task ACC05_NonCourseActionWithResource_DeniedAsPolicyError()
+    {
+        var decision = await DecideWithDefinition(
+            new ActionDefinition("test.account.read", ActionScope.Authenticated, null, false),
+            new ResourceRef("laboratory", "lab-1"));
+
+        Assert.That(decision.DenialReason, Is.EqualTo(AccessDenialReason.PolicyError));
+    }
+
+    [Test]
+    public async Task ACC05_UndefinedActionScope_DeniedAsPolicyError()
+    {
+        var decision = await DecideWithDefinition(
+            new ActionDefinition("test.unknown.scope", (ActionScope)99, null, false),
+            resource: null);
+
+        Assert.That(decision.DenialReason, Is.EqualTo(AccessDenialReason.PolicyError));
+    }
+
+    [Test]
+    public async Task ACC05_CorrelationId_IsSanitizedAndBoundedBeforeReturningDecision()
+    {
+        var fx = new EngineFixture();
+        var correlationId = "bad\r\n" + new string('x', 70);
+
+        var decision = await fx.Engine().DecideAsync(
+            AccessRequestBuilder.Default().WithAction("unknown.action")
+                .WithCorrelationId(correlationId).Build());
+
+        Assert.That(decision.CorrelationId, Is.EqualTo("bad__" + new string('x', 59)));
+        Assert.That(decision.CorrelationId, Has.Length.EqualTo(64));
     }
 
 
@@ -208,7 +291,8 @@ public class DefaultDenyEngineTests
 
         Assert.That(decision.Outcome, Is.EqualTo(AccessOutcome.Deny));
         Assert.That(decision.DenialReason, Is.EqualTo(AccessDenialReason.PolicyDenied));
-        Assert.That(decision.PolicyId, Is.Null);
+        Assert.That(decision.PolicyId, Is.EqualTo("fake-policy"));
+        Assert.That(decision.PolicyVersion, Is.EqualTo("v1"));
     }
 
     [Test]
@@ -404,6 +488,24 @@ public class DefaultDenyEngineTests
     }
 
     [Test]
+    public async Task ACC05_AuditTimeoutCancelsWriterOperationAndPreservesDenial()
+    {
+        var fx = new EngineFixture();
+        var audit = new CancellationAwareAuditWriter();
+
+        var decision = await fx.Engine(
+                auditTimeout: TimeSpan.FromMilliseconds(100),
+                audit: audit)
+            .DecideAsync(AccessRequestBuilder.Default().Build());
+
+        await audit.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.That(audit.WriteStarted.Task.IsCompleted, Is.True);
+        Assert.That(decision.Outcome, Is.EqualTo(AccessOutcome.Deny));
+        Assert.That(decision.DenialReason, Is.EqualTo(AccessDenialReason.NoPolicy));
+    }
+
+    [Test]
     public async Task ACC05_EveryDecisionIsPassedToAudit_AlsoWhenCallerCancelled()
     {
         var fx = new EngineFixture().WithPolicy(LabRead, FakePolicy.Permit());
@@ -447,5 +549,22 @@ public class DefaultDenyEngineTests
             found = policy;
             return true;
         }
+    }
+
+    private static async Task<AccessDecision> DecideWithDefinition(
+        ActionDefinition definition,
+        ResourceRef? resource)
+    {
+        var catalog = new SingleActionCatalog(definition);
+        var registry = new InMemoryAccessPolicyRegistry();
+        registry.Register(definition.Id, FakePolicy.Permit());
+        var engine = EngineFixture.Build(catalog, registry, new RecordingAuditWriter());
+        var request = new AccessRequest(
+            new SubjectRef("subject-1", AccountState.Active),
+            definition.Id,
+            resource,
+            "scope-test");
+
+        return await engine.DecideAsync(request);
     }
 }
