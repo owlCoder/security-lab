@@ -104,6 +104,10 @@ public static class MfaKeyRingRegistration
             return $"{MfaKeyRingOptions.Section}:KeysPath is not readable. Data Protection reads the key ring " +
                    "from it on first use.";
 
+        if (!CanReadEveryKey(options.KeysPath!))
+            return $"{MfaKeyRingOptions.Section}:KeysPath holds a key file that cannot be read, for example after a " +
+                   "restore with another file owner. Data Protection needs every key to decrypt stored secrets.";
+
         if (!CanWrite(options.KeysPath!))
             return $"{MfaKeyRingOptions.Section}:KeysPath is not writable. Data Protection writes the first key " +
                    "on first use and a new key about every 90 days.";
@@ -117,6 +121,24 @@ public static class MfaKeyRingRegistration
         {
             // Only *.xml files are keys; enumerating opens the directory for reading.
             _ = Directory.EnumerateFiles(directory, "*.xml").Any();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool CanReadEveryKey(string directory)
+    {
+        try
+        {
+            // Opening is enough: the content is decrypted later by Data Protection, with the certificate.
+            foreach (var key in Directory.EnumerateFiles(directory, "*.xml"))
+                using (File.OpenRead(key))
+                {
+                }
+
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

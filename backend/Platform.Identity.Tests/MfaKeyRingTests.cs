@@ -238,6 +238,24 @@ public sealed class MfaKeyRingTests
     }
 
     [Test]
+    public void AddMfaKeyRing_ExistingKeyFileWithoutReadAccess_Throws()
+    {
+        // Arrange
+        // A real key from a first start; then the directory stays readable, but the key file is not, as after a
+        // restore with another file owner.
+        using (var first = BuildProvider(Settings()))
+            first.GetRequiredService<ITotpSecretProtector>().Protect("JBSWY3DPEHPK3PXP");
+        var keyFile = Directory.GetFiles(_keys, "key-*.xml").Single();
+        TakeAwayReadFromFile(keyFile);
+
+        // Act
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(Settings()));
+
+        // Assert
+        Assert.That(error!.Message, Does.Contain("key file that cannot be read"));
+    }
+
+    [Test]
     public void AddMfaKeyRing_WritableKeysPath_LeavesNoProbeFile()
     {
         // Arrange
@@ -288,6 +306,46 @@ public sealed class MfaKeyRingTests
             Assert.Ignore("Root ignores directory mode bits, so the missing right cannot be simulated.");
 
         RemoveUnixModeBits(directory, write);
+    }
+
+    /// <summary>Takes the read right on one file: Deny ACL rule on Windows, mode bits elsewhere (ignored for root).</summary>
+    private void TakeAwayReadFromFile(string file)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            DenyReadOnWindows(file);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess)
+            Assert.Ignore("Root ignores file mode bits, so the missing right cannot be simulated.");
+
+        RemoveUnixReadBit(file);
+    }
+
+    [UnsupportedOSPlatform("windows")]
+    private void RemoveUnixReadBit(string file)
+    {
+        var before = File.GetUnixFileMode(file);
+        File.SetUnixFileMode(file, UnixFileMode.UserWrite);
+        _restoreAccess = () => File.SetUnixFileMode(file, before);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void DenyReadOnWindows(string file)
+    {
+        var info = new FileInfo(file);
+        var rule = new FileSystemAccessRule(
+            WindowsIdentity.GetCurrent().User!, FileSystemRights.ReadData, AccessControlType.Deny);
+        var security = info.GetAccessControl();
+        security.AddAccessRule(rule);
+        info.SetAccessControl(security);
+        _restoreAccess = () =>
+        {
+            var restored = info.GetAccessControl();
+            restored.RemoveAccessRuleSpecific(rule);
+            info.SetAccessControl(restored);
+        };
     }
 
     [UnsupportedOSPlatform("windows")]
