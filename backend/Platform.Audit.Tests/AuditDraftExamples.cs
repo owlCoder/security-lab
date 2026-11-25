@@ -54,7 +54,7 @@ internal static class AuditDraftExamples
 
         yield return (
             new AuditEventDraft(
-                AuditEventTypes.AuthMfaVerify,
+                AuditEventTypes.AuthMfaVerified,
                 AuditOutcome.Failure,
                 Resource: TargetAccount,
                 Details: Details(("reasonCode", "invalid_code"))),

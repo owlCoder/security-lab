@@ -45,7 +45,8 @@ internal sealed partial class AuditDraftValidator
             return AuditRejectionCode.InvalidResource;
 
         if (schema.RequiredDetails is not null && schema.RequiredDetails.Any(key =>
-                draft.Details is null || !draft.Details.ContainsKey(key)))
+                IsRequiredFor(schema, key, draft.Outcome)
+                && (draft.Details is null || !draft.Details.ContainsKey(key))))
             return AuditRejectionCode.InvalidDetailValue;
 
         return CheckDetails(schema, draft.Outcome, draft.Details);
@@ -115,10 +116,20 @@ internal sealed partial class AuditDraftValidator
 
             if (!AuditDetailFormats.IsValid(field.Format, value))
                 return AuditRejectionCode.InvalidDetailValue;
+
+            if (field.AllowedValues is not null
+                && (!field.AllowedValues.TryGetValue(outcome, out var allowed) || !allowed.Contains(value)))
+                return AuditRejectionCode.InvalidDetailValue;
         }
 
         return AuditRejectionCode.None;
     }
+
+    // A required key whose field is limited to some outcomes (reasonCode: Denied and Failure) is required only there.
+    private static bool IsRequiredFor(AuditEventSchema schema, string key, AuditOutcome outcome) =>
+        !schema.Details.TryGetValue(key, out var field)
+        || field.OnlyForOutcomes is null
+        || field.OnlyForOutcomes.Contains(outcome);
 
     private static bool IsForbiddenKeyName(string key) =>
         ForbiddenKeyParts.Any(part => key.Contains(part, StringComparison.OrdinalIgnoreCase));

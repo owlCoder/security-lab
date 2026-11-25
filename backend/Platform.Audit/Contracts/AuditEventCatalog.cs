@@ -24,6 +24,20 @@ public static class AuditEventCatalog
         AuditDetailFormat.Code,
         new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet());
 
+    // IDN-06: reasonCode is required with every refusal and comes from a closed list (CONTRACTS.md, MFA).
+    private static readonly AuditDetailField MfaEnableReasonCode = ClosedReasonCode(
+        (AuditOutcome.Failure,
+            ["invalid_code", "no_valid_enrollment", "already_enabled", "invalid_enrollment", "session_inactive"]));
+
+    // A wrong or replayed code is a Failure like a wrong password in auth.login; the attempt limit is a Denied
+    // like auth.login.throttled.
+    private static readonly AuditDetailField MfaVerifyReasonCode = ClosedReasonCode(
+        (AuditOutcome.Failure, ["invalid_code", "replayed_code", "invalid_secret", "session_inactive"]),
+        (AuditOutcome.Denied, ["attempt_limit"]));
+
+    private static readonly IReadOnlySet<string> ReasonCodeRequired =
+        new[] { "reasonCode" }.ToFrozenSet(StringComparer.Ordinal);
+
     // Privileged changes: denied for an anonymous caller too, failed only for an authenticated one.
     private static readonly IReadOnlyDictionary<AuditOutcome, IReadOnlySet<AuditActorKind>> PrivilegedChange =
         Outcomes(
@@ -72,16 +86,19 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             AuditPresence.Required,
             AuditResourceTypes.Account,
-            Fields(("reasonCode", ReasonCode))),
+            Fields(("reasonCode", MfaEnableReasonCode)),
+            ReasonCodeRequired),
 
-        // IDN-06 (US-18): the second factor of a login (MfaPending session) was verified, or it failed.
+        // IDN-06 (US-18): the second factor of a login (MfaPending session) was verified, it failed, or it was
+        // refused because of the attempt limit.
         new AuditEventSchema(
-            AuditEventTypes.AuthMfaVerify,
-            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditEventTypes.AuthMfaVerified,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User), (AuditOutcome.Denied, User)),
             AuditPresence.Forbidden,
             AuditPresence.Required,
             AuditResourceTypes.Account,
-            Fields(("reasonCode", ReasonCode))),
+            Fields(("reasonCode", MfaVerifyReasonCode)),
+            ReasonCodeRequired),
 
         new AuditEventSchema(
             AuditEventTypes.AuthMfaBackupCodesGenerated,
@@ -221,6 +238,13 @@ public static class AuditEventCatalog
         (eventType == AuditEventTypes.RevisionApproved
             ? new[] { "authorId", "operationId", "contentHash", "laboratoryId", "revisionNumber" }
             : new[] { "authorId", "operationId", "contentHash" }).ToFrozenSet(StringComparer.Ordinal));
+
+    private static AuditDetailField ClosedReasonCode(params (AuditOutcome Outcome, string[] Values)[] entries) => new(
+        AuditDetailFormat.Code,
+        entries.Select(entry => entry.Outcome).ToFrozenSet(),
+        entries.ToFrozenDictionary(
+            entry => entry.Outcome,
+            entry => (IReadOnlySet<string>)entry.Values.ToFrozenSet(StringComparer.Ordinal)));
 
     private static IReadOnlySet<AuditActorKind> Kinds(params AuditActorKind[] kinds) => kinds.ToFrozenSet();
 

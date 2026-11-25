@@ -169,8 +169,8 @@ with `EventIdConflict` and never replaces the stored record.
 | `auth.logout` | Identity (IDN-02) | Success | `User` | forbidden | none | none |
 | `auth.login.throttled` | Identity (IDN-05) | Denied | `Anonymous` | forbidden | none | none |
 | `auth.mfa.enrollment.started` | Identity (IDN-06, US-17) | Success | `User` | forbidden | `Account` (required) | none |
-| `auth.mfa.enabled` | Identity (IDN-06, US-17, enrollment confirmed) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` (Failure only) |
-| `auth.mfa.verify` | Identity (IDN-06, US-18, second factor of a login) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` (Failure only) |
+| `auth.mfa.enabled` | Identity (IDN-06, US-17, enrollment confirmed) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` (required with Failure, closed list, see [MFA](#mfa-events-idn-06)) |
+| `auth.mfa.verified` | Identity (IDN-06, US-18, second factor of a login) | Success, Failure, Denied | `User` | forbidden | `Account` (required) | `reasonCode` (required with Failure and Denied, closed list, see [MFA](#mfa-events-idn-06)) |
 | `account.status.changed` | Identity (IDN-03), Admin (ADM-01) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `oldStatus`, `newStatus`, `reasonCode` |
 | `account.unlocked` | Identity (IDN-05, administrator unlock) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `lockoutEnd` (Success only), `reasonCode` |
 | `course.member.role.changed` | Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
@@ -191,7 +191,7 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 
 | Key | Format |
 |-|-|
-| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `invalid_credentials`, `account_blocked`, `account_locked` (IDN-05: `auth.login` Failure while the account is temporarily locked), `forbidden`, `not_found` |
+| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`; for `auth.mfa.enabled` and `auth.mfa.verified` also one of the closed list below. For example `invalid_credentials`, `account_blocked`, `account_locked` (IDN-05: `auth.login` Failure while the account is temporarily locked), `forbidden`, `not_found` |
 | `oldStatus`, `newStatus` | one of `active`, `blocked`, `archived` |
 | `oldRole`, `newRole` | one of `none`, `student`, `teacher`, `assistant` |
 | `action`, `filterType` | action or event type: `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$`, at most 64 characters (same rule as `ActionId` in `Platform.Access`) |
@@ -202,6 +202,46 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 | `filterOutcome` | one of `success`, `denied`, `failure` |
 | `filterFrom`, `filterTo`, `lockoutEnd` | UTC timestamp, ISO 8601, ending with `Z` |
 | `resultCount` | integer from 0 to 100000 |
+
+### MFA events (IDN-06)
+
+`reasonCode` is required with every refusal of an MFA event and must be on the list of its outcome. A value
+outside the list, or a refusal without a reason, is rejected with `InvalidDetailValue`.
+
+| Event type | Outcome | `reasonCode` | Meaning |
+|-|-|-|-|
+| `auth.mfa.enabled` | Failure | `invalid_code` | wrong or reused TOTP code |
+| | | `no_valid_enrollment` | no pending enrollment, it expired, or a parallel confirmation won |
+| | | `already_enabled` | MFA is already enabled |
+| | | `invalid_enrollment` | the pending secret cannot be decrypted |
+| | | `session_inactive` | the session or the account stopped being active before the write (IDN-03, IDN-07) |
+| `auth.mfa.verified` | Failure | `invalid_code` | wrong TOTP code |
+| | | `replayed_code` | a time step that is not newer than the last used one |
+| | | `invalid_secret` | the stored secret cannot be decrypted |
+| | | `session_inactive` | the pending session or the account stopped being active before the write |
+| | Denied | `attempt_limit` | the attempt limit was reached by this code, or the second factor is still locked |
+
+Why the outcomes differ:
+
+- A wrong or replayed TOTP code is `Failure`, as a wrong password is `Failure` in `auth.login`: the user tried
+  and the factor did not match.
+- The attempt limit is `Denied`, as `auth.login.throttled` is: the request is refused by a rule, and while the
+  lock lasts the code is not even checked.
+- `auth.mfa.backup_code.rejected` (Team 7) is a separate type and always `Denied`. An AUD-06 filter by outcome
+  therefore finds MFA lockouts and rejected backup codes under `denied`, and wrong TOTP codes under `failure`.
+  Filter by event type to tell the two denials apart.
+
+Producer obligations for MFA, in addition to the general ones above:
+
+1. Never put into a draft or a technical alarm: the TOTP code, the Base32 secret, the `otpauth://`
+   provisioning URI, the protected ciphertext, or any session value (token, hash, handle, cookie).
+2. `auth.mfa.enabled` (Success) is written with `ITransactionalAuditWriter` in the transaction that enables MFA.
+   `auth.mfa.verified` (Success) is written in the transaction that consumes the time step and moves the
+   session from `MfaPending` to `Active`. Without `Recorded` nothing is committed and the answer is `503`
+   (obligation 1).
+3. A refused confirmation or verification stays refused when its audit write fails (obligation 2). The refusal
+   is written with `ITrustedAuditWriter` and `CancellationToken.None`, because a counted attempt or a revoked
+   session is already committed (obligation 3).
 
 ## Limits
 
@@ -292,6 +332,7 @@ Agreements with the consumers and producers listed above are tracked in
 |-|-|-|
 | 0.1 | 2026-11-03 | Initial draft for review (S-02) |
 | 0.1 | 2026-11-23 | `account.unlocked` event type added (IDN-05, administrator unlock), with the new detail key `lockoutEnd`. Additive change: existing event types and producers are not affected, the schema version stays 1 |
+| 0.1 | 2026-11-25 | `auth.mfa.enrollment.started`, `auth.mfa.enabled` and `auth.mfa.verified` added (IDN-06, US-17, US-18), with required `reasonCode` from a closed list per outcome. The validator now supports a closed list of values per outcome (`AuditDetailField.AllowedValues`), and a required detail key whose field is limited to some outcomes is required only with those. Additive change: existing event types and producers are not affected, the schema version stays 1 |
 
 ## REV-05 integration (2026-11-06)
 
