@@ -5,6 +5,7 @@ using OtpNet;
 using Platform.Api.Contracts.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
+using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
 using Platform.Identity.Tests.Helpers;
 
@@ -318,6 +319,80 @@ public sealed class MfaIntegrationTests : IntegrationTestBase
         var response = await Client.PostAsJsonAsync("/api/auth/mfa/verify", new { Code = "000000" });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    // owlCoder review point 1: the same code in two parallel requests (two pending logins of one user).
+    [Test]
+    [Category("US-18")]
+    public async Task Verification_SameCodeInParallelFromTwoPendingSessions_PromotesExactlyOne()
+    {
+        var secret = TotpHelpers.GenerateSecret();
+        var user = await UserTestData.AddAsync(Factory, "mfa-verify-parallel@platform.com", Password);
+        await MfaTestData.AddEnabledAsync(Factory, user.Id, secret);
+        var first = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+        var second = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+        var code = CurrentCode(secret);
+
+        var responses = await Task.WhenAll(
+            PostWithSessionAsync("/api/auth/mfa/verify", first.RawToken, new { Code = code }),
+            PostWithSessionAsync("/api/auth/mfa/verify", second.RawToken, new { Code = code }));
+
+        Assert.That(responses.Count(r => r.StatusCode == HttpStatusCode.OK), Is.EqualTo(1));
+        Assert.That(responses.Count(r => r.StatusCode == HttpStatusCode.Unauthorized), Is.EqualTo(1));
+        var levels = new[]
+        {
+            (await SessionTestData.GetAsync(Factory, first.Session.Id))!.AuthLevel,
+            (await SessionTestData.GetAsync(Factory, second.Session.Id))!.AuthLevel
+        };
+        Assert.That(levels, Is.EquivalentTo(new[] { AuthLevel.Active, AuthLevel.MfaPending }));
+    }
+
+    [Test]
+    [Category("US-18")]
+    public async Task Verification_OlderCodeAfterNewerOne_ReturnsUnauthorized()
+    {
+        var secret = TotpHelpers.GenerateSecret();
+        var user = await UserTestData.AddAsync(Factory, "mfa-verify-older@platform.com", Password);
+        await MfaTestData.AddEnabledAsync(Factory, user.Id, secret);
+        var newer = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+        var older = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+
+        var first = await PostWithSessionAsync("/api/auth/mfa/verify", newer.RawToken, new { Code = NextCode(secret) });
+        var second = await PostWithSessionAsync("/api/auth/mfa/verify", older.RawToken, new { Code = CurrentCode(secret) });
+
+        Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(second.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+        Assert.That((await SessionTestData.GetAsync(Factory, older.Session.Id))!.AuthLevel,
+            Is.EqualTo(AuthLevel.MfaPending));
+    }
+
+    [Test]
+    [Category("US-17")]
+    public async Task EnrollConfirm_TwoParallelConfirmations_EnableMfaOnce()
+    {
+        var secret = TotpHelpers.GenerateSecret();
+        var user = await UserTestData.AddAsync(Factory, "mfa-confirm-parallel@platform.com", Password);
+        await MfaTestData.AddPendingAsync(Factory, user.Id, secret, DateTimeOffset.UtcNow.AddMinutes(5));
+        var first = await SessionTestData.CreateAsync(Factory, user.Id);
+        var second = await SessionTestData.CreateAsync(Factory, user.Id);
+        var code = CurrentCode(secret);
+
+        var responses = await Task.WhenAll(
+            PostWithSessionAsync("/api/auth/mfa/enroll/confirm", first.RawToken, new { Code = code }),
+            PostWithSessionAsync("/api/auth/mfa/enroll/confirm", second.RawToken, new { Code = code }));
+
+        Assert.That(responses.Count(r => r.StatusCode == HttpStatusCode.OK), Is.EqualTo(1));
+        var credentials = await GetCredentialsAsync(user.Id);
+        Assert.That(credentials!.MfaEnabled, Is.True);
+        Assert.That(credentials.PendingTotpSecretCiphertext, Is.Null);
+    }
+
+    private static async Task<HttpResponseMessage> PostWithSessionAsync(
+        string url, string rawToken, object body, HttpClient? client = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+        request.Headers.Add("Cookie", $"{SessionCookie.Name}={rawToken}");
+        return await (client ?? Client).SendAsync(request);
     }
 
     private async Task<HttpResponseMessage> LoginAsync(string email) =>

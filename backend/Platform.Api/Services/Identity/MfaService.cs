@@ -117,15 +117,29 @@ public sealed class MfaService(
         }
 
         var result = TotpHelpers.Verify(code, secret);
-        if (!result.success || credentials.LastTotpTimeStep == result.timeStepMatched)
+        if (!result.success || IsReplayed(credentials, result.timeStepMatched))
         {
             WriteAudit(session.UserId, "auth.mfa.enroll.confirm", "failure", correlationId, "invalid_code");
             return MfaOutcome.InvalidCode;
         }
 
-        var confirmed = await _mfaCredentialsStore.ConfirmAsync(session.UserId, result.timeStepMatched, ct);
-        if (!confirmed)
-            return MfaOutcome.Unavailable;
+        // The check above read the row without a lock. The conditional UPDATE decides: of two parallel
+        // confirmations only one finds MFA still disabled and the same pending enrollment.
+        await using (var work = await _mfaCredentialsStore.BeginAsync(ct))
+        {
+            if (!await work.TryConfirmEnrollmentAsync(
+                    session.UserId,
+                    credentials.PendingTotpSecretCiphertext,
+                    result.timeStepMatched,
+                    _clock.GetUtcNow(),
+                    ct))
+            {
+                WriteAudit(session.UserId, "auth.mfa.enroll.confirm", "failure", correlationId, "no_valid_enrollment");
+                return MfaOutcome.InvalidCode;
+            }
+
+            await work.CommitAsync(ct);
+        }
 
         WriteAudit(session.UserId, "auth.mfa.enroll.confirm", "success", correlationId, null);
         return MfaOutcome.Success;
@@ -165,7 +179,7 @@ public sealed class MfaService(
         }
 
         var result = TotpHelpers.Verify(code, secret);
-        if (!result.success || credentials.LastTotpTimeStep == result.timeStepMatched)
+        if (!result.success || IsReplayed(credentials, result.timeStepMatched))
         {
             var locked = await _mfaCredentialsStore.RecordFailedAttemptAsync(
                 session.UserId,
@@ -180,15 +194,32 @@ public sealed class MfaService(
             return MfaOutcome.InvalidCode;
         }
 
-        if (!await _mfaCredentialsStore.CompleteVerificationAsync(
-                session.UserId, result.timeStepMatched, ct))
-            return MfaOutcome.Unavailable;
-        if (!await _sessionStore.PromoteToActiveAsync(session, ct))
-            return MfaOutcome.Unauthorized;
+        // The check above is only a fast path. The step is consumed and the session promoted in one transaction,
+        // and each UPDATE repeats its condition: a parallel request with the same code (also from another pending
+        // session of this user) waits for the row and then matches nothing.
+        await using (var work = await _mfaCredentialsStore.BeginAsync(ct))
+        {
+            var now = _clock.GetUtcNow();
+            if (!await work.TryConsumeTimeStepAsync(session.UserId, result.timeStepMatched, now, ct))
+            {
+                WriteAudit(session.UserId, "auth.mfa.verify", "failure", correlationId, "replayed");
+                return MfaOutcome.InvalidCode;
+            }
+
+            // Revoked or expired in the meantime: leaving without a commit also gives the step back.
+            if (!await work.TryPromoteSessionAsync(session.Id, now, ct))
+                return MfaOutcome.Unauthorized;
+
+            await work.CommitAsync(ct);
+        }
 
         WriteAudit(session.UserId, "auth.mfa.verify", "success", correlationId, null);
         return MfaOutcome.Success;
     }
+
+    // A TOTP step can be used once: the same step and every older one are refused.
+    private static bool IsReplayed(MfaCredentials credentials, long timeStep) =>
+        credentials.LastTotpTimeStep is { } last && timeStep <= last;
 
     private bool IsActiveSession(Session session) =>
         session.RevokedAt is null

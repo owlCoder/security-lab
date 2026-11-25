@@ -447,11 +447,8 @@ internal sealed class NoMfaCredentialsStore : IMfaCredentialsStore
         CancellationToken ct) =>
         Task.FromResult(false);
 
-    public Task<bool> ConfirmAsync(Guid userId, long timeStepMatched, CancellationToken ct) =>
-        Task.FromResult(false);
-
-    public Task<bool> CompleteVerificationAsync(Guid userId, long timeStepMatched, CancellationToken ct) =>
-        Task.FromResult(false);
+    public Task<IMfaUnitOfWork> BeginAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Login rate-limit tests never verify a second factor.");
 
     public Task<bool> RecordFailedAttemptAsync(
         Guid userId,

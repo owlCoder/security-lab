@@ -1,5 +1,8 @@
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Platform.Identity.Entities;
+using Platform.Identity.Enums;
 using Platform.Identity.Interfaces.Mfa;
 
 namespace Platform.Identity.Persistence.Mfa;
@@ -52,37 +55,6 @@ public class EfMfaCredentialsStore(
         return true;
     }
 
-    public async Task<bool> ConfirmAsync(Guid userId, long timeStepMatched, CancellationToken ct)
-    {
-        var mfaCredentials = await GetAsync(userId, ct);
-        if (mfaCredentials is null)
-            return false;
-
-        mfaCredentials.MfaEnabled = true;
-        mfaCredentials.TotpSecretCiphertext = mfaCredentials.PendingTotpSecretCiphertext;
-        mfaCredentials.TotpSecretKeyVersion = mfaCredentials.PendingTotpSecretKeyVersion;
-        mfaCredentials.LastTotpTimeStep = timeStepMatched;
-        mfaCredentials.PendingTotpSecretCiphertext = null;
-        mfaCredentials.PendingTotpSecretKeyVersion = null;
-        mfaCredentials.PendingEnrollmentExpiresAt = null;
-        mfaCredentials.MfaFailedAttempts = 0;
-        await _db.SaveChangesAsync(ct);
-        return true;
-    }
-
-    public async Task<bool> CompleteVerificationAsync(Guid userId, long timeStepMatched, CancellationToken ct)
-    {
-        var credentials = await GetAsync(userId, ct);
-        if (credentials is null || !credentials.MfaEnabled)
-            return false;
-
-        credentials.LastTotpTimeStep = timeStepMatched;
-        credentials.MfaFailedAttempts = 0;
-        credentials.MfaLockedUntil = null;
-        await _db.SaveChangesAsync(ct);
-        return true;
-    }
-
     public async Task<bool> RecordFailedAttemptAsync(
         Guid userId,
         int maxAttempts,
@@ -99,5 +71,75 @@ public class EfMfaCredentialsStore(
 
         await _db.SaveChangesAsync(ct);
         return credentials.MfaFailedAttempts >= maxAttempts;
+    }
+
+    public async Task<IMfaUnitOfWork> BeginAsync(CancellationToken ct) =>
+        new UnitOfWork(_db, await _db.Database.BeginTransactionAsync(ct));
+
+    // Every operation is one UPDATE with its condition in WHERE. Under READ COMMITTED PostgreSQL locks the row;
+    // a parallel UPDATE of the same row waits, then checks WHERE again against the committed row and matches
+    // nothing. So the check and the change cannot be split by another request (no read-then-write race).
+    private sealed class UnitOfWork(PlatformIdentityDbContext db, IDbContextTransaction transaction) : IMfaUnitOfWork
+    {
+        public DbTransaction Transaction => transaction.GetDbTransaction();
+
+        public async Task<bool> TryConfirmEnrollmentAsync(
+            Guid userId,
+            string pendingCiphertext,
+            long timeStep,
+            DateTimeOffset now,
+            CancellationToken ct)
+        {
+            var rows = await db.MfaCredentials
+                .Where(c => c.UserId == userId
+                            && !c.MfaEnabled
+                            && c.PendingTotpSecretCiphertext == pendingCiphertext
+                            && c.PendingEnrollmentExpiresAt > now
+                            && (c.LastTotpTimeStep == null || c.LastTotpTimeStep < timeStep))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(c => c.MfaEnabled, true)
+                    .SetProperty(c => c.TotpSecretCiphertext, c => c.PendingTotpSecretCiphertext)
+                    .SetProperty(c => c.TotpSecretKeyVersion, c => c.PendingTotpSecretKeyVersion)
+                    .SetProperty(c => c.LastTotpTimeStep, timeStep)
+                    .SetProperty(c => c.PendingTotpSecretCiphertext, (string?)null)
+                    .SetProperty(c => c.PendingTotpSecretKeyVersion, (int?)null)
+                    .SetProperty(c => c.PendingEnrollmentExpiresAt, (DateTimeOffset?)null)
+                    .SetProperty(c => c.MfaFailedAttempts, 0)
+                    .SetProperty(c => c.MfaLockedUntil, (DateTimeOffset?)null), ct);
+            return rows == 1;
+        }
+
+        public async Task<bool> TryConsumeTimeStepAsync(
+            Guid userId,
+            long timeStep,
+            DateTimeOffset now,
+            CancellationToken ct)
+        {
+            var rows = await db.MfaCredentials
+                .Where(c => c.UserId == userId
+                            && c.MfaEnabled
+                            && (c.LastTotpTimeStep == null || c.LastTotpTimeStep < timeStep)
+                            && (c.MfaLockedUntil == null || c.MfaLockedUntil <= now))
+                .ExecuteUpdateAsync(set => set
+                    .SetProperty(c => c.LastTotpTimeStep, timeStep)
+                    .SetProperty(c => c.MfaFailedAttempts, 0)
+                    .SetProperty(c => c.MfaLockedUntil, (DateTimeOffset?)null), ct);
+            return rows == 1;
+        }
+
+        public async Task<bool> TryPromoteSessionAsync(Guid sessionId, DateTimeOffset now, CancellationToken ct)
+        {
+            var rows = await db.Sessions
+                .Where(s => s.Id == sessionId
+                            && s.AuthLevel == AuthLevel.MfaPending
+                            && s.RevokedAt == null
+                            && s.ExpiresAt > now)
+                .ExecuteUpdateAsync(set => set.SetProperty(s => s.AuthLevel, AuthLevel.Active), ct);
+            return rows == 1;
+        }
+
+        public Task CommitAsync(CancellationToken ct) => transaction.CommitAsync(ct);
+
+        public ValueTask DisposeAsync() => transaction.DisposeAsync();
     }
 }

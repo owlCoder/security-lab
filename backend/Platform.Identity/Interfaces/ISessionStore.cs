@@ -19,10 +19,6 @@ public interface ISessionStore
 
     Task<Session?> FindByTokenAsync(string rawToken, CancellationToken ct);
 
-    Task<bool> PromoteToActiveAsync(Session session, CancellationToken ct) =>
-        Task.FromResult(false);
-
-
     Task TouchAsync(Session session, DateTimeOffset now, CancellationToken ct);
 
     /// <summary>
