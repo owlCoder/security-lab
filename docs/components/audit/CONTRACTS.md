@@ -274,7 +274,7 @@ Planned tests in `backend/Platform.Audit.Tests`, each with its negative case:
 
 | # | Question | Owner |
 |-|-|-|
-| 1 | Does Identity switch to this contract or keep its own interface behind an adapter? `ChangeAccountStatus` currently writes a free-text administrator reason into `Detail`, which conflicts with AUD-03; the proposal is a `reasonCode` instead. | Member 9 with Teams 1 and 2 (D1) |
+| 1 | ~~Does Identity switch to this contract or keep its own interface behind an adapter?~~ Settled: Identity uses this contract (login, logout, MFA through `IdentityAuditProducer`; status change and unlock with `reasonCode` through `ITransactionalAuditWriter`), and its own interface is removed (PR #196). | Member 9 with Teams 1 and 2 (D1) |
 | 2 | Shared transaction or transactional outbox for privileged changes. | Members 2, 3 and 9 with producers (D3) |
 | 3 | Is `auth.login` with valid credentials on a blocked account recorded with a `User` actor? (Proposed: yes; the identity is confirmed, the login is refused.) | Members 3, 8 and 9 with Team 1 |
 | 4 | Who sees events without a course (global or administrator view)? Proposed: nobody through the teacher API. | Members 5, 7 and 9 with the assistant (D4) |

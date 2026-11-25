@@ -37,7 +37,7 @@ Checked on `main`, commit `0a4f3d1`. These are facts that the proposals below de
 | F3 | `IActionCatalog` and `IAccessPolicyRegistry` only read. `Register` exists only on `InMemoryActionCatalog` and `InMemoryAccessPolicyRegistry`. Identity resolves these concrete classes after `Build()` and calls `Register`. | `Platform.Identity/Composition/IdentityAccessRegistration.cs` | Other modules depend on Access infrastructure classes. Registration happens after the container is built, so a duplicate is found only when that code runs. |
 | F4 | When a policy returns `false`, the decision is `Deny` with reason `PolicyError`. The same reason is used when the policy throws. | `DefaultDenyAccessDecision.cs` | An `access.denied` record cannot tell a normal refusal from a broken policy. |
 | F5 | `SubjectRef.Id` is a `string` (the demo uses `"demo-student"`). `AuditActor.Id` is a `Guid?`. | `Platform.Access/Domain/Models/SubjectRef.cs`, `Platform.Audit/Contracts/AuditActor.cs` | The forwarder needs a rule for subjects whose ID is not an account GUID. |
-| F6 | Identity has its own `IAuditWriter` (`void Write(AuditEvent)`), registered as the singleton `LoggerAuditWriter`, which writes to `ILogger`. The caller sets actor, time, outcome as a string and a free-text detail. | `Platform.Api/Services/Identity/IAuditWriter.cs`, `Adapters.cs` | Conflicts with decision A3 (actor and time come from the server, not the caller) and with AUD-03 (no free text). A log line is not a guaranteed audit record. |
+| F6 | Identity has its own `IAuditWriter` (`void Write(AuditEvent)`), registered as the singleton `LoggerAuditWriter`, which writes to `ILogger`. The caller sets actor, time, outcome as a string and a free-text detail. | `Platform.Api/Services/Identity/IAuditWriter.cs`, `Adapters.cs` | Conflicts with decision A3 (actor and time come from the server, not the caller) and with AUD-03 (no free text). A log line is not a guaranteed audit record. **Resolved:** login and logout moved to `IdentityAuditProducer` (PR #113), MFA moved there too and the old interface, `LoggerAuditWriter` and `AuditEvent` were removed (PR #196). |
 | F7 | `ChangeAccountStatus` writes `account.status.change` (catalog: `account.status.changed`) after `accounts.Save`, with detail `Old->New reason=<free text up to 200 characters>`. | `Platform.Api/Services/Identity/ChangeAccountStatus.cs` | Name mismatch, free text, and no transaction between the change and its record. |
 | F8 | `LoginAccount` writes no audit record. `SessionValidationMiddleware` writes `session.validation`, which is not in the catalog. | `LoginAccount.cs`, `Middlewares/SessionValidationMiddleware.cs` | AUD-01 requires a record of login. A new event type needs a catalog change (decision A4). |
 | F9 | Correlation IDs come from different places: `HttpContext.TraceIdentifier` in the session middleware, `Guid.NewGuid()` in the Access demo endpoint. | `Program.cs`, `SessionValidationMiddleware.cs` | The same request cannot be followed from the HTTP call to the decision and the audit record (AUD-04). |
@@ -150,6 +150,12 @@ fail-closed choice (revoke the newly created session and return a generic `503` 
 Audit persistence is unavailable) is pending confirmation from the Team 1 Identity owner.
 PR #148 supplies the separate IDN-03 account-status transaction and S-16 rollback proof described
 in S11-06; the two changes share the same Audit contracts and composition.
+
+IDN-06 (PR #196, catalog in PR #230) adds `auth.mfa.enrollment.started`, `auth.mfa.enabled` and
+`auth.mfa.verify`. MFA enabled and MFA verified are written through `ITransactionalAuditWriter` in
+the same transaction as the identity change (no record, no commit, `503`); refusals go through
+`ITrustedAuditWriter` and stay refusals when the write fails. With this, Identity has no audit
+path outside the shared contract.
 
 `account.status.changed` (IDN-03), from `ChangeAccountStatus`:
 
