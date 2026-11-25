@@ -157,7 +157,8 @@ public sealed class IdentityAuditPostgresIntegrationTests
                 TimeProvider.System),
             new StoreSessionCreator(sessionStore, NullLogger<StoreSessionCreator>.Instance),
             new SessionManager(identity),
-            CreateProducer(new UnavailableAuditWriter()));
+            CreateProducer(new UnavailableAuditWriter()),
+            new RoleMfaPolicy(new ConfigurationBuilder().Build()));
 
         var result = await login.ExecuteAsync(email, Password, Guid.NewGuid().ToString("N"));
 

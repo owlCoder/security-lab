@@ -13,7 +13,7 @@ internal sealed class EfCredentialStore(PlatformIdentityDbContext db) : ICredent
             .AsNoTracking()
             .Where(account => account.Email == normalizedEmail)
             .Select(account => new CredentialRecord(
-                account.Id, account.Status, account.PasswordHash, account.FailedLoginCount, account.LockoutEnd))
+                account.Id, account.Status, account.PasswordHash, account.FailedLoginCount, account.LockoutEnd, account.Role))
             .FirstOrDefaultAsync(ct);
 
     // Each change below is one UPDATE, so parallel requests see each other's writes.

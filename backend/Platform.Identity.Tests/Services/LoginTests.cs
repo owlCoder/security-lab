@@ -68,7 +68,8 @@ public class LoginTests
             _verifier.Object,
             _sessions.Object,
             _sessionManager.Object,
-            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance),
+            new Mock<IMfaPolicy>().Object);
     }
 
     private void GivenCredentials(CredentialResult result) =>

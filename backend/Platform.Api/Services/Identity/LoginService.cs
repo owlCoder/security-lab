@@ -15,7 +15,8 @@ internal sealed class LoginService(
     ICredentialVerifier credentials,
     ISessionCreator sessions,
     ISessionManager sessionManager,
-    IdentityAuditProducer audit) : ILoginService
+    IdentityAuditProducer audit,
+    IMfaPolicy mfa) : ILoginService
 {
     public async Task<LoginResult> ExecuteAsync(
         string? email, string? password, string correlationId, CancellationToken ct = default)
@@ -47,11 +48,14 @@ internal sealed class LoginService(
                 ct,
                 actorConfirmed: true);
 
-        // MFA (IDN-06) is not implemented yet: until an MFA policy exists every login is Active.
+        var authLevel = mfa.IsRequiredFor(check.Role)
+            ? AuthenticationLevel.MfaPending
+            : AuthenticationLevel.Active;
+
         IssuedSession? session;
         try
         {
-            session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
+            session = await sessions.CreateAsync(check.AccountId, authLevel, ct);
         }
         catch (AccountNotActiveException)
         {

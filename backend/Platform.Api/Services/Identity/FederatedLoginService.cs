@@ -16,7 +16,8 @@ internal sealed class FederatedLoginService(
     IExternalIdentityLinker linker,
     ISessionCreator sessions,
     ISessionManager sessionManager,
-    IdentityAuditProducer audit) : IFederatedLoginService
+    IdentityAuditProducer audit,
+    IMfaPolicy mfa) : IFederatedLoginService
 {
     public async Task<LoginResult> ExecuteAsync(
         ClaimsPrincipal principal, string correlationId, CancellationToken ct = default)
@@ -31,11 +32,15 @@ internal sealed class FederatedLoginService(
 
         var accountId = link.AccountId!.Value;
 
-        // MFA (IDN-06) is not enforced yet for any login. When it is, federated login must follow the same policy.
+        // Federated login follows the same MFA policy as password login (US-19).
+        var authLevel = mfa.IsRequiredFor(link.Role)
+            ? AuthenticationLevel.MfaPending
+            : AuthenticationLevel.Active;
+
         IssuedSession? session;
         try
         {
-            session = await sessions.CreateAsync(accountId, AuthenticationLevel.Active, ct);
+            session = await sessions.CreateAsync(accountId, authLevel, ct);
         }
         catch (AccountNotActiveException)
         {

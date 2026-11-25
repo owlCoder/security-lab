@@ -54,7 +54,8 @@ public class FederatedLoginServiceTests
             _linker.Object,
             _sessions.Object,
             _sessionManager.Object,
-            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance),
+            new Mock<IMfaPolicy>().Object);
     }
 
     // ---------- Success ----------
