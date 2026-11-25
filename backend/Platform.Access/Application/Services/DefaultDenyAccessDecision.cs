@@ -103,15 +103,68 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
             return AccessDecision.Deny(AccessDenialReason.PolicyError, correlationId);
         }
 
-        var permitted = await EvaluatePolicyAsync(policy, request, cancellationToken).ConfigureAwait(false);
+        if (policy is IOutcomeAccessPolicy outcomePolicy)
+        {
+            var result = await RunPolicyAsync(
+                token => outcomePolicy.EvaluateOutcomeAsync(request, token),
+                cancellationToken).ConfigureAwait(false);
+
+            return ToDecision(result, policyId, policyVersion, correlationId);
+        }
+
+        var permitted = await RunPolicyAsync(
+            token => policy.EvaluateAsync(request, token),
+            cancellationToken).ConfigureAwait(false);
         return permitted
             ? AccessDecision.Allow(policyId, correlationId, policyVersion)
             : AccessDecision.Deny(AccessDenialReason.PolicyDenied, correlationId, policyVersion, policyId);
     }
 
-    private async Task<bool> EvaluatePolicyAsync(
-        IAccessPolicy policy,
-        AccessRequest request,
+    private static AccessDecision ToDecision(
+        PolicyResult? result,
+        string policyId,
+        string policyVersion,
+        string correlationId)
+    {
+        if (result is null || !Enum.IsDefined(result.Outcome))
+        {
+            return AccessDecision.Deny(AccessDenialReason.PolicyError, correlationId, policyVersion);
+        }
+
+        switch (result.Outcome)
+        {
+            case PolicyOutcome.Permit:
+                return result.Reason == AccessDenialReason.None
+                    ? AccessDecision.Allow(policyId, correlationId, policyVersion)
+                    : AccessDecision.Deny(AccessDenialReason.PolicyError, correlationId, policyVersion);
+
+            case PolicyOutcome.Indeterminate:
+                return AccessDecision.Deny(
+                    PolicyReason(result.Reason, AccessDenialReason.MissingAttribute),
+                    correlationId,
+                    policyVersion,
+                    policyId);
+
+            default:
+                return AccessDecision.Deny(
+                    PolicyReason(result.Reason, AccessDenialReason.NotPermitted),
+                    correlationId,
+                    policyVersion,
+                    policyId);
+        }
+    }
+
+    private static AccessDenialReason PolicyReason(AccessDenialReason reason, AccessDenialReason fallback) =>
+        reason is AccessDenialReason.NotPermitted
+            or AccessDenialReason.ContextMismatch
+            or AccessDenialReason.MissingAttribute
+            or AccessDenialReason.PolicyDenied
+            or AccessDenialReason.PolicyError
+            ? reason
+            : fallback;
+
+    private async Task<T> RunPolicyAsync<T>(
+        Func<CancellationToken, ValueTask<T>> evaluate,
         CancellationToken cancellationToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -119,7 +172,7 @@ public sealed class DefaultDenyAccessDecision : IAccessDecision
 
         try
         {
-            var task = policy.EvaluateAsync(request, linked.Token).AsTask();
+            var task = evaluate(linked.Token).AsTask();
             ObserveFault(task);
             return await task.WaitAsync(options.PolicyTimeout, cancellationToken).ConfigureAwait(false);
         }
