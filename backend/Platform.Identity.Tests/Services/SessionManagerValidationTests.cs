@@ -124,13 +124,20 @@ public class SessionManagerValidationTests
     {
         var userId = Guid.NewGuid();
         var (_, session) = await CreateSessionAsync(userId);
+        var optionsWithoutEarlierInactivityExpiry = Options.Create(new SessionOptions
+        {
+            AbsoluteLifetimeMinutes = _optionsTime.Value.AbsoluteLifetimeMinutes,
+            ActivityTimeoutMinutes = (int)_lifetime.TotalMinutes + 1,
+            MfaPendingTimeoutMinutes = _optionsTime.Value.MfaPendingTimeoutMinutes
+        });
+        var manager = new SessionManager(_db, optionsWithoutEarlierInactivityExpiry, _clock);
 
-        _clock.Advance(Lifetime - TimeSpan.FromSeconds(1));
-        Assert.That((await _manager.ListForUser(userId)).Select(info => info.Handle),
+        _clock.Advance(_lifetime - TimeSpan.FromSeconds(1));
+        Assert.That((await manager.ListForUser(userId)).Select(info => info.Handle),
             Is.EqualTo(new[] { session.SessionHandle }));
 
         _clock.Advance(TimeSpan.FromSeconds(1));
-        Assert.That(await _manager.ListForUser(userId), Is.Empty);
+        Assert.That(await manager.ListForUser(userId), Is.Empty);
     }
 
     [Test]
