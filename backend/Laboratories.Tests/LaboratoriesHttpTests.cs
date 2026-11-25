@@ -575,6 +575,39 @@ public sealed class LaboratoriesHttpTests
         Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
     }
 
+    // Tudja laboratorija namerno vraca 404, a ne 403: odgovor mora biti isti kao za nepostojecu,
+    // da napadac pogadjanjem ID-eva ne moze da sazna koje laboratorije postoje (IDOR, SEC-01).
+    // Vazi i za drugog nastavnika istog kursa: menja samo autor laboratorije.
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task PatchLabTitle_ForeignLab_ReturnsSameResponseAsMissingAndKeepsTitle(bool otherTeacherOnSameCourse)
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        if (otherTeacherOnSameCourse)
+        {
+            factory.Services.GetRequiredService<InMemoryCourseMembership>()
+                .Set(CourseId, UserGuid("jelena"), CourseRole.Teacher);
+        }
+
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Originalni naslov");
+
+        using var foreign = await client.SendAsync(CreateJsonRequest("PATCH", $"{Route}{created.Id}/title", OtherTeacher, new { title = "Tudja izmena" }));
+        using var missing = await client.SendAsync(CreateJsonRequest("PATCH", $"{Route}{Guid.NewGuid()}/title", OtherTeacher, new { title = "Tudja izmena" }));
+        string foreignBody = await foreign.Content.ReadAsStringAsync();
+        string missingBody = await missing.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(foreign.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+            Assert.That(missing.StatusCode, Is.EqualTo(foreign.StatusCode));
+            Assert.That(foreignBody, Is.EqualTo(missingBody));
+            Assert.That(foreignBody, Does.Not.Contain("Originalni naslov"));
+            Assert.That(foreignBody, Does.Not.Contain(created.Id.ToString()));
+        });
+        Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
+    }
+
     [TestCase("")]
     [TestCase("   ")]
     [TestCase(null)]
