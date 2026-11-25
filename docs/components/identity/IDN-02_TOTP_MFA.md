@@ -137,14 +137,44 @@ kodova i admin reseta svi MFA nalozi ostaju zaključani. Zato `AddMfaKeyRing` (`
 | `Identity:DataProtection:CertificatePath` | PFX sa privatnim ključem; njime se šifruje svaki ključ upisan u `KeysPath` |
 | `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu ili user-secrets, nikad u repou (ADM-04) |
 
-- Van Development okruženja oba prva podešavanja su obavezna. Ako nedostaju, ako fajl ne postoji, ako lozinka
-  nije dobra ili sertifikat nema privatni ključ, API se ne pokreće (poruka ne sadrži lozinku).
+- Van Development okruženja oba prva podešavanja su obavezna. API se ne pokreće, a poruka ne sadrži lozinku,
+  u ovim slučajevima (svaki ima test u `MfaKeyRingTests`):
+
+  | Uslov | Test |
+  |-|-|
+  | podešavanja nedostaju | `OutsideDevelopment_MissingSettings_StopTheStart`, `ApiHost_InProductionWithoutKeyRing_DoesNotStart` |
+  | podešeno je samo jedno od dva | `OnlyOneOfTheTwoSettings_StopsTheStart_EvenInDevelopment` |
+  | PFX fajl ne postoji | `MissingCertificateFile_StopsTheStart` |
+  | lozinka nije dobra | `WrongCertificatePassword_StopsTheStart_WithoutRevealingIt` |
+  | sertifikat nema privatni ključ | `CertificateWithoutPrivateKey_StopsTheStart` |
+  | `KeysPath` ne može da se napravi | `KeysPathThatCannotBeCreated_StopsTheStart` |
 - U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring. Ako je podešeno samo jedno
   od dva, start pada i tada.
 - Za restore na drugom hostu potrebni su i `KeysPath` i isti sertifikat. Kopija ključeva bez sertifikata ne
   otvara tajne (`MfaKeyRingTests.WithoutTheCertificate_TheStoredKeysCannotBeUsed`).
 - Test hostovi koji rade kao Production ili Testing uključuju test key ring preko `UseMfaTestKeyRing()`
   (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu.
+- Lokalno pokretanje van Development okruženja i pravljenje PFX-a: `docs/DEVELOPMENT.md`, odeljak
+  "MFA key ring (IDN-06)".
+
+### Zamena sertifikata (rotacija nije podržana)
+
+Svaki ključ u `KeysPath` je šifrovan sertifikatom koji je bio podešen kad je ključ napravljen, a u XML-u ključa
+stoji njegov thumbprint. `AddMfaKeyRing` registruje samo trenutni sertifikat i ne prosleđuje prethodne
+sertifikate u `UnprotectKeysWithAnyCertificate`. Posledice:
+
+- Ako se `CertificatePath` zameni drugim sertifikatom, postojeći ključevi ne mogu da se dešifruju. Svaka sačuvana
+  TOTP tajna postaje nečitljiva i svi MFA nalozi ostaju zaključani, dok se ne vrati stari PFX. To važi i za
+  obnovljen sertifikat sa istim ključnim parom, jer se thumbprint menja.
+- Stari PFX zato mora da ostane dostupan dok god u `KeysPath` postoji ključ šifrovan njime. PFX ide u backup,
+  ali ne na isto mesto kao `KeysPath` i baza: ko ima sva tri, može da pročita TOTP tajne.
+- Ako sertifikat procuri, napadaču za TOTP tajne trebaju još kopija `KeysPath`-a i baze. Bez podrške za rotaciju
+  jedini izlaz je novi sertifikat sa praznim `KeysPath`-om i ponovni enrollment svih MFA naloga, a admin reset
+  MFA (US-32) još ne postoji.
+
+Rotacija bi se dodala opcionim podešavanjem, na primer `Identity:DataProtection:PreviousCertificatePaths`.
+Učitani prethodni sertifikati išli bi u `UnprotectKeysWithAnyCertificate`, a novi ključevi bi se šifrovali
+samo trenutnim. To nije deo IDN-06.
 
 ## 7. Replay i rate limiting zaštita
 
