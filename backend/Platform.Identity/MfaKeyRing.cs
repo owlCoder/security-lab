@@ -97,7 +97,52 @@ public static class MfaKeyRingRegistration
             return $"{MfaKeyRingOptions.Section}:KeysPath cannot be created.";
         }
 
+        // The directory can already exist with the wrong rights. Data Protection reads the key ring on first use
+        // and writes the first key then and a new key about every 90 days, so both rights are checked here,
+        // at start, and not left to the first enrollment.
+        if (!CanRead(options.KeysPath!))
+            return $"{MfaKeyRingOptions.Section}:KeysPath is not readable. Data Protection reads the key ring " +
+                   "from it on first use.";
+
+        if (!CanWrite(options.KeysPath!))
+            return $"{MfaKeyRingOptions.Section}:KeysPath is not writable. Data Protection writes the first key " +
+                   "on first use and a new key about every 90 days.";
+
         return null;
+    }
+
+    private static bool CanRead(string directory)
+    {
+        try
+        {
+            // Only *.xml files are keys; enumerating opens the directory for reading.
+            _ = Directory.EnumerateFiles(directory, "*.xml").Any();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool CanWrite(string directory)
+    {
+        // A real write is the only check that works the same on Windows (ACLs), Linux and macOS (mode bits,
+        // read-only mounts). The probe is not *.xml, so Data Protection never reads it, and it is deleted on close.
+        var probe = Path.Combine(directory, $".write-probe-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize: 1,
+                       FileOptions.DeleteOnClose))
+            {
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static X509Certificate2 LoadCertificate(MfaKeyRingOptions options) =>
