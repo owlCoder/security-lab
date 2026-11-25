@@ -5,6 +5,9 @@ namespace Platform.Audit.Contracts;
 /// <see cref="ActorsByOutcome"/>; each outcome lists the actor kinds allowed with it.
 /// </summary>
 /// <param name="ResourceType">Required resource type, or null for any of <see cref="AuditResourceTypes"/>.</param>
+/// <param name="RequiredDetails">
+/// Keys that must be present. A key whose field is limited to some outcomes is required only with those outcomes.
+/// </param>
 public sealed record AuditEventSchema(
     string EventType,
     IReadOnlyDictionary<AuditOutcome, IReadOnlySet<AuditActorKind>> ActorsByOutcome,
@@ -22,9 +25,14 @@ public enum AuditPresence
 }
 
 /// <param name="OnlyForOutcomes">Outcomes with which the field may appear, or null for all.</param>
+/// <param name="AllowedValues">
+/// Closed list of values per outcome, checked after <paramref name="Format"/>, or null for any value of the format.
+/// An outcome that is not a key allows no value.
+/// </param>
 public sealed record AuditDetailField(
     AuditDetailFormat Format,
-    IReadOnlySet<AuditOutcome>? OnlyForOutcomes = null);
+    IReadOnlySet<AuditOutcome>? OnlyForOutcomes = null,
+    IReadOnlyDictionary<AuditOutcome, IReadOnlySet<string>>? AllowedValues = null);
 
 public enum AuditDetailFormat
 {

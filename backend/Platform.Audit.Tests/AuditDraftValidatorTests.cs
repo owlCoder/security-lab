@@ -348,13 +348,13 @@ public sealed class AuditDraftValidatorTests
     [
         AuditEventTypes.AuthMfaEnrollmentStarted,
         AuditEventTypes.AuthMfaEnabled,
-        AuditEventTypes.AuthMfaVerify
+        AuditEventTypes.AuthMfaVerified
     ];
 
     private static readonly string[] MfaEventTypesWithFailure =
     [
         AuditEventTypes.AuthMfaEnabled,
-        AuditEventTypes.AuthMfaVerify
+        AuditEventTypes.AuthMfaVerified
     ];
 
     private static AuditEventDraft Mfa(
@@ -371,11 +371,91 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
     }
 
-    [TestCaseSource(nameof(MfaEventTypes))]
+    // Only auth.mfa.verified knows a denial (the attempt limit); enrollment and confirmation do not.
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted)]
+    [TestCase(AuditEventTypes.AuthMfaEnabled)]
     public void Validate_WhenMfaOutcomeIsDenied_RejectsOutcome(string eventType)
     {
-        Assert.That(_validator.Validate(Mfa(eventType, AuditOutcome.Denied), UserContext),
-            Is.EqualTo(AuditRejectionCode.OutcomeNotAllowed));
+        // Arrange
+        var draft = Mfa(eventType, AuditOutcome.Denied, Details(("reasonCode", "attempt_limit")));
+
+        // Act
+        var result = _validator.Validate(draft, UserContext);
+
+        // Assert
+        Assert.That(result, Is.EqualTo(AuditRejectionCode.OutcomeNotAllowed));
+    }
+
+    [Test]
+    public void Validate_MfaVerifiedDeniedWithAttemptLimit_AcceptsIt()
+    {
+        // Arrange
+        var draft = Mfa(AuditEventTypes.AuthMfaVerified, AuditOutcome.Denied, Details(("reasonCode", "attempt_limit")));
+
+        // Act
+        var result = _validator.Validate(draft, UserContext);
+
+        // Assert
+        Assert.That(result, Is.EqualTo(AuditRejectionCode.None));
+    }
+
+    // The agreed lists (CONTRACTS.md, MFA reason codes): every listed value is accepted with its outcome.
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "invalid_code")]
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "no_valid_enrollment")]
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "already_enabled")]
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "invalid_enrollment")]
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "session_inactive")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "invalid_code")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "replayed_code")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "invalid_secret")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "session_inactive")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Denied, "attempt_limit")]
+    public void Validate_MfaRefusalWithListedReasonCode_AcceptsIt(string eventType, AuditOutcome outcome, string reason)
+    {
+        // Arrange
+        var draft = Mfa(eventType, outcome, Details(("reasonCode", reason)));
+
+        // Act
+        var result = _validator.Validate(draft, UserContext);
+
+        // Assert
+        Assert.That(result, Is.EqualTo(AuditRejectionCode.None));
+    }
+
+    // A refusal without a reason does not help a review.
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure)]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure)]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Denied)]
+    public void Validate_MfaRefusalWithoutReasonCode_RejectsIt(string eventType, AuditOutcome outcome)
+    {
+        // Arrange
+        var draft = Mfa(eventType, outcome);
+
+        // Act
+        var result = _validator.Validate(draft, UserContext);
+
+        // Assert
+        Assert.That(result, Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
+    }
+
+    // Well-formed codes that are not on the list of the event and outcome, including the old names.
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "replayed")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "locked")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, "attempt_limit")]
+    [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Denied, "invalid_code")]
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "replayed_code")]
+    [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "account_locked")]
+    public void Validate_MfaReasonCodeNotOnTheListOfItsOutcome_RejectsValue(
+        string eventType, AuditOutcome outcome, string reason)
+    {
+        // Arrange
+        var draft = Mfa(eventType, outcome, Details(("reasonCode", reason)));
+
+        // Act
+        var result = _validator.Validate(draft, UserContext);
+
+        // Assert
+        Assert.That(result, Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
     }
 
     [Test]
@@ -438,7 +518,7 @@ public sealed class AuditDraftValidatorTests
     [TestCase("email", "student")]
     public void Validate_WhenMfaFailureCarriesAnotherDetail_RejectsIt(string key, string value)
     {
-        var draft = Mfa(AuditEventTypes.AuthMfaVerify, AuditOutcome.Failure,
+        var draft = Mfa(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure,
             Details(("reasonCode", "invalid_code"), (key, value)));
 
         Assert.That(_validator.Validate(draft, UserContext),
@@ -450,7 +530,7 @@ public sealed class AuditDraftValidatorTests
     [TestCase("otpauth://totp/x")]
     public void Validate_WhenMfaReasonCodeIsNotACode_RejectsValue(string value)
     {
-        var draft = Mfa(AuditEventTypes.AuthMfaVerify, AuditOutcome.Failure, Details(("reasonCode", value)));
+        var draft = Mfa(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure, Details(("reasonCode", value)));
 
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
     }

@@ -13,7 +13,7 @@ public static class AuditEventTypes
     public const string AuthLoginThrottled = "auth.login.throttled";
     public const string AuthMfaEnrollmentStarted = "auth.mfa.enrollment.started";
     public const string AuthMfaEnabled = "auth.mfa.enabled";
-    public const string AuthMfaVerify = "auth.mfa.verify";
+    public const string AuthMfaVerified = "auth.mfa.verified";
     public const string AuthMfaBackupCodesGenerated = "auth.mfa.backup_codes.generated";
     public const string AuthMfaBackupCodeRedeemed = "auth.mfa.backup_code.redeemed";
     public const string AuthMfaBackupCodeRejected = "auth.mfa.backup_code.rejected";
