@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
 using Platform.Identity.Services;
 
@@ -19,6 +21,10 @@ public static class IdentityModule
         var connectionString = configuration.GetConnectionString(ConnectionStringName);
 
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
+        services.AddDataProtection()
+            .SetApplicationName("SecurityLab");
+        // IDN-06: no plain IDataProtector is registered; only MFA gets the MFA purpose.
+        services.AddSingleton<ITotpSecretProtector, DataProtectionTotpSecretProtector>();
 
         // IDN-05: an invalid lockout setting stops the service from starting.
         services.AddOptions<IdentityLockoutOptions>()

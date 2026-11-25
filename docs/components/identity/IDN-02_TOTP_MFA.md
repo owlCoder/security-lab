@@ -122,6 +122,30 @@ TOTP tajna mora biti šifrovana pre upisa u bazu. Ključ se čuva u environment 
 
 Pošto backend mora da koristi tajnu za verifikaciju, ona se ne hash-uje kao lozinka.
 
+TOTP tajnu šifruje samo `ITotpSecretProtector` (`DataProtectionTotpSecretProtector`, purpose
+`SecurityLab / Identity / MfaTotpSecret / v1`). Običan `IDataProtector` nije registrovan, pa drugi moduli prave
+sopstveni protector iz `IDataProtectionProvider`, sa svojim purpose-om.
+
+### Key ring (implementirano)
+
+Gubitak Data Protection ključeva znači da se nijedna sačuvana TOTP tajna ne može dešifrovati, a bez recovery
+kodova i admin reseta svi MFA nalozi ostaju zaključani. Zato `AddMfaKeyRing` (`Program.cs`) traži:
+
+| Podešavanje | Značenje |
+|-|-|
+| `Identity:DataProtection:KeysPath` | direktorijum za ključeve; mora da preživi restart i da bude u backup-u zajedno sa bazom (ADM-03, OPS-04) |
+| `Identity:DataProtection:CertificatePath` | PFX sa privatnim ključem; njime se šifruje svaki ključ upisan u `KeysPath` |
+| `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu ili user-secrets, nikad u repou (ADM-04) |
+
+- Van Development okruženja oba prva podešavanja su obavezna. Ako nedostaju, ako fajl ne postoji, ako lozinka
+  nije dobra ili sertifikat nema privatni ključ, API se ne pokreće (poruka ne sadrži lozinku).
+- U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring. Ako je podešeno samo jedno
+  od dva, start pada i tada.
+- Za restore na drugom hostu potrebni su i `KeysPath` i isti sertifikat. Kopija ključeva bez sertifikata ne
+  otvara tajne (`MfaKeyRingTests.WithoutTheCertificate_TheStoredKeysCannotBeUsed`).
+- Test hostovi koji rade kao Production ili Testing uključuju test key ring preko `UseMfaTestKeyRing()`
+  (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu.
+
 ## 7. Replay i rate limiting zaštita
 
 Za svaki nalog ili MFA credential čuvati poslednji prihvaćeni TOTP time-step. Kod iz istog ili starijeg time-step-a odbiti, čime se sprečava ponovna upotreba istog koda.
