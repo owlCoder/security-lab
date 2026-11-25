@@ -24,10 +24,8 @@ public static class IdentityModule
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
         services.AddDataProtection()
             .SetApplicationName("SecurityLab");
-        services.AddSingleton<IDataProtector>(serviceProvider =>
-            serviceProvider
-                .GetRequiredService<IDataProtectionProvider>()
-                .CreateProtector("SecurityLab", "Identity", "MfaTotpSecret", "v1"));
+        // IDN-06: no plain IDataProtector is registered; only MFA gets the MFA purpose.
+        services.AddSingleton<ITotpSecretProtector, DataProtectionTotpSecretProtector>();
 
         // IDN-05: an invalid lockout setting stops the service from starting.
         services.AddOptions<IdentityLockoutOptions>()

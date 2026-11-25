@@ -34,25 +34,23 @@ public class EfMfaCredentialsStore(
         DateTimeOffset expiresAt,
         CancellationToken ct)
     {
-        var mfaCredentials = await GetAsync(userId, ct);
-        if (mfaCredentials is null)
-        {
-            mfaCredentials = new MfaCredentials(userId);
-            await _db.MfaCredentials.AddAsync(mfaCredentials, ct);
-        }
-
-        if (mfaCredentials.MfaEnabled)
-            return false;
-
-        if (mfaCredentials.PendingTotpSecretCiphertext is not null
-            && mfaCredentials.PendingEnrollmentExpiresAt > _clock.GetUtcNow())
-            return false;
-
-        mfaCredentials.PendingTotpSecretCiphertext = encryptedSecret;
-        mfaCredentials.PendingTotpSecretKeyVersion = keyVersion;
-        mfaCredentials.PendingEnrollmentExpiresAt = expiresAt;
-        await _db.SaveChangesAsync(ct);
-        return true;
+        // One statement, so parallel enrollments cannot both pass a read-then-write check. Without a row the INSERT
+        // wins; a parallel INSERT waits for it and then takes the UPDATE path. The UPDATE runs only while MFA is
+        // disabled and no unexpired enrollment is pending, checked again on the committed row after the wait.
+        // 0 rows: MFA is enabled or an enrollment is still pending.
+        var now = _clock.GetUtcNow();
+        var rows = await _db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO identity.mfa_credentials AS c
+                (user_id, pending_totp_secret_ciphertext, pending_totp_secret_key_version, pending_enrollment_expires_at)
+            VALUES ({userId}, {encryptedSecret}, {keyVersion}, {expiresAt})
+            ON CONFLICT (user_id) DO UPDATE
+            SET pending_totp_secret_ciphertext = EXCLUDED.pending_totp_secret_ciphertext,
+                pending_totp_secret_key_version = EXCLUDED.pending_totp_secret_key_version,
+                pending_enrollment_expires_at = EXCLUDED.pending_enrollment_expires_at
+            WHERE NOT c.mfa_enabled
+              AND (c.pending_totp_secret_ciphertext IS NULL OR c.pending_enrollment_expires_at <= {now})
+            """, ct);
+        return rows == 1;
     }
 
     public async Task<bool> RecordFailedAttemptAsync(

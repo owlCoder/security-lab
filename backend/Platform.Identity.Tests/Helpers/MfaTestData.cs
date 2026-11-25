@@ -1,6 +1,6 @@
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Identity.Entities;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
 
 namespace Platform.Identity.Tests.Helpers;
@@ -16,7 +16,7 @@ public static class MfaTestData
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        var protector = scope.ServiceProvider.GetRequiredService<IDataProtector>();
+        var protector = scope.ServiceProvider.GetRequiredService<ITotpSecretProtector>();
         var credentials = new MfaCredentials(userId)
         {
             MfaEnabled = true,
@@ -39,7 +39,7 @@ public static class MfaTestData
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        var protector = scope.ServiceProvider.GetRequiredService<IDataProtector>();
+        var protector = scope.ServiceProvider.GetRequiredService<ITotpSecretProtector>();
         var credentials = new MfaCredentials(userId)
         {
             PendingTotpSecretCiphertext = protector.Protect(secret),

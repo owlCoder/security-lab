@@ -13,6 +13,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
+using Platform.Identity.Services;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -27,7 +28,7 @@ public sealed class MfaServiceTests
     private Mock<IMfaCredentialsStore> _credentials = null!;
     private RecordingAudit _audit = null!;
     private Mock<TimeProvider> _clock = null!;
-    private IDataProtector _protector = null!;
+    private ITotpSecretProtector _protector = null!;
     private FakeUnitOfWork _work = null!;
     private MfaService _service = null!;
 
@@ -41,8 +42,7 @@ public sealed class MfaServiceTests
         _clock.Setup(clock => clock.GetUtcNow()).Returns(_now);
         _work = new FakeUnitOfWork();
         _credentials.Setup(store => store.BeginAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_work);
-        _protector = new EphemeralDataProtectionProvider()
-            .CreateProtector("SecurityLab", "Identity", "MfaTotpSecret", "v1");
+        _protector = new DataProtectionTotpSecretProtector(new EphemeralDataProtectionProvider());
         _service = new MfaService(_credentials.Object, _sessions.Object,
             new IdentityAuditProducer(_audit, _audit, NullLogger<IdentityAuditProducer>.Instance),
             _clock.Object, _protector, Options.Create(new IdentityLockoutOptions()), NullLogger<MfaService>.Instance);
@@ -493,6 +493,40 @@ public sealed class MfaServiceTests
 
         Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
         VerifyAuditDoesNotContainSecret("invalid_code", AuditEventTypes.AuthMfaVerify);
+    }
+
+    // milanPR15 review: confirm without /mfa/enroll is a client error (401), not 503.
+    [Test]
+    public async Task Confirm_WithoutEnrollment_IsInvalidCode_AndAuditsNoValidEnrollment()
+    {
+        SetupSession();
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MfaCredentials?)null);
+
+        var result = await _service.ConfirmEnrollAsync(Token, "123456", "corr-no-enroll", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.InvalidCode));
+        _credentials.Verify(store => store.BeginAsync(It.IsAny<CancellationToken>()), Times.Never);
+        VerifyAuditDoesNotContainSecret("no_valid_enrollment");
+    }
+
+    [Test]
+    public async Task Enroll_WhenTheDatabaseFails_ReturnsUnavailable()
+    {
+        SetupSession();
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MfaCredentials?)null);
+        _credentials.Setup(store => store.GetEmailAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("student@example.test");
+        _credentials.Setup(store => store.CreatePendingAsync(
+                UserId, It.IsAny<string>(), 1, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Microsoft.EntityFrameworkCore.DbUpdateException("storage failed"));
+
+        var result = await _service.EnrollAsync(Token, "corr-db-down", CancellationToken.None);
+
+        Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unavailable));
+        Assert.That(result.Uri, Is.Null);
+        Assert.That(_audit.Writes, Is.Empty);
     }
 
     private readonly Guid _sessionId = Guid.NewGuid();

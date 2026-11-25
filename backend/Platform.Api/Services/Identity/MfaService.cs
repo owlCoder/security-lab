@@ -1,6 +1,5 @@
 using System.Data.Common;
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
@@ -25,7 +24,7 @@ public sealed class MfaService(
     ISessionStore sessionStore,
     IdentityAuditProducer audit,
     TimeProvider clock,
-    IDataProtector secretProtector,
+    ITotpSecretProtector secretProtector,
     IOptions<IdentityLockoutOptions> lockout,
     ILogger<MfaService> logger) : IMfaService
 {
@@ -36,7 +35,7 @@ public sealed class MfaService(
     private readonly ISessionStore _sessionStore = sessionStore;
     private readonly IdentityAuditProducer _audit = audit;
     private readonly TimeProvider _clock = clock;
-    private readonly IDataProtector _secretProtector = secretProtector;
+    private readonly ITotpSecretProtector _secretProtector = secretProtector;
     private readonly IdentityLockoutOptions _lockout = lockout.Value;
     private readonly ILogger<MfaService> _logger = logger;
 
@@ -63,12 +62,21 @@ public sealed class MfaService(
         var secret = TotpHelpers.GenerateSecret();
         var encryptedSecret = _secretProtector.Protect(secret);
         var expiresAt = _clock.GetUtcNow().Add(EnrollmentLifetime);
-        var stored = await _mfaCredentialsStore.CreatePendingAsync(
-            session.UserId,
-            encryptedSecret,
-            SecretKeyVersion,
-            expiresAt,
-            ct);
+        bool stored;
+        try
+        {
+            stored = await _mfaCredentialsStore.CreatePendingAsync(
+                session.UserId,
+                encryptedSecret,
+                SecretKeyVersion,
+                expiresAt,
+                ct);
+        }
+        catch (Exception ex) when (ex is DbException or DbUpdateException)
+        {
+            _logger.LogError(ex, "MFA enrollment could not be stored: the database failed.");
+            return (MfaOutcome.Unavailable, null);
+        }
 
         if (!stored)
             return (MfaOutcome.EnrollmentPending, null);
@@ -96,9 +104,10 @@ public sealed class MfaService(
             return MfaOutcome.Unauthorized;
 
         var userId = session.UserId;
+        // No row yet means confirm without /mfa/enroll: a client error like every other missing enrollment.
         var credentials = await _mfaCredentialsStore.GetAsync(userId, ct);
         if (credentials is null)
-            return MfaOutcome.Unavailable;
+            return await RefuseEnableAsync(userId, "no_valid_enrollment", correlationId, MfaOutcome.InvalidCode, ct);
         if (credentials.MfaEnabled)
             return await RefuseEnableAsync(userId, "already_enabled", correlationId, MfaOutcome.AlreadyEnabled, ct);
 

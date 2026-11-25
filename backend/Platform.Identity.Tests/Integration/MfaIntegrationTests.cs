@@ -15,6 +15,7 @@ using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Integration;
@@ -589,6 +590,67 @@ public sealed class MfaIntegrationTests : IntegrationTestBase
             rows.Add(new AuditRow(reader.GetString(0), reader.GetString(1),
                 reader.IsDBNull(2) ? null : reader.GetGuid(2), reader.GetString(3), reader.GetString(4)));
         return rows;
+    }
+
+    // milanPR15 review: enrollment edge cases.
+    [Test]
+    [Category("US-17")]
+    public async Task EnrollConfirm_WithoutEnrollment_ReturnsUnauthorized()
+    {
+        await LoginAsAsync("mfa-confirm-no-enroll@platform.com");
+
+        var response = await Client.PostAsJsonAsync("/api/auth/mfa/enroll/confirm", new { Code = "123456" });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+        Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain("invalid_mfa"));
+    }
+
+    [Test]
+    [Category("US-17")]
+    public async Task Enroll_TwoParallelFirstEnrollments_OneSucceeds_OneConflicts_NoServerError()
+    {
+        var user = await UserTestData.AddAsync(Factory, "mfa-enroll-parallel@platform.com", Password);
+        var first = await SessionTestData.CreateAsync(Factory, user.Id);
+        var second = await SessionTestData.CreateAsync(Factory, user.Id);
+
+        var responses = await Task.WhenAll(
+            PostWithSessionAsync("/api/auth/mfa/enroll", first.RawToken, new { }),
+            PostWithSessionAsync("/api/auth/mfa/enroll", second.RawToken, new { }));
+
+        Assert.That(responses.Select(r => r.StatusCode),
+            Is.EquivalentTo(new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
+        await AssertStoredSecretMatchesTheReturnedUriAsync(user.Id, responses);
+    }
+
+    [Test]
+    [Category("US-17")]
+    public async Task Enroll_TwoParallelEnrollmentsOverAnExpiredOne_OneSucceeds_OneConflicts()
+    {
+        var user = await UserTestData.AddAsync(Factory, "mfa-enroll-parallel-expired@platform.com", Password);
+        await MfaTestData.AddPendingAsync(
+            Factory, user.Id, TotpHelpers.GenerateSecret(), DateTimeOffset.UtcNow.AddMinutes(-1));
+        var first = await SessionTestData.CreateAsync(Factory, user.Id);
+        var second = await SessionTestData.CreateAsync(Factory, user.Id);
+
+        var responses = await Task.WhenAll(
+            PostWithSessionAsync("/api/auth/mfa/enroll", first.RawToken, new { }),
+            PostWithSessionAsync("/api/auth/mfa/enroll", second.RawToken, new { }));
+
+        Assert.That(responses.Select(r => r.StatusCode),
+            Is.EquivalentTo(new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
+        await AssertStoredSecretMatchesTheReturnedUriAsync(user.Id, responses);
+    }
+
+    // The URI the user got is the enrollment that is stored, so the code from the app can confirm it.
+    private static async Task AssertStoredSecretMatchesTheReturnedUriAsync(Guid userId, HttpResponseMessage[] responses)
+    {
+        var ok = responses.Single(r => r.StatusCode == HttpStatusCode.OK);
+        var body = await ok.Content.ReadFromJsonAsync<MfaEnrollResponse>();
+        var secret = HttpUtility.ParseQueryString(new Uri(body!.Uri).Query)["secret"]!;
+        var credentials = await GetAsync<MfaCredentials>(userId);
+        using var scope = Factory.Services.CreateScope();
+        var protector = scope.ServiceProvider.GetRequiredService<ITotpSecretProtector>();
+        Assert.That(protector.Unprotect(credentials!.PendingTotpSecretCiphertext!), Is.EqualTo(secret));
     }
 
     private const int MaxFailedAttempts = 5;

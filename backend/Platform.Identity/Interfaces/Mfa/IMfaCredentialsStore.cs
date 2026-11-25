@@ -8,6 +8,10 @@ public interface IMfaCredentialsStore
     Task<MfaCredentials?> GetAsync(Guid userId, CancellationToken ct);
     Task<string?> GetEmailAsync(Guid userId, CancellationToken ct);
 
+    /// <summary>
+    /// US-17: stores a pending enrollment in one statement (insert, or update of an expired one). Returns false when
+    /// MFA is already enabled or an unexpired enrollment is pending, also when a parallel request stored one first.
+    /// </summary>
     Task<bool> CreatePendingAsync(
         Guid userId,
         string encryptedSecret,
