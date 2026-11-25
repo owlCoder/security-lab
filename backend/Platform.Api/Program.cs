@@ -199,6 +199,8 @@ builder.Services.AddSingleton(new AccessConfigurationOptions
     }
 });
 builder.Services.AddPrg04CompetencyOperations();
+// ACC-08: probni izvori clanstva i resursa. Rade samo u Development uz Access__DevelopmentSources=true.
+builder.Services.AddAccessDevelopmentSources(builder.Environment, builder.Configuration);
 builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
 if (kt1Enabled) builder.Services.AddKt1RequestIdentity();
