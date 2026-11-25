@@ -56,6 +56,33 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             null,
             Fields()),
+        // IDN-06 (US-17): a pending TOTP enrollment was created for the account of the session.
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaEnrollmentStarted,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        // IDN-06 (US-17): the enrollment was confirmed with a TOTP code, or the confirmation failed.
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaEnabled,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", ReasonCode))),
+
+        // IDN-06 (US-18): the second factor of a login (MfaPending session) was verified, or it failed.
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaVerify,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", ReasonCode))),
+
         new AuditEventSchema(
             AuditEventTypes.AuthMfaBackupCodesGenerated,
             Outcomes((AuditOutcome.Success, User)),
