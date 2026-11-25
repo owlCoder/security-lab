@@ -79,8 +79,16 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
        
         if ((now - session.LastActivityAt) >= inactivityTime) {
             session.Revoke(now);
+            try{
             await db.SaveChangesAsync(ct);
             return null;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                db.Entry(session).State = EntityState.Detached;
+                return null;
+            }
+
         }
 
         session.Touch(now);

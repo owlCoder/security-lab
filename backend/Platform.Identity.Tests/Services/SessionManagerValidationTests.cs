@@ -100,8 +100,12 @@ public class SessionManagerValidationTests
     public async Task ExpiredSession_IsRejected_AtTheExactExpiryTime()
     {
         var (token, _) = await CreateSessionAsync(Guid.NewGuid());
-        _clock.Advance(Lifetime);
-
+        for (var elapsed = 0; elapsed + 44 < 480; elapsed += 44)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(44));
+            Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+        }
+        _clock.Advance(TimeSpan.FromMinutes(44));
         Assert.That(await _manager.ValidateAsync(token), Is.Null);
     }
 

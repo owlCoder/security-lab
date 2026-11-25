@@ -66,7 +66,7 @@ flowchart LR
   Logout --> Audit
 ```
 
-`SessionCookie` centralizes cookie name and options: HttpOnly, Secure, SameSite Strict, path `/`, and the session expiration. `StoreSessionCreator` currently issues sessions with a configutable absolute lifetime (by default 8 hours). `SessionStore` generates a new token and stores its SHA-256 hash with the session. `SessionCheckMiddleware` reads the cookie, bypasses endpoints marked `AllowAnonymous`, and otherwise calls `ISessionManager.ValidateAsync`.
+`SessionCookie` centralizes cookie name and options: HttpOnly, Secure, SameSite Strict, path `/`, and the session expiration. `StoreSessionCreator` currently issues sessions with a configurable absolute lifetime (by default 8 hours). `SessionStore` generates a new token and stores its SHA-256 hash with the session. `SessionCheckMiddleware` reads the cookie, bypasses endpoints marked `AllowAnonymous`, and otherwise calls `ISessionManager.ValidateAsync`.
 
 The middleware places a `ValidateSession` in `HttpContext.Items`; `SessionIdentityContext` maps it to `CallerIdentity`. `IsAuthenticated` is true only for `Active`. Middleware accepts a valid `MfaPending` session as a validated session and does not apply endpoint-specific MFA policy.
 
@@ -121,5 +121,4 @@ dotnet test backend\Platform.Identity.Tests\Platform.Identity.Tests.csproj
 1. Confirm account-status persistence with IDN-03.
 2. Implement IDN-06 MFA policy, enrollment, verification, and endpoint restrictions before claiming MFA protection.
 3. Add explicit authorization/CSRF controls where required by ACC-05 and SEC-03.
-4. Align session lifetime and inactivity behavior with US-14.
-5. Keep this document and the contract docs synchronized with code and tests.
+4. Keep this document and the contract docs synchronized with code and tests.
