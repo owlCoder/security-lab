@@ -142,16 +142,25 @@ kodova i admin reseta svi MFA nalozi ostaju zaključani. Zato `AddMfaKeyRing` (`
 
   | Uslov | Test |
   |-|-|
-  | podešavanja nedostaju | `OutsideDevelopment_MissingSettings_StopTheStart`, `ApiHost_InProductionWithoutKeyRing_DoesNotStart` |
-  | podešeno je samo jedno od dva | `OnlyOneOfTheTwoSettings_StopsTheStart_EvenInDevelopment` |
-  | PFX fajl ne postoji | `MissingCertificateFile_StopsTheStart` |
-  | lozinka nije dobra | `WrongCertificatePassword_StopsTheStart_WithoutRevealingIt` |
-  | sertifikat nema privatni ključ | `CertificateWithoutPrivateKey_StopsTheStart` |
-  | `KeysPath` ne može da se napravi | `KeysPathThatCannotBeCreated_StopsTheStart` |
+  | podešavanja nedostaju | `AddMfaKeyRing_OutsideDevelopmentWithoutSettings_Throws`, `ApiHost_InProductionWithoutKeyRing_DoesNotStart` |
+  | podešeno je samo jedno od dva | `AddMfaKeyRing_OnlyOneSettingInDevelopment_Throws` |
+  | PFX fajl ne postoji | `AddMfaKeyRing_MissingCertificateFile_Throws` |
+  | lozinka nije dobra | `AddMfaKeyRing_WrongCertificatePassword_ThrowsWithoutRevealingIt` |
+  | sertifikat nema privatni ključ | `AddMfaKeyRing_CertificateWithoutPrivateKey_Throws` |
+  | `KeysPath` ne može da se napravi | `AddMfaKeyRing_KeysPathThatCannotBeCreated_Throws` |
+  | `KeysPath` postoji, ali nije čitljiv | `AddMfaKeyRing_ExistingKeysPathWithoutReadAccess_Throws` |
+  | `KeysPath` postoji, ali nije upisiv | `AddMfaKeyRing_ExistingKeysPathWithoutWriteAccess_Throws` |
+
+- Prava na `KeysPath` se proveravaju pri startu, a ne pri prvom enrollment-u. Data Protection čita key ring pri
+  prvoj upotrebi i tada upisuje prvi ključ, a posle toga nov ključ otprilike svakih 90 dana. Zato direktorijum
+  koji postoji, ali nije čitljiv ili upisiv za korisnika pod kojim radi API, zaustavlja start. Upis se proverava
+  pravim upisom privremenog fajla `.write-probe-<guid>.tmp`, koji se odmah briše. Tako provera radi isto na
+  Windows-u (ACL), Linux-u i macOS-u (prava pristupa, read-only mount). Data Protection čita samo `*.xml`, pa
+  probni fajl nikad ne smatra ključem.
 - U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring. Ako je podešeno samo jedno
   od dva, start pada i tada.
 - Za restore na drugom hostu potrebni su i `KeysPath` i isti sertifikat. Kopija ključeva bez sertifikata ne
-  otvara tajne (`MfaKeyRingTests.WithoutTheCertificate_TheStoredKeysCannotBeUsed`).
+  otvara tajne (`MfaKeyRingTests.TotpSecretProtector_KeysWithoutTheCertificate_CannotReadTheSecret`).
 - Test hostovi koji rade kao Production ili Testing uključuju test key ring preko `UseMfaTestKeyRing()`
   (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu.
 - Lokalno pokretanje van Development okruženja i pravljenje PFX-a: `docs/DEVELOPMENT.md`, odeljak

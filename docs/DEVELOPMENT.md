@@ -139,5 +139,7 @@ rm keyring.key keyring.crt
 
 Then set `Identity__DataProtection__KeysPath` to a directory, `Identity__DataProtection__CertificatePath` to the PFX, and `Identity__DataProtection__CertificatePassword` to the export password in `.env` or user-secrets. Never commit the PFX or its password.
 
+The user that runs the API needs read and write rights on `KeysPath`, for example the owner of a Docker volume. Data Protection writes the first key on first use and a new key about every 90 days, so the API checks both rights at start and does not start without them.
+
 - Keep the same PFX for as long as the key directory exists. A different certificate cannot decrypt the existing keys, and every stored TOTP secret becomes unreadable. Certificate rotation is not supported yet, see `docs/components/identity/IDN-02_TOTP_MFA.md`, section "Zamena sertifikata".
 - Test hosts that run outside Development call `UseMfaTestKeyRing()` from `backend/TestShared/MfaTestKeyRing.cs`. A new test project that starts the API as Production or Testing links that file and calls it after `UseEnvironment(...)`.
