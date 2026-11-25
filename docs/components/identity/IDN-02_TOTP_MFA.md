@@ -137,8 +137,8 @@ kodova i admin reseta svi MFA nalozi ostaju zaključani. Zato `AddMfaKeyRing` (`
 | `Identity:DataProtection:CertificatePath` | PFX sa privatnim ključem; njime se šifruje svaki ključ upisan u `KeysPath` |
 | `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu ili user-secrets, nikad u repou (ADM-04) |
 
-- Van Development okruženja oba prva podešavanja su obavezna. API se ne pokreće, a poruka ne sadrži lozinku,
-  u ovim slučajevima (svaki ima test u `MfaKeyRingTests`):
+- Van Development okruženja oba prva podešavanja su obavezna. API se ne pokreće u ovim slučajevima (svaki ima
+  test u `MfaKeyRingTests`). Poruka greške ove provere ne sadrži lozinku ni putanju:
 
   | Uslov | Test |
   |-|-|
@@ -150,19 +150,26 @@ kodova i admin reseta svi MFA nalozi ostaju zaključani. Zato `AddMfaKeyRing` (`
   | `KeysPath` ne može da se napravi | `AddMfaKeyRing_KeysPathThatCannotBeCreated_Throws` |
   | `KeysPath` postoji, ali nije čitljiv | `AddMfaKeyRing_ExistingKeysPathWithoutReadAccess_Throws` |
   | `KeysPath` postoji, ali nije upisiv | `AddMfaKeyRing_ExistingKeysPathWithoutWriteAccess_Throws` |
+  | postojeći ključ (`*.xml`) nije čitljiv, npr. posle restore-a sa drugim vlasnikom fajlova | `AddMfaKeyRing_ExistingKeyFileWithoutReadAccess_Throws` |
 
 - Prava na `KeysPath` se proveravaju pri startu, a ne pri prvom enrollment-u. Data Protection čita key ring pri
   prvoj upotrebi i tada upisuje prvi ključ, a posle toga nov ključ otprilike svakih 90 dana. Zato direktorijum
   koji postoji, ali nije čitljiv ili upisiv za korisnika pod kojim radi API, zaustavlja start. Upis se proverava
   pravim upisom privremenog fajla `.write-probe-<guid>.tmp`, koji se odmah briše. Tako provera radi isto na
   Windows-u (ACL), Linux-u i macOS-u (prava pristupa, read-only mount). Data Protection čita samo `*.xml`, pa
-  probni fajl nikad ne smatra ključem.
+  probni fajl nikad ne smatra ključem. Svaki postojeći ključ se pri startu samo otvara za čitanje; dešifruje ga
+  Data Protection kasnije, sertifikatom.
+- Data Protection sam loguje putanju fajla kad upisuje nov ključ (`FileSystemXmlRepository`, nivo Information).
+  Putanja nije tajna i pomaže operativi, pa se taj log ne filtrira. Log sadrži samo putanju, ne sadržaj ključa
+  ni lozinku PFX-a.
 - U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring. Ako je podešeno samo jedno
   od dva, start pada i tada.
 - Za restore na drugom hostu potrebni su i `KeysPath` i isti sertifikat. Kopija ključeva bez sertifikata ne
   otvara tajne (`MfaKeyRingTests.TotpSecretProtector_KeysWithoutTheCertificate_CannotReadTheSecret`).
 - Test hostovi koji rade kao Production ili Testing uključuju test key ring preko `UseMfaTestKeyRing()`
-  (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu.
+  (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu, jedan po test procesu.
+  Folder se briše kad se proces završi, a folder koji je ostao posle prekinutog procesa briše sledeće pokretanje
+  kad je stariji od jednog dana.
 - Lokalno pokretanje van Development okruženja i pravljenje PFX-a: `docs/DEVELOPMENT.md`, odeljak
   "MFA key ring (IDN-06)".
 
