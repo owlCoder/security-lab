@@ -7,7 +7,7 @@
 
 import { fakeLabContentResponse } from './fakeLabContent'
 
-/** Putanja iz LAB-01 kostura u main grani. Timski plan pominje /api/labs; ako se to usvoji, menja se samo ova linija. */
+/** Kanonska putanja LAB-01 API-ja. Server prihvata i alias /api/labs sa istim proverama. */
 export const LABS_BASE_PATH = '/api/laboratories'
 
 /**
@@ -34,6 +34,16 @@ export const LANGUAGES: { code: Language; label: string }[] = [
 export type TestUser = { id: string; role: 'Student' | 'Teacher' } | null
 
 export const TEST_USER_HEADER = 'X-Test-User'
+
+/**
+ * FAKE – demo kursevi iz Program.cs, postoje samo u Development režimu.
+ * Na prvom kursu je marko (1111…) nastavnik, a ana (2222…) studentkinja; na drugom marko nije nastavnik.
+ * Zameniće se listom kurseva prijavljenog nastavnika kad se poveže ACC/IDN modul.
+ */
+export const DEV_DEMO_COURSES: { id: string; label: string }[] = [
+  { id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', label: 'Demo kurs (marko je nastavnik)' },
+  { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', label: 'Drugi demo kurs (marko nije nastavnik)' },
+]
 
 export type ApiFailure =
   | { kind: 'invalid'; messages: string[]; requestId?: string }
@@ -63,13 +73,18 @@ export type LabContentOutcome =
 
 // Poznati kodovi grešaka sa servera prevode se u naše poruke.
 // Proizvoljan tekst sa servera se ne prikazuje, da poruka ne bi otkrila interne detalje.
+export const INVALID_COURSE_MESSAGE = 'Izaberite kurs na kome predajete.'
+
 const KNOWN_ERRORS: Record<string, string> = {
   INVALID_TITLE: `Naslov je obavezan i može imati najviše ${MAX_TITLE_LENGTH} znakova.`,
+  INVALID_COURSE: INVALID_COURSE_MESSAGE,
+  INVALID_BODY: 'Zahtev nije ispravan. Osvežite stranicu i pokušajte ponovo.',
   INVALID_LANGUAGE: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
   INVALID_DESCRIPTION: 'Opis nije ispravan.',
   INVALID_INSTRUCTIONS: 'Uputstvo nije ispravno.',
   INVALID_QUERY: `Proverite naziv i izabrane filtere. Naziv je opcion i može imati najviše ${MAX_TITLE_LENGTH} znakova, bez kontrolnih znakova.`,
   title: `Naslov je obavezan i može imati najviše ${MAX_TITLE_LENGTH} znakova.`,
+  courseId: INVALID_COURSE_MESSAGE,
   lang: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
   language: 'Jezik nije podržan. Dozvoljeni su srpski (sr) i engleski (en).',
 }
@@ -130,17 +145,18 @@ export async function toFailure(res: Response): Promise<ApiFailure> {
 }
 
 /**
- * LAB-01 kreiranje laboratorije. Šalje se samo naslov: ID dodeljuje server,
- * pa ga klijent nikad ne šalje.
+ * LAB-01 kreiranje laboratorije. Šalju se samo naslov i kurs (LAB-03).
+ * ID, autora, status i vreme dodeljuje server, pa ih klijent nikad ne šalje.
+ * Kurs bira korisnik, ali server proverava da je pozivalac nastavnik baš na tom kursu.
  */
-export async function createLab(title: string, user: TestUser): Promise<CreateLabOutcome> {
+export async function createLab(title: string, courseId: string, user: TestUser): Promise<CreateLabOutcome> {
   let res: Response
   try {
     res = await fetch(`${LABS_BASE_PATH}/`, {
       method: 'POST',
       headers: headersFor(user, true),
       credentials: 'same-origin',
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, courseId }),
     })
   } catch {
     return { kind: 'error' }
