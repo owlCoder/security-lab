@@ -13,7 +13,7 @@ namespace Platform.Api.Endpoints;
 public sealed record TemplateResponse(Guid Id, string Name, string Title, string Goal, string Type);
 
 public sealed record TemplateListResponse(IReadOnlyList<TemplateResponse> Templates, string CorrelationId);
-
+public sealed record LabStepDto(int SequenceOrder, string Title, string Instruction);
 public sealed record DraftResponse(
     Guid Id,
     Guid? SourceTemplateId,
@@ -23,6 +23,7 @@ public sealed record DraftResponse(
     string Title,
     string Goal,
     string Type,
+    IReadOnlyList<LabStepDto> Steps,
     string CorrelationId);
 
 public sealed record AuthoringErrorResponse(string Error, string CorrelationId);
@@ -146,5 +147,6 @@ public static class AuthoringEndpoints
 
     private static DraftResponse ToResponse(LabDraft d, string correlationId) =>
         new(d.Id, d.SourceTemplateId, d.OwnerId, d.Status.ToString(), d.Version,
-            d.Content.Title, d.Content.Goal, d.Content.Type.ToString(), correlationId);
+            d.Content.Title, d.Content.Goal, d.Content.Type.ToString(),
+            d.Content.Steps.Select(s => new LabStepDto(s.SequenceOrder, s.Title, s.Instruction)).ToList(), correlationId);
 }

@@ -15,8 +15,16 @@ public sealed record LabContent
     public string Title { get; private init; } = "";
     public string Goal { get; private init; } = "";
     public LabType Type { get; private init; }
-    public LabStep[] Steps { get; private init; } = Array.Empty<LabStep>();
-    private LabContent() { }
+    private readonly LabStep[] _steps = Array.Empty<LabStep>();
+    public IReadOnlyList<LabStep> Steps => Array.AsReadOnly(_steps);
+
+    private LabContent(string title, string goal, LabType type, LabStep[] steps)
+    {
+        Title = title;
+        Goal = goal;
+        Type = type;
+        _steps = steps;
+    }
 
     /// <summary>
     /// A draft may be incomplete (empty goal); completeness is checked at publication (REV-02, AUT-03).
@@ -54,6 +62,6 @@ public sealed record LabContent
             }
         }
 
-        return new LabContent { Title = cleanTitle, Goal = cleanGoal, Type = type, Steps = orderedSteps };
+        return new LabContent(cleanTitle, cleanGoal, type, orderedSteps);
     }
 }

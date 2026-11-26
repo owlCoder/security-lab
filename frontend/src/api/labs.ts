@@ -178,22 +178,49 @@ function parseContent(body: Record<string, unknown> | null): LabContent | null {
   if (!strings.every(v => typeof v === 'string')) return null
   const lang = parseLanguage(language)
     if (!lang) return null
-    const parsedSteps: LabStep[] = Array.isArray(steps)
-        ? steps.map(s => ({
-            sequenceOrder: typeof (s as Record<string, unknown>)?.sequenceOrder === 'number' ? (s as Record<string, unknown>).sequenceOrder as number : 0,
-            title: typeof (s as Record<string, unknown>)?.title === 'string' ? (s as Record<string, unknown>).title as string : '',
-            instruction: typeof (s as Record<string, unknown>)?.instruction === 'string' ? (s as Record<string, unknown>).instruction as string : '',
-        }))
-        : []
+  const parsedSteps = parseSteps(steps)
+    if (parsedSteps === null) return null
   return {
     revisionId: revisionId as string,
     evaluatorVersion: evaluatorVersion as string,
     language: lang,
     title: title as string,
     description: description as string,
-      instructions: instructions as string,
-      steps : parsedSteps,
+    instructions: instructions as string,
+    steps : parsedSteps,
   }
+}
+
+function parseSteps(steps: unknown): LabStep[] | null {
+    if (steps === undefined) return []
+    if (!Array.isArray(steps)) return null
+
+    const parsed: LabStep[] = []
+    for (const item of steps) {
+        if (item === null || typeof item !== 'object' || Array.isArray(item)) return null
+        const record = item as Record<string, unknown>
+        const { sequenceOrder, title, instruction } = record
+
+        if (typeof sequenceOrder !== 'number' || !Number.isInteger(sequenceOrder) || sequenceOrder < 1) {
+            return null
+        }
+        if (typeof title !== 'string' || typeof instruction !== 'string') {
+            return null
+        }
+
+        parsed.push({
+            sequenceOrder,
+            title,
+            instruction,
+        })
+    }
+
+    const sorted = [...parsed].sort((a, b) => a.sequenceOrder - b.sequenceOrder)
+    for (let i = 0; i < sorted.length; i++) {
+        if (sorted[i].sequenceOrder !== i + 1) return null
+    }
+
+    return sorted
 }
 
 /**

@@ -155,4 +155,19 @@ public class LabContentStepTests
         Assert.That(content.Steps.Select(s => s.SequenceOrder),
             Is.EqualTo(new[] { 1, 2, 3 }));
     }
+    [Test]
+    public void Mutating_source_array_does_not_affect_content_steps()
+    {
+        var source = new[]
+        {
+        LabStep.Create(1, "Step One", "Do this first."),
+        LabStep.Create(2, "Step Two", "Do this second.")
+    };
+
+        var content = LabContent.Create("Lab", "Goal", LabType.AccessControl, source);
+        source[0] = LabStep.Create(1, "Changed Outside", "Modified");
+
+        Assert.That(content.Steps, Is.Not.InstanceOf<LabStep[]>());
+        Assert.That(content.Steps[0].Title, Is.EqualTo("Step One"));
+    }
 }

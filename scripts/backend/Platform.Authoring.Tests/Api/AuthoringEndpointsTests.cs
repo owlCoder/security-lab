@@ -211,4 +211,23 @@ public class AuthoringEndpointsTests
         Assert.That(Status(result), Is.EqualTo(403));
         Assert.That(((InMemoryDraftStore)unregistered.GetRequiredService<IDraftRepository>()).Count, Is.EqualTo(0));
     }
+
+    [Test]
+    public async Task Copy_returns_steps_from_the_source_template()
+    {
+        var template = BuiltInTemplates.All.First(t => t.Id == TemplateId);
+
+        var result = await Copy(TestHost.Active(TestHost.Author), TemplateId);
+
+        Assert.That(Status(result), Is.EqualTo(201));
+        var draft = Body<DraftResponse>(result);
+        Assert.That(draft.Steps.Count, Is.EqualTo(template.Content.Steps.Count));
+
+        for (var i = 0; i < template.Content.Steps.Count; i++)
+        {
+            Assert.That(draft.Steps[i].SequenceOrder, Is.EqualTo(template.Content.Steps[i].SequenceOrder));
+            Assert.That(draft.Steps[i].Title, Is.EqualTo(template.Content.Steps[i].Title));
+            Assert.That(draft.Steps[i].Instruction, Is.EqualTo(template.Content.Steps[i].Instruction));
+        }
+    }
 }
