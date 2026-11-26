@@ -16,6 +16,9 @@ internal sealed class LiveApiProcess : IAsyncDisposable
     private readonly string certificateFile;
     private readonly string certificatePassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     private readonly X509Certificate2 certificate;
+    private readonly string keyRingFolder;
+    private readonly string keyRingCertificateFile;
+    private readonly string keyRingPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
     private Process? process;
     private Task? stdout;
     private Task? stderr;
@@ -39,6 +42,17 @@ internal sealed class LiveApiProcess : IAsyncDisposable
         certificateFile = Path.Combine(directory, "loopback-only.pfx");
         File.WriteAllBytes(certificateFile, certificate.Export(X509ContentType.Pfx, certificatePassword));
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(certificateFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        // US-22: a Production API does not start without a certificate-protected Data Protection key ring. Its own
+        // PFX and key folder live in the same private directory, survive the API restart and are deleted with it.
+        keyRingFolder = Path.Combine(directory, "dataprotection-keys");
+        keyRingCertificateFile = Path.Combine(directory, "keyring-only.pfx");
+        using var keyRingKey = RSA.Create(2048);
+        using var keyRingCertificate = new CertificateRequest("CN=SecurityLab live demo key ring", keyRingKey,
+                HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        File.WriteAllBytes(keyRingCertificateFile, keyRingCertificate.Export(X509ContentType.Pfx, keyRingPassword));
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(keyRingCertificateFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     public async Task StartAsync(CancellationToken ct)
@@ -54,6 +68,9 @@ internal sealed class LiveApiProcess : IAsyncDisposable
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
         start.Environment["ASPNETCORE_Kestrel__Certificates__Default__Path"] = certificateFile;
         start.Environment["ASPNETCORE_Kestrel__Certificates__Default__Password"] = certificatePassword;
+        start.Environment["Identity__DataProtection__KeysPath"] = keyRingFolder;
+        start.Environment["Identity__DataProtection__CertificatePath"] = keyRingCertificateFile;
+        start.Environment["Identity__DataProtection__CertificatePassword"] = keyRingPassword;
         start.Environment["CourseworkAdministration__Enabled"] = "true";
         start.Environment["CourseworkAttempts__Enabled"] = "false"; // no synthetic ATT provider is added
         start.Environment["Kt1Demo__Enabled"] = "false";

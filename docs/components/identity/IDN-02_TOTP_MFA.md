@@ -189,6 +189,9 @@ sa ispravnim podešavanjem se pokreće i piše ključ u `KeysPath`),
   (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu, jedan po test procesu,
   obrisan na kraju procesa. Folder koji ostane posle prekinutog procesa briše sledeće pokretanje kad je stariji
   od jednog dana.
+- Živa HTTPS demonstracija (`Platform.Coursework.Demo`, `LiveApiProcess`) pokreće pravi API kao `Production`
+  proces, pa pravi sopstveni PFX i `KeysPath` u svom privatnom direktorijumu. Oni preživljavaju restart API-ja
+  i brišu se zajedno sa tim direktorijumom.
 - Lokalno podešavanje i pravljenje PFX-a: `docs/DEVELOPMENT.md`, odeljak "MFA key ring".
 
 ### Zamena sertifikata i ključeva
