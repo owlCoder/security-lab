@@ -10,6 +10,7 @@ Components and requirements are defined by the Security Lab project specificatio
 | Team 4 | IDN-05 Per-account lockout | | milanmilosev1: IDN-05 lockout, [IDN-05 lockout](components/identity/IDN-05-lockout.md); administrator unlock: [IDN-05 admin unlock](components/identity/IDN-05-admin-unlock.md); per-IP limiting: [IDN-05](components/identity/IDN-05.md) |
 | … |  |  |  |
 | Team 6 | AUT-04 — odvajanje javnih podataka od evaluator ključa | AUT-07 — pregled studentskog prikaza pre objave | [AUT-04 i AUT-07](components/AUT-04-AUT-07.md) |
+| Team 09 | IDN-11 Session identifier rotation | IDN-22 Personal login history search | Team 09; [IDN-11 and IDN-22](components/identity/IDN-11_IDN-22.md) |
 | Team 11 | AUT-01 Create and edit drafts | AUT-06 Templates for quick task creation | SopalovicDjordje (PR 70/2023): AUT-01, AUT-06; [AUT-01 and AUT-06](components/AUT-authoring.md) |
 | Team 12 | AUD-01 Audit record of login and changes of rights | AUD-06 Teacher view of permitted security events | Bogdan Pećanac, Aleksandar Petrović, Mladen Kovačević, Konstantin Ristivojević, Bojan Kostić, Nikola Zeković, Vanja Jovanov, Nikola Jevtić, Aleksa Mandarić, Kristijan Oros; [component document](components/AUD-01-AUD-06.md), [Audit contract](components/audit/CONTRACTS.md), [agreements](components/audit/INTEGRATION.md) |
 | Team 14 | LAB-07 Lokalizacija i pristupačne varijante | | Lana Gojković (PR46/2023): LAB-07; [LAB-07](components/LAB-07-localization.md) |
