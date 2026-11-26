@@ -15,6 +15,7 @@ using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -83,7 +84,7 @@ public class AccountUnlockIntegrationTests : IntegrationTestBase
             services.RemoveAll<ITrustedAuditWriter>();
             services.AddScoped<ITrustedAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
         }));
-        using var client = audited.CreateClient();
+        using var client = audited.CreateCsrfClient();
 
         var response = await SendAsync(UnlockUrl(other.Id), studentSession.RawToken, client);
 
@@ -227,7 +228,7 @@ public class AccountUnlockIntegrationTests : IntegrationTestBase
             services.RemoveAll<ITransactionalAuditWriter>();
             services.AddSingleton<ITransactionalAuditWriter>(new UnavailableAuditWriter(failurePoint));
         }));
-        using var client = failing.CreateClient();
+        using var client = failing.CreateCsrfClient();
 
         var response = await SendAsync(UnlockUrl(student.Id), adminSession.RawToken, client);
 

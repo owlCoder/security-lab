@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Platform.Api.Contracts.Identity;
 using Platform.Api.Modules.Administration;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Enums;
@@ -133,9 +134,13 @@ internal static class LiveScenario
         private HttpClient? client;
         private readonly LiveReport report;
         public string? Cookie { get; private set; }
+        // US-15 / SEC-03: the CSRF pair for the current session, fetched as the frontend does before a state-changing
+        // request. It is bound to the session cookie and to the API's Data Protection keys, so it is dropped on login
+        // and on restart.
+        private (string Cookie, string Token)? csrf;
         public LiveSession(LiveApiProcess api, LiveReport report) { client = api.CreateClient(); this.report = report; }
-        public void Disconnect() { client?.Dispose(); client = null; }
-        public void Reconnect(LiveApiProcess api) => client = api.CreateClient();
+        public void Disconnect() { client?.Dispose(); client = null; csrf = null; }
+        public void Reconnect(LiveApiProcess api) { client = api.CreateClient(); csrf = null; }
         public async Task LoginAsync(string label, Guid account, string password, CancellationToken ct)
         {
             var reply = await SendAsync(label + " login", HttpMethod.Post, "/api/auth/login",
@@ -144,6 +149,7 @@ internal static class LiveScenario
             var lower = issued.ToLowerInvariant();
             report.Check(label + " cookie is Secure/HttpOnly/SameSite=Strict", lower.Contains("secure") && lower.Contains("httponly") && lower.Contains("samesite=strict"));
             Cookie = issued.Split(';')[0];
+            csrf = null;
             report.Check(label + " token is absent from the response body", Cookie.Length > SessionCookie.Name.Length + 21 && !reply.Body.Contains(Cookie[(SessionCookie.Name.Length + 1)..], StringComparison.Ordinal));
         }
         public async Task<Reply> SendAsync(string name, HttpMethod method, string path, object? body, int[] expected,
@@ -151,7 +157,14 @@ internal static class LiveScenario
         {
             report.Stage = name;
             using var request = new HttpRequestMessage(method, path);
-            if (Cookie is not null) request.Headers.Add("Cookie", Cookie);
+            var cookieHeader = Cookie;
+            if (method != HttpMethod.Get && method != HttpMethod.Head)
+            {
+                var pair = csrf ??= await FetchCsrfAsync(ct);
+                cookieHeader = cookieHeader is null ? pair.Cookie : cookieHeader + "; " + pair.Cookie;
+                request.Headers.Add(CsrfToken.HeaderName, pair.Token);
+            }
+            if (cookieHeader is not null) request.Headers.Add("Cookie", cookieHeader);
             if (includeWriteHeader) request.Headers.Add("X-Coursework-Request", "1");
             if (origin is not null) request.Headers.Add("Origin", origin);
             if (body is not null) request.Content = JsonContent.Create(body);
@@ -161,6 +174,17 @@ internal static class LiveScenario
             var content = await response.Content.ReadAsStringAsync(ct);
             return new(content, response.Headers.CacheControl?.NoStore == true,
                 response.Headers.TryGetValues("Set-Cookie", out var cookies) ? cookies.ToArray() : []);
+        }
+        private async Task<(string Cookie, string Token)> FetchCsrfAsync(CancellationToken ct)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/api/auth/csrf");
+            if (Cookie is not null) request.Headers.Add("Cookie", Cookie);
+            using var response = await client!.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            var cookie = response.Headers.GetValues("Set-Cookie")
+                .Single(v => v.StartsWith(CsrfToken.CookieName + "=", StringComparison.Ordinal)).Split(';')[0];
+            var token = (await response.Content.ReadFromJsonAsync<CsrfTokenResponse>(Json, ct))!.Token;
+            return (cookie, token);
         }
         public void Dispose() => Disconnect();
     }

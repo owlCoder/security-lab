@@ -26,6 +26,7 @@ Validates a presented session token for the request pipeline, revokes sessions, 
 | Method | Implemented behavior |
 |-|-|
 | `Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)` | Returns `null` for a blank, unknown, revoked, or expired token. Otherwise hashes the token with SHA-256 to find the stored session, updates `LastActivityAt`, persists it, and returns its handle, user id, and level. The raw token is not stored. |
+| `Task<ValidateSession?> PeekAsync(string token, CancellationToken ct = default)` | US-15. The same answer as `ValidateAsync`, but it does not update `LastActivityAt`. The CSRF check calls it before it refuses a request, so a refused request does not extend the session (US-14). It is a default interface method that calls `ValidateAsync`, for implementations that record no activity (test doubles); `SessionManager` overrides it. |
 | `Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)` | Revokes every session for the user whose `RevokedAt` is null and returns the number changed; returns `0` if none match. It validates that `userId` is non-empty. The current `SessionManager` does not use or audit `reason`; callers are responsible for any associated audit event. |
 | `Task<bool> RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default)` | Finds a session by both handle and owner and revokes it. Returns `false` for an unknown handle or a handle belonging to another user, and `true` when the owned session exists (including if it was already revoked). Both ids must be non-empty. |
 | `Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default)` | Returns sessions for the user that are not revoked and have not expired. It validates that `userId` is non-empty. |
@@ -51,6 +52,7 @@ The contract is for trusted server-side callers and does not authorize them. Cal
 | Team / module | Use |
 |-|-|
 | IDN-02 request pipeline | `ValidateAsync` on protected requests |
+| IDN-02 CSRF check (US-15) | `PeekAsync` for a state-changing request whose CSRF token failed, to tell a valid session (refused with `403`) from an invalid one (left to the session check, `401`) |
 | IDN-02 logout | Revokes the session identified by the presented cookie through `ISessionStore` |
 | IDN-03 account status | `RevokeAllForUser` when an account becomes blocked or archived |
 | IDN-07 session overview | `ListForUser` and `RevokeSession` |
@@ -66,3 +68,4 @@ Identity tests cover validation/revocation/listing, middleware handling of missi
 |-|-|-|
 | 0.1 | 2026-10 | Initial proposal using `ISessionManagement` |
 | 1.0 | 2026-11 | Updated method/type names and behavior to match the implemented `ISessionManager` |
+| 1.1 | 2026-11-25 | Added `PeekAsync` with a default implementation, so existing implementations keep compiling (US-15, PR #228) |

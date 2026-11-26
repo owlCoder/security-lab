@@ -1,3 +1,4 @@
+import { csrfFetch } from '../auth/csrf'
 import { parseRetryAfter } from './http'
 
 export type CreateAccountOutcome =
@@ -17,7 +18,7 @@ interface ApiBody {
 export async function createAccount(email: string, password: string): Promise<CreateAccountOutcome> {
   let res: Response
   try {
-    res = await fetch('/api/admin/accounts', {
+    res = await csrfFetch('/api/admin/accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -69,7 +70,7 @@ interface StatusBody {
 export async function changeAccountStatus(id: string, status: AccountStatus): Promise<ChangeAccountStatusOutcome> {
   let res: Response
   try {
-    res = await fetch(`/api/admin/accounts/${encodeURIComponent(id)}/status`, {
+    res = await csrfFetch(`/api/admin/accounts/${encodeURIComponent(id)}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),

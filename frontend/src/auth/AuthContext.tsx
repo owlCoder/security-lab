@@ -3,6 +3,7 @@ import { apiFetch } from './apiClient'
 import { ApiError, NetworkError } from '../models/ApiErrors'
 import type { AuthUser } from '../models/AuthUser'
 import { getCurrentUser, login as loginRequest, logout as logoutRequest } from './authApi'
+import { readCsrfCookie, refreshCsrfToken } from './csrf'
 import type { AuthContextValue, AuthProviderProps } from '../types/auth'
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -24,6 +25,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     let active = true
+    // US-15: get the CSRF cookies before the first form is sent, so login does not start with a 403 and a retry.
+    if (!readCsrfCookie()) void refreshCsrfToken()
     void getCurrentUser()
       .then(currentUser => {
         if (active) {
@@ -61,6 +64,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = useCallback(async () => {
     await logoutRequest()
     setUser(null)
+    // US-15: logout removes the CSRF cookies of the ended session; get a new pair for the next login.
+    void refreshCsrfToken()
   }, [])
 
   const request = useCallback(

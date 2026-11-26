@@ -19,6 +19,7 @@
     <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
     <ProjectReference Include="..\Platform.Competencies\Platform.Competencies.csproj" />
+    <ProjectReference Include="..\Platform.LabLocalization\Platform.LabLocalization.csproj" />
   </ItemGroup>
 
   <ItemGroup>
