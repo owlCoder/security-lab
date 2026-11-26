@@ -142,26 +142,76 @@ SecurityLab / Identity / MfaTotpSecret / v1
 U kontejneru nije registrovan običan `IDataProtector`, pa nijedan drugi modul ne može slučajno da dobije MFA
 purpose. Drugi moduli prave sopstveni protector iz `IDataProtectionProvider`, sa svojim purpose-om.
 
-### Ključevi
+### Ključevi (US-22)
 
-Data Protection ključevi se čuvaju u direktorijumu iz `Identity:DataProtection:KeysPath` (`IdentityModule`):
+Gubitak Data Protection ključeva znači da se nijedna sačuvana TOTP tajna ne može dešifrovati. Bez recovery
+kodova i admin reseta svi MFA nalozi tada ostaju zaključani. Gde se ključevi čuvaju i čime se šifruju određuje
+samo `AddMfaKeyRing` (`MfaKeyRing.cs`, poziva ga `Program.cs`). `IdentityModule` registruje samo Data Protection
+sa application name-om `SecurityLab` i `ITotpSecretProtector`.
 
-- ključevi preživljavaju restart, pa sačuvane tajne ostaju čitljive;
-- direktorijum je van repozitorijuma i ide u backup zajedno sa bazom (ADM-03, OPS-04). Restore baze bez njega
-  ostavlja MFA naloge bez pristupa, jer se nijedna tajna ne može dešifrovati;
-- bez `KeysPath` koristi se podrazumevano mesto frameworka: na Linuxu `~/.aspnet/DataProtection-Keys`, a u
-  kontejneru bez upisivog home direktorijuma samo memorija, pa se tajne posle restarta ne mogu dešifrovati.
+| Podešavanje | Značenje |
+|-|-|
+| `Identity:DataProtection:KeysPath` | direktorijum za ključeve; van repozitorijuma, mora da preživi restart i ide u backup zajedno sa bazom (ADM-03, OPS-04) |
+| `Identity:DataProtection:CertificatePath` | PFX sa privatnim ključem (`ProtectKeysWithCertificate`); njime je šifrovan svaki ključ upisan u `KeysPath` |
+| `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu, a u Development-u i `.env` ili user-secrets; nikad u repozitorijumu (ADM-04) |
 
-Kompromis ovog stanja:
+Ključ na disku ne sadrži master key u čistom obliku, nego `encryptedSecret` šifrovan sertifikatom. Kopija
+`KeysPath`-a i baze bez PFX-a ne otvara tajne.
 
-- ključevi u `KeysPath` **nisu šifrovani** na disku. Dump baze sam ne otkriva tajne, ali ih otkriva neko ko ima
-  i bazu i taj direktorijum;
-- start ne proverava da li je `KeysPath` podešen, ni u `Production` okruženju.
+**Provera pri startu.** Van Development okruženja (`Production`, `Staging`, `Testing`) `KeysPath` i
+`CertificatePath` su obavezni. API se ne pokreće u ovim slučajevima, a poruka greške ne sadrži lozinku ni sadržaj
+ključa:
 
-Šifrovanje ključeva, provera pri startu i test da logovi ne sadrže tajnu ni kod su obuhvat US-22.
+| Uslov | Test (`MfaKeyRingTests`) |
+|-|-|
+| podešavanja nedostaju | `AddMfaKeyRing_OutsideDevelopmentWithoutSettings_Throws`, `ApiHost_InProductionWithoutKeyRing_DoesNotStart` |
+| podešeno je samo jedno od dva (i u Development-u) | `AddMfaKeyRing_OnlyOneSettingInDevelopment_Throws` |
+| PFX fajl ne postoji | `AddMfaKeyRing_MissingCertificateFile_Throws` |
+| lozinka nije dobra | `AddMfaKeyRing_WrongCertificatePassword_ThrowsWithoutRevealingIt` |
+| sertifikat nema privatni ključ | `AddMfaKeyRing_CertificateWithoutPrivateKey_Throws` |
+| `KeysPath` ne može da se napravi | `AddMfaKeyRing_KeysPathThatCannotBeCreated_Throws` |
+| `KeysPath` postoji, ali nije čitljiv ili upisiv | `AddMfaKeyRing_ExistingKeysPathWithoutReadAccess_Throws`, `..._WithoutWriteAccess_Throws` |
+| postojeći ključ (`*.xml`) nije čitljiv, npr. posle restore-a sa drugim vlasnikom fajlova | `AddMfaKeyRing_ExistingKeyFileWithoutReadAccess_Throws` |
 
-Testovi: `IdentityModuleTests.TotpSecretProtector_WithKeysPath_NewInstanceReadsTheStoredSecret` (nova instanca
-sa istim direktorijumom čita sačuvanu tajnu) i `TotpSecretProtector_WithAnotherKeysPath_CannotReadTheStoredSecret`.
+Pozitivni slučajevi: `ApiHost_InProductionWithKeyRing_StartsAndWritesEncryptedKeys` (pravi host u `Production`-u
+sa ispravnim podešavanjem se pokreće i piše ključ u `KeysPath`),
+`AddMfaKeyRing_FirstProtect_WritesKeysEncryptedWithTheCertificate` i
+`TotpSecretProtector_NewInstanceWithTheSameKeyRing_ReadsTheSecret` (restart čita sačuvanu tajnu).
+
+- Prava na `KeysPath` se proveravaju pri startu, a ne pri prvom enrollment-u. Data Protection čita key ring pri
+  prvoj upotrebi, tada upisuje prvi ključ, a posle toga nov ključ otprilike svakih 90 dana. Upis se proverava
+  pravim upisom privremenog fajla `.write-probe-<guid>.tmp`, koji se odmah briše, pa provera radi isto na
+  Windows-u (ACL), Linux-u i macOS-u. Data Protection čita samo `*.xml`, pa probni fajl nikad ne smatra ključem.
+- U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring frameworka.
+- Data Protection loguje putanju fajla kad upisuje nov ključ (`FileSystemXmlRepository`, nivo Information).
+  Putanja nije tajna, pa se taj log ne filtrira; ne sadrži sadržaj ključa ni lozinku.
+- Test hostovi koji rade kao `Production` ili `Testing` uključuju test key ring preko `UseMfaTestKeyRing()`
+  (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu, jedan po test procesu,
+  obrisan na kraju procesa. Folder koji ostane posle prekinutog procesa briše sledeće pokretanje kad je stariji
+  od jednog dana.
+- Lokalno podešavanje i pravljenje PFX-a: `docs/DEVELOPMENT.md`, odeljak "MFA key ring".
+
+### Zamena sertifikata i ključeva
+
+Svaki ključ u `KeysPath` je šifrovan sertifikatom koji je bio podešen kad je ključ napravljen. `AddMfaKeyRing`
+registruje samo trenutni sertifikat i ne prosleđuje prethodne u `UnprotectKeysWithAnyCertificate`. Posledice:
+
+- **Drugi sertifikat:** postojeći ključevi ne mogu da se dešifruju, svaka sačuvana TOTP tajna postaje nečitljiva
+  i MFA prijava tih naloga ne uspeva dok se ne vrati stari PFX. To važi i za obnovljen sertifikat sa istim
+  ključnim parom, jer se thumbprint menja
+  (`TotpSecretProtector_ReplacedCertificate_CannotReadTheSecretUntilTheOldOneIsBack`).
+- **Drugi ili prazan `KeysPath`:** isto, tajne iz baze se ne mogu pročitati
+  (`TotpSecretProtector_AnotherKeysPath_CannotReadTheSecret`). Nove tajne posle toga rade sa novim ključem.
+- **Automatska rotacija ključa** (Data Protection, oko 90 dana) nije problem: stari ključevi ostaju u `KeysPath`
+  i dalje dešifruju stare tajne, a nove se šifruju novim ključem.
+- Stari PFX zato ostaje dostupan dok god u `KeysPath` postoji ključ šifrovan njime. PFX ide u backup, ali ne na
+  isto mesto kao `KeysPath` i baza: ko ima sva tri, može da pročita TOTP tajne.
+- Ako sertifikat procuri, napadaču trebaju još kopija `KeysPath`-a i baze. Bez podrške za rotaciju jedini izlaz
+  je novi sertifikat sa praznim `KeysPath`-om i ponovni enrollment svih MFA naloga; admin reset MFA je US-32.
+
+Rotacija sertifikata bi se dodala opcionim podešavanjem, na primer
+`Identity:DataProtection:PreviousCertificatePaths`, čiji bi se sertifikati prosledili u
+`UnprotectKeysWithAnyCertificate`, a novi ključevi šifrovali samo trenutnim. To nije deo US-22.
 
 ## 6. Audit i poverljivi podaci
 
@@ -253,8 +303,20 @@ US-18 i audit testovi (`MfaServiceTests` i PostgreSQL testovi u `backend/Platfor
 - zapise `auth.mfa.enabled` i `auth.mfa.verified` u `audit` šemi bez koda, tajne i e-maila;
 - svaki razlog koji servis piše prolazi pravi `AuditDraftValidator` (`MfaRefusals_WithEveryReasonTheServiceWrites_PassTheAuditContract`);
 - potvrdu bez enrollment-a (`401`) i dva paralelna enroll-a (jedan `200`, jedan `409`, nijedan `500`);
-- ključeve u `KeysPath` (`IdentityModuleTests`): nova instanca sa istim direktorijumom dešifruje sačuvanu tajnu,
-  a ključevi iz drugog direktorijuma ne.
+- key ring (`MfaKeyRingTests`, odeljak 5 "Ključevi").
+
+US-22 testovi (`Integration/Mfa/MfaSecretExposureIntegrationTests`) hvataju sve log zapise test hosta, na svim
+nivoima, uključujući `Trace`, sa porukom, strukturiranim vrednostima, scope-ovima i izuzetkom:
+
+- kroz `mfa/enroll`, `mfa/enroll/confirm` i `mfa/verify` (uspeh, ponovljen kod, pogrešan kod do praga pokušaja)
+  nijedan zapis ne sadrži Base32 tajnu, `otpauth://` URI, TOTP kod ni šifrat (pending i aktivni);
+- kontrolni test pokazuje da provera pronalazi tajnu upisanu u strukturiranu vrednost loga;
+- tajna je samo u odgovoru na `mfa/enroll`. Odgovori (zaglavlja i telo) na confirm, verify, ponovljen verify,
+  `/api/auth/me`, `/api/auth/sessions`, odbijen confirm i drugi enroll je ne sadrže, a ne sadrže ni kod.
+
+MVC na nivou `Trace` loguje argumente akcije kroz `ToString()`, a `record` ispisuje sva svoja polja. Zato
+`MfaVerifyRequest` i `MfaEnrollResponse` u `ToString()` daju `***` umesto koda i URI-ja
+(`MfaContracts_ToString_HideCodeAndUri`).
 
 ## 9. Budući rad
 

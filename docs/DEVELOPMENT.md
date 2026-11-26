@@ -124,3 +124,22 @@ Set `Seed__DevelopmentPassword` in your local, git-ignored `.env` (or user-secre
 
 
 For tests, `TestUsers.Create(accounts, role, status, password)` creates a user in the in-memory account repository. `TestUsers.CreateAsync(context, role, status, password)` saves a user in the identity database used by credential verification and login tests. Without a password either helper creates an account with no hash, which cannot log in.
+
+## MFA key ring (IDN-06, US-22)
+
+TOTP secrets are encrypted with an ASP.NET Core Data Protection key ring. In Development you need nothing: without settings the API uses the default local key ring. Every other environment (Staging, Testing, Production) requires `Identity__DataProtection__KeysPath` and `Identity__DataProtection__CertificatePath`, otherwise the API does not start. The variables are listed with empty values in `.env.example`; leave them empty in Development. Setting only one of `KeysPath` and `CertificatePath` stops the start in every environment, Development included: keys in `KeysPath` without a certificate would lie on disk unencrypted.
+
+To run the API outside Development on your machine, make a local-only PFX outside the repository:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=SecurityLab key ring" -keyout keyring.key -out keyring.crt
+openssl pkcs12 -export -inkey keyring.key -in keyring.crt -out keyring.pfx
+rm keyring.key keyring.crt
+```
+
+Then set `Identity__DataProtection__KeysPath` to a directory, `Identity__DataProtection__CertificatePath` to the PFX, and `Identity__DataProtection__CertificatePassword` to the export password as environment variables of the API process. Outside Development the API reads neither `.env` nor user-secrets (`Program.cs` adds both only in Development), so a value there does not reach a Staging or Production start. Never commit the PFX or its password, and keep both outside the repository folder.
+
+The user that runs the API needs read and write rights on `KeysPath`, for example the owner of a Docker volume. Data Protection writes the first key on first use and a new key about every 90 days, so the API checks both rights at start and does not start without them.
+
+- Keep the same PFX for as long as the key directory exists. A different certificate cannot decrypt the existing keys, and every stored TOTP secret becomes unreadable. Certificate rotation is not supported yet, see `docs/components/identity/IDN-02_TOTP_MFA.md`, section "Zamena sertifikata".
+- Test hosts that run outside Development call `UseMfaTestKeyRing()` from `backend/TestShared/MfaTestKeyRing.cs`. A new test project that starts the API as Production or Testing links that file and calls it after `UseEnvironment(...)`.
