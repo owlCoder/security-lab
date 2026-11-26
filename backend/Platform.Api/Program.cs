@@ -107,6 +107,10 @@ if (!string.IsNullOrWhiteSpace(competenciesConnectionString))
     builder.Services.AddCompetencyPersistence(competenciesConnectionString);
 
 builder.Services.AddAuthoring();
+// AUT-01/AUT-06: drafts in PostgreSQL (schema authoring_drafts) when the connection string is set; in-memory otherwise.
+var authoringConnectionString = builder.Configuration.GetConnectionString("Authoring");
+if (!string.IsNullOrWhiteSpace(authoringConnectionString))
+    builder.Services.AddAuthoringPersistence(authoringConnectionString);
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
@@ -282,6 +286,18 @@ if (app.Environment.IsDevelopment())
         }
 
         await app.SeedDevelopmentAccountsAsync();
+    }
+    // AUT-01/AUT-06: create the authoring_drafts schema in development (production migrates explicitly).
+    if (!string.IsNullOrWhiteSpace(authoringConnectionString))
+    {
+        try
+        {
+            await AuthoringPersistenceExtensions.MigrateAuthoringDatabaseAsync(authoringConnectionString);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning("The authoring schema was not migrated: {Message}", ex.Message);
+        }
     }
     // LAB-03 drugi demo kurs: 3333 je student samo ovde, ne na prvom kursu.
     // Primer: X-Test-User: 11111111-1111-1111-1111-111111111111:Teacher pravi laboratoriju na prvom kursu.
