@@ -14,6 +14,7 @@ using Platform.Membership.Infrastructure.Persistence;
 using Platform.Audit.Composition;
 using Platform.Audit.Contracts;
 namespace Platform.Membership.Composition;
+using Platform.Membership.Application;
 
 public static class MembershipServiceCollectionExtensions
 {
