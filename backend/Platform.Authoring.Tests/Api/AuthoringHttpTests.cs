@@ -22,6 +22,12 @@ using ISessionManager = Platform.Api.Interfaces.Identity.ISessionManager;
 using Platform.Identity.Entities;
 using System.Text.Json.Nodes;
 
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Platform.Identity.Enums;
+using Platform.Identity.Persistence;
+
 namespace Platform.Authoring.Tests.Api;
 
 [TestFixture]
@@ -41,7 +47,7 @@ public sealed class AuthoringHttpRequests
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["AuthoringTests:SessionUserId"] = authorId,
-                    ["Authoring:AuthorAccountsIds:0"] = authorId
+                    ["Authoring:AuthorAccountIds:0"] = authorId
                 });
             });
         });
@@ -298,6 +304,88 @@ public sealed class AuthoringHttpRequests
         Assert.That(body.RootElement.GetProperty("ownerId").GetGuid(), Is.EqualTo(assistantId));
         Assert.That(storedDraft, Is.Not.Null);
         Assert.That(storedDraft!.OwnerId, Is.EqualTo(assistantId));
+    }
+
+    [TestCase(AccountStatus.Blocked)]
+    [TestCase(AccountStatus.Archived)]
+    public async Task Templates_CopyAfterAccountDeactivation_Returns401WithoutCreatingDraft(AccountStatus newStatus)
+    {
+        var authorId = Guid.NewGuid();
+        var templateId = Guid.Parse("a1000000-0000-4000-8000-000000000001");
+        var sessionToken = Guid.NewGuid().ToString("N");
+        var repository = new InMemoryDraftRepository();
+
+        //each test case uses its own temporary database
+        var databaseOptions = new DbContextOptionsBuilder<PlatformIdentityDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+
+        using var baseFactory = new AuthoringHostFactory();
+        using var factory = baseFactory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Authoring:AuthorAccountIds:0"] = authorId.ToString("D"),
+                    ["ConnectionStrings:Identity"] = ""
+                });
+            });
+
+            builder.ConfigureTestServices(services =>
+            {
+                //replace the fake session manager with the real implementation
+                services.RemoveAll<ISessionManager>();
+                services.AddScoped<ISessionManager, SessionManager>();
+
+                //the real manager reads accounts and sessions from the test database
+                services.RemoveAll<PlatformIdentityDbContext>();
+                services.AddScoped<PlatformIdentityDbContext>(_ => new PlatformIdentityDbContext(databaseOptions));
+                services.RemoveAll<IDraftRepository>();
+                services.AddSingleton<IDraftRepository>(repository);
+            });
+        });
+
+        //create an active account and a session that expires in one hour
+        using(var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+            var now = DateTimeOffset.UtcNow;
+
+            db.Accounts.Add(new UserAccount(authorId, $"{authorId:N}@example.test"));
+            db.Sessions.Add(new Session(
+                id: Guid.NewGuid(),
+                userId: authorId,
+                tokenHash: SHA256.HashData(Encoding.UTF8.GetBytes(sessionToken)),
+                sessionHandle: Guid.NewGuid(),
+                authLevel: AuthLevel.Active,
+                createdAt: now,
+                expiresAt: now.AddHours(1)
+            ));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={sessionToken}");
+
+        //first prove that this session gives the active author access
+        using var before = await client.GetAsync("/api/authoring/templates");
+        Assert.That(before.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        //change the account status after issuing the session
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+            var account = await db.Accounts.SingleAsync(a => a.Id == authorId);
+            account.Status = newStatus;
+            await db.SaveChangesAsync();
+        }
+
+        //reuse the same session cookie to attempt draft selection
+        using var response = await client.PostAsync($"/api/authoring/templates/{templateId}/drafts", null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+            Assert.That(repository.Count, Is.Zero);
+        });
     }
 
     private sealed class DenyingAccessDecision : IAccessDecision
