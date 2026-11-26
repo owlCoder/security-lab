@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -308,6 +309,41 @@ public sealed class LaboratoriesHttpTests
         Assert.That(await repository.GetByIdAsync(created!.Id), Is.Not.Null);
     }
 
+    // Klijent pokusava da sam zada Id, autora i status, i to u razlicitim oblicima:
+    // camelCase, PascalCase i status kao broj. Server mora sve da ignorise.
+    [TestCase("{\"title\":\"Lab\",\"courseId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\",\"id\":\"11111111-1111-1111-1111-111111111111\",\"createdBy\":\"22222222-2222-2222-2222-222222222222\",\"status\":\"Archived\"}")]
+    [TestCase("{\"Title\":\"Lab\",\"CourseId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\",\"Id\":\"11111111-1111-1111-1111-111111111111\",\"CreatedBy\":\"22222222-2222-2222-2222-222222222222\",\"Status\":\"Archived\"}")]
+    [TestCase("{\"title\":\"Lab\",\"courseId\":\"cccccccc-cccc-cccc-cccc-cccccccccccc\",\"id\":\"11111111-1111-1111-1111-111111111111\",\"createdBy\":\"22222222-2222-2222-2222-222222222222\",\"status\":1}")]
+    public async Task PostLabs_WhenClientSetsIdCreatorOrStatus_StoredLabHasServerValues(string body)
+    {
+        Guid clientSuppliedId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        Guid clientSuppliedCreator = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        using var request = CreateRequest("POST", Route, Teacher);
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        var created = await response.Content.ReadFromJsonAsync<LaboratoryResponse>();
+        Assert.That(created, Is.Not.Null);
+
+        // Proverava se ono sto je stvarno sacuvano, ne samo odgovor servera.
+        var repository = factory.Services.GetRequiredService<ILaboratoryRepository>();
+        Laboratory? stored = await repository.GetByIdAsync(created!.Id);
+        Assert.That(stored, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(stored!.Id, Is.Not.EqualTo(clientSuppliedId));
+            Assert.That(stored.CreatedBy, Is.EqualTo(UserGuid("marko")));
+            Assert.That(stored.CreatedBy, Is.Not.EqualTo(clientSuppliedCreator));
+            Assert.That(stored.Status, Is.EqualTo(LabStatus.Draft));
+        });
+        Assert.That(await repository.GetByIdAsync(clientSuppliedId), Is.Null);
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(1));
+    }
+
     [Test]
     public async Task PostLabs_TwoCreatesWithSameTitle_GetDifferentIds()
     {
@@ -539,6 +575,39 @@ public sealed class LaboratoriesHttpTests
         Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
     }
 
+    // Tudja laboratorija namerno vraca 404, a ne 403: odgovor mora biti isti kao za nepostojecu,
+    // da napadac pogadjanjem ID-eva ne moze da sazna koje laboratorije postoje (IDOR, SEC-01).
+    // Vazi i za drugog nastavnika istog kursa: menja samo autor laboratorije.
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task PatchLabTitle_ForeignLab_ReturnsSameResponseAsMissingAndKeepsTitle(bool otherTeacherOnSameCourse)
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        if (otherTeacherOnSameCourse)
+        {
+            factory.Services.GetRequiredService<InMemoryCourseMembership>()
+                .Set(CourseId, UserGuid("jelena"), CourseRole.Teacher);
+        }
+
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Originalni naslov");
+
+        using var foreign = await client.SendAsync(CreateJsonRequest("PATCH", $"{Route}{created.Id}/title", OtherTeacher, new { title = "Tudja izmena" }));
+        using var missing = await client.SendAsync(CreateJsonRequest("PATCH", $"{Route}{Guid.NewGuid()}/title", OtherTeacher, new { title = "Tudja izmena" }));
+        string foreignBody = await foreign.Content.ReadAsStringAsync();
+        string missingBody = await missing.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(foreign.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+            Assert.That(missing.StatusCode, Is.EqualTo(foreign.StatusCode));
+            Assert.That(foreignBody, Is.EqualTo(missingBody));
+            Assert.That(foreignBody, Does.Not.Contain("Originalni naslov"));
+            Assert.That(foreignBody, Does.Not.Contain(created.Id.ToString()));
+        });
+        Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
+    }
+
     [TestCase("")]
     [TestCase("   ")]
     [TestCase(null)]
@@ -552,6 +621,31 @@ public sealed class LaboratoriesHttpTests
 
         Assert.That(patch.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(await patch.Content.ReadAsStringAsync(), Does.Contain(LabErrorCodes.InvalidTitle));
+        Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
+    }
+
+    [TestCase("{ not json", "application/json")]
+    [TestCase("", "application/json")]
+    [TestCase("[]", "application/json")]
+    [TestCase("{\"title\":\"Novi naslov\"}", "text/plain")]
+    public async Task PatchLabTitle_WhenBodyIsMalformed_Returns400AndKeepsTitle(string body, string contentType)
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Originalni naslov");
+        using var request = CreateRequest("PATCH", $"{Route}{created.Id}/title", Teacher);
+        request.Content = new StringContent(body, Encoding.UTF8, contentType);
+
+        using var response = await client.SendAsync(request);
+        string responseBody = await response.Content.ReadAsStringAsync();
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        Assert.Multiple(() =>
+        {
+            Assert.That(responseBody, Does.Contain(LabErrorCodes.InvalidBody));
+            Assert.That(responseBody, Does.Not.Contain("Exception"));
+            Assert.That(responseBody, Does.Not.Contain(" at "));
+        });
         Assert.That(await StoredTitleAsync(factory, created.Id), Is.EqualTo("Originalni naslov"));
     }
 
@@ -585,6 +679,74 @@ public sealed class LaboratoriesHttpTests
 
         var updated = await patch.Content.ReadFromJsonAsync<LaboratoryResponse>();
         Assert.That(updated, Is.EqualTo(created with { Title = "Novi naslov" }));
+    }
+
+    // ---------- Poruke o greskama ne otkrivaju interne detalje ----------
+
+    // Za svaki tip odbijanja (400, 401, 403, 404) proverava se da odgovor:
+    //  - ima samo poznata polja (kod i poruka, ili standardni ProblemDetails),
+    //  - ne sadrzi tip izuzetka, stack trace ni imena internih klasa,
+    //  - ne vraca nazad unos klijenta ni podatke o tudjoj laboratoriji ili kursu,
+    //  - nista ne menja u skladistu.
+    [TestCase(ErrorScenario.InvalidTitle, HttpStatusCode.BadRequest)]
+    [TestCase(ErrorScenario.InvalidCourse, HttpStatusCode.BadRequest)]
+    [TestCase(ErrorScenario.InvalidBody, HttpStatusCode.BadRequest)]
+    [TestCase(ErrorScenario.Unauthenticated, HttpStatusCode.Unauthorized)]
+    [TestCase(ErrorScenario.ForbiddenRole, HttpStatusCode.Forbidden)]
+    [TestCase(ErrorScenario.ForbiddenCourse, HttpStatusCode.Forbidden)]
+    [TestCase(ErrorScenario.NotFoundMissing, HttpStatusCode.NotFound)]
+    [TestCase(ErrorScenario.NotFoundForeign, HttpStatusCode.NotFound)]
+    public async Task ErrorResponses_DoNotRevealInternalDetailsOrInput(ErrorScenario scenario, HttpStatusCode expectedStatus)
+    {
+        const string secretTitle = "Tajni nacrt nastavnika";
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        LaboratoryResponse lab = await CreateLabAsync(client, Teacher, secretTitle);
+        string probe = $"probe-{Guid.NewGuid():N}";
+        Guid missingId = Guid.NewGuid();
+
+        using HttpRequestMessage request = scenario switch
+        {
+            ErrorScenario.InvalidTitle => CreateJsonRequest("POST", Route, Teacher, new { title = probe + new string('x', 201), courseId = CourseId }),
+            ErrorScenario.InvalidCourse => CreateJsonRequest("POST", Route, Teacher, new { title = probe, courseId = (Guid?)null }),
+            ErrorScenario.InvalidBody => CreateRawRequest("POST", Route, Teacher, "{\"title\":\"" + probe),
+            ErrorScenario.Unauthenticated => CreateRequest("GET", $"{Route}{lab.Id}", null),
+            ErrorScenario.ForbiddenRole => CreateRequest("GET", $"{Route}{lab.Id}", Student),
+            ErrorScenario.ForbiddenCourse => CreateJsonRequest("POST", Route, OtherTeacher, new { title = probe, courseId = CourseId }),
+            ErrorScenario.NotFoundMissing => CreateRequest("GET", $"{Route}{missingId}", Teacher),
+            ErrorScenario.NotFoundForeign => CreateJsonRequest("PATCH", $"{Route}{lab.Id}/title", OtherTeacher, new { title = probe }),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        using var response = await client.SendAsync(request);
+        string body = await response.Content.ReadAsStringAsync();
+
+        Assert.That(response.StatusCode, Is.EqualTo(expectedStatus));
+        Assert.That(response.Content.Headers.ContentType?.MediaType, Does.EndWith("json"));
+        using JsonDocument json = JsonDocument.Parse(body);
+        Assert.That(json.RootElement.ValueKind, Is.EqualTo(JsonValueKind.Object));
+        Assert.Multiple(() =>
+        {
+            foreach (JsonProperty property in json.RootElement.EnumerateObject())
+            {
+                Assert.That(AllowedErrorFields, Does.Contain(property.Name), $"Neocekivano polje u odgovoru: {property.Name}");
+            }
+
+            foreach (string marker in InternalMarkers)
+            {
+                Assert.That(body, Does.Not.Contain(marker));
+            }
+
+            Assert.That(body, Does.Not.Contain(probe));
+            Assert.That(body, Does.Not.Contain(secretTitle));
+            Assert.That(body, Does.Not.Contain(lab.Id.ToString()));
+            Assert.That(body, Does.Not.Contain(CourseId.ToString()));
+            Assert.That(body, Does.Not.Contain(missingId.ToString()));
+        });
+
+        // Odbijen zahtev nista ne menja.
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(1));
+        Assert.That(await StoredTitleAsync(factory, lab.Id), Is.EqualTo(secretTitle));
     }
 
     // ---------- Neocekivana greska ----------
@@ -642,6 +804,34 @@ public sealed class LaboratoriesHttpTests
         HttpRequestMessage request = CreateRequest(method, path, testUser);
         request.Content = JsonContent.Create(body);
         return request;
+    }
+
+    private static HttpRequestMessage CreateRawRequest(string method, string path, string? testUser, string body)
+    {
+        HttpRequestMessage request = CreateRequest(method, path, testUser);
+        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        return request;
+    }
+
+    // Polja koja odgovor o gresci sme da ima: nas ApiErrorResponse (code, message)
+    // ili standardni ProblemDetails (type, title, status) sa ID-em zahteva za podrsku.
+    private static readonly string[] AllowedErrorFields =
+        ["code", "message", "type", "title", "status", "traceId", "correlationId"];
+
+    // Tragovi internih detalja koji nikad ne smeju da stignu do klijenta.
+    private static readonly string[] InternalMarkers =
+        ["Exception", " at ", "StackTrace", "Platform.", "System.", "Microsoft.", "Npgsql"];
+
+    public enum ErrorScenario
+    {
+        InvalidTitle,
+        InvalidCourse,
+        InvalidBody,
+        Unauthenticated,
+        ForbiddenRole,
+        ForbiddenCourse,
+        NotFoundMissing,
+        NotFoundForeign,
     }
 
     private sealed class LaboratoriesHostFactory(

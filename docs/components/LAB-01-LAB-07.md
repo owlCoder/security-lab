@@ -18,6 +18,57 @@ Ovaj dokument opisuje trenutno implementiran kostur. Ne predstavlja dokaz zavrse
 
 Nisu implementirani: stvarno kreiranje/citanje/preimenovanje preko API-ja, repozitorijum, veza sa kursom, revizije, prevodi, evaluator i frontend laboratorije. `Status`, `CreatedBy` i `CreatedAt` iz timskog plana takodje ostaju naredni korak domena.
 
+## Rute i statusni kodovi (stanje KT2)
+
+Ova sekcija opisuje stanje posle KT2 i ima prednost nad starijim opisima KT1 kostura u ostatku dokumenta (npr. POST danas ne vraca 501).
+
+Sve rute postoje i pod aliasom `/api/labs` (isti handleri, iste provere; `Location` uvek pokazuje `/api/laboratories`).
+
+| Ruta | Radnja | Ko sme | Uspeh | Greske | Dokument |
+| --- | --- | --- | --- | --- | --- |
+| `GET /api/laboratories/` | `laboratory.list` | prijavljen korisnik | 200, `[]` (kostur) | 401 | ovaj |
+| `POST /api/laboratories/` | `laboratory.create` | nastavnik na kursu iz tela | 201 + `Location` + laboratorija | 400 `INVALID_BODY` / `INVALID_COURSE` / `INVALID_TITLE`, 401, 403 | `LAB-01-api.md`, `LAB-03.md` |
+| `GET /api/laboratories/{id}` | `laboratory.read` | nastavnik, autor, na kursu laboratorije | 200 + laboratorija | 401, 403 (uloga), 404 `NOT_FOUND` (ne postoji ili nije dostupna) | `LAB-01-api.md`, `LAB-03.md` |
+| `PATCH /api/laboratories/{id}/title` | `laboratory.rename` | nastavnik, autor | 200 + laboratorija, isti `id` | 400 `INVALID_BODY` / `INVALID_TITLE`, 401, 403 (uloga), 404 `NOT_FOUND` (ne postoji ili tudja) | `LAB-01-api.md` |
+| `GET /api/laboratories/search?q=` | `laboratory.search` | prijavljen korisnik; vraca samo laboratorije koje bi mogao i da otvori | 200 `{ items, truncated }` | 400 `INVALID_QUERY`, 401, 403, 503 `FILTERS_UNAVAILABLE` | `LAB-05-search.md` |
+| `GET /api/laboratories/search/filters` | `laboratory.search` | prijavljen korisnik | 200, opcije filtera | 401, 403 | `LAB-05-filtering.md` |
+
+Svaka ruta moze vratiti i 500: genericka poruka i `traceId`, bez tipa izuzetka i stack trace-a (`SafeErrors`). `{id}` mora biti `Guid`, inace 404. Van Development okruzenja sve LAB rute vracaju 401 dok se ne poveze prava prijava.
+
+**Znacenje statusnih kodova:**
+
+| Status | Znacenje | Oblik tela |
+| --- | --- | --- |
+| 200 / 201 | uspeh | podaci (laboratorija, rezultat pretrage) |
+| 400 | neispravan zahtev; nista nije promenjeno | `{ "code", "message" }` |
+| 401 | pozivalac nije prepoznat (nema identiteta, neispravno ili visestruko `X-Test-User`) | ProblemDetails `{ "type", "title", "status" }` uz `correlationId` ili `traceId` |
+| 403 | pozivalac je prepoznat, ali uloga (ili uloga na kursu pri kreiranju) ne dozvoljava radnju | ProblemDetails, `"title": "Access denied"` |
+| 404 | laboratorija ne postoji **ili** pozivalac nema pravo da zna da postoji | `{ "code": "NOT_FOUND", "message" }` |
+| 503 | filteri po osobinama privremeno nisu dostupni | `{ "code": "FILTERS_UNAVAILABLE", "message" }` |
+| 500 | neocekivana greska | ProblemDetails `"Unexpected error"` + `traceId` |
+
+**Kodovi gresaka** (`LabErrorCodes`):
+
+| Kod | Status | Kada |
+| --- | --- | --- |
+| `INVALID_BODY` | 400 | telo nije JSON, nije `application/json`, vece od 4 KB, prazno ili nije objekat |
+| `INVALID_TITLE` | 400 | naslov nedostaje, prazan je ili ima vise od 200 znakova |
+| `INVALID_COURSE` | 400 | `courseId` nedostaje ili je prazan `Guid` pri kreiranju |
+| `NOT_FOUND` | 404 | laboratorija ne postoji ili nije dostupna pozivaocu |
+| `INVALID_QUERY` | 400 | neispravan upit ili filter pretrage |
+| `FILTERS_UNAVAILABLE` | 503 | metapodaci za filtere nisu dostupni |
+
+Frontend (`frontend/src/api/labs.ts`) prevodi kod u nasu poruku i ne prikazuje tekst sa servera. Prevode za `INVALID_COURSE` i `INVALID_BODY` dodaje Marija (LAB-07, povezivanje frontenda sa serverom).
+
+**Pravila koja vaze za sve rute:**
+
+- Tudja laboratorija daje isti 404 i isto telo kao nepostojeca, i za `GET` i za `PATCH`. 403 bi potvrdio da laboratorija sa tim ID-em postoji (enumeracija ID-eva). 403 ostaje za pogresnu ulogu i za kurs na kome nastavnik ne predaje. Obrazlozenje: `LAB-01-api.md`, "Zasto tudja laboratorija vraca 404, a ne 403".
+- Klijent ne bira `id`, autora, status ni vreme kreiranja; ta polja u telu se ignorisu. Kurs se bira samo pri kreiranju i server proverava ulogu na njemu.
+- Prava se proveravaju pre citanja tela. Odbijen zahtev ne menja podatke.
+- Odgovori o gresci nemaju tip izuzetka, stack trace, imena klasa, poslati unos ni ID iz zahteva.
+
+`/api/catalog` (katalog laboratorija) je poseban modul i nije u ovoj tabeli.
+
 ## Dijagram arhitekture
 
 Puna strelica oznacava postojecu vezu, isprekidana planiranu integraciju.
