@@ -8,5 +8,8 @@ public enum AccessDenialReason
     UnknownAction,
     NoPolicy,
     PolicyDenied,
-    PolicyError
+    PolicyError,
+    NotPermitted,
+    ContextMismatch,
+    MissingAttribute
 }

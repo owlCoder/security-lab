@@ -16,4 +16,11 @@ public interface IAccessAuditWriter
         AccessRequest request,
         AccessDecision decision,
         CancellationToken cancellationToken = default);
+
+    ValueTask WriteAsync(
+        AccessRequest request,
+        AccessDecision decision,
+        DecisionTrace trace,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(request, decision, cancellationToken);
 }
