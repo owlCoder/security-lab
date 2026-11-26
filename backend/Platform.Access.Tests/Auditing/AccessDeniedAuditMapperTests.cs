@@ -64,6 +64,9 @@ public sealed class AccessDeniedAuditMapperTests
     [TestCase(AccessDenialReason.NoPolicy, "no_policy")]
     [TestCase(AccessDenialReason.PolicyDenied, "policy_denied")]
     [TestCase(AccessDenialReason.PolicyError, "policy_error")]
+    [TestCase(AccessDenialReason.NotPermitted, "policy_denied")]
+    [TestCase(AccessDenialReason.ContextMismatch, "policy_denied")]
+    [TestCase(AccessDenialReason.MissingAttribute, "policy_denied")]
     public void DenialReason_UsesAuditCatalogCodes(AccessDenialReason reason, string expected)
     {
         Assert.That(mapper.CreateDraft(Request(), Denied(reason)).Details!["denialReason"], Is.EqualTo(expected));

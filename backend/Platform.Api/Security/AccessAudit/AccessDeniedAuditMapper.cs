@@ -89,7 +89,10 @@ public sealed partial class AccessDeniedAuditMapper : IAccessDeniedAuditMapper
         AccessDenialReason.AccountNotActive => "account_not_active",
         AccessDenialReason.UnknownAction => "unknown_action",
         AccessDenialReason.NoPolicy => "no_policy",
-        AccessDenialReason.PolicyDenied => "policy_denied",
+        AccessDenialReason.PolicyDenied
+            or AccessDenialReason.NotPermitted
+            or AccessDenialReason.ContextMismatch
+            or AccessDenialReason.MissingAttribute => "policy_denied",
         _ => "policy_error",
     };
 }
