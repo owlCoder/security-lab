@@ -5,6 +5,7 @@ namespace Platform.Api.Services.Identity;
 
 public sealed class RoleMfaPolicy(IConfiguration configuration) : IMfaPolicy
 {
+    
     public bool IsRequiredFor(AccountRole role)
     {
         var requiredRoles = configuration.GetSection("Identity:Mfa:RequiredForRoles").Get<string[]>() ?? [];
