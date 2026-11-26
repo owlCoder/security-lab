@@ -67,6 +67,36 @@ CREATE DATABASE permissions. It creates/deletes only its GUID-named database.
 `-NoBuild` is intended for CI after the full solution build. The normal default builds
 what it needs. The CI workflow adds one live-demo step and preserves existing jobs.
 
+## Reproduce ACC-04 with the local ATT stub
+
+Run from the repository root with .NET 10, PowerShell and Docker Desktop running:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo-coursework-live.ps1 -AttemptDemo
+```
+
+The launcher starts the real API on loopback HTTPS, seeds isolated PostgreSQL Identity
+accounts and starts a second HTTPS listener for the local `acc04-att-v1` stub.
+Two students have test membership in the same course. Identity login, session cookies,
+CSRF, the Access policies and the HTTP adapter are the normal API implementation.
+Membership and the ATT store are demonstration fixtures. The stub uses only synthetic
+answers in memory and supports metadata, snapshot-bound reads and versioned draft writes;
+its write receipts are in memory and do not stand in for durable ATT audit.
+
+The run checks login, reading and saving an own draft, reload with the new version,
+denial of reads and writes on a different student's attempt, rejection of stale writes
+and immutability of submitted attempts. The listener addresses, certificate pins and
+service credential are scoped to one run. The disposable database, children and
+temporary certificate files are removed on exit. The stub reloads its per-run
+certificate as PKCS#12 so Windows Schannel can use the server private key. The
+demo client still pins the certificate, and no trusted root is installed.
+
+Results: `TestResults/coursework-live-<run>/live-attempts.json`. The launcher verifies
+that the report is from the requested run and that all checks and cleanup succeeded.
+`-UseExistingServer` is available only for a dedicated test PostgreSQL server; set
+`COURSEWORK_TEST_POSTGRES` as for the ADM-08 demo. The default invocation without
+`-AttemptDemo` runs ADM-08 separately.
+
 ## Repeat the NUnit regression/integration checks
 
 ```powershell
