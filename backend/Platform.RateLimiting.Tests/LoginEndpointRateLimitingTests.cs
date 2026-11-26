@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 ﻿using System.Net;
 using System.Security.Cryptography;
 using System.Collections.Concurrent;
@@ -21,6 +20,7 @@ using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.Identity.Services;
 using Platform.Audit.Contracts;
+using SecurityLab.TestShared;
 
 namespace Platform.RateLimiting.Tests;
 
