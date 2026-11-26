@@ -6,28 +6,72 @@
 
 **Zahtevi iz specifikacije:** LAB-01 (kreiranje laboratorije sa trajnim ID; kriterijum: ID ostaje isti kroz revizije i izmene naslova). Zajednicki zahtevi koje ovaj deo pokriva: SEC-01 (serverska autorizacija), SEC-05 (validacija ulaza), ACC-04 (autorizacija nad konkretnim resursom), ACC-05 (podrazumevano odbijanje), OPS-07 (poruke o gresci bez tajni).
 
-**Grana:** `feature/LAB-01-api`
+**Grane:** KT1 `feature/LAB-01-api` (PR #78), KT2 `feature/LAB-01-api-contract-tests`
 
 ## Odgovornosti i granice
 
 - **Procesi i scenariji:**
-  - Nastavnik kreira laboratoriju: `POST /api/laboratories` sa telom `{ "title": "..." }`. Server dodeljuje `Id`, autora (iz identiteta pozivaoca), status `Draft` i UTC vreme kreiranja, i vraca `201 Created` + `Location`.
+  - Nastavnik kreira laboratoriju na kursu na kome predaje: `POST /api/laboratories` sa telom `{ "title": "...", "courseId": "..." }`. Server dodeljuje `Id`, autora (iz identiteta pozivaoca), status `Draft` i UTC vreme kreiranja, i vraca `201 Created` + `Location`. Ulogu na kursu proverava LAB-03 (`LabCoursePolicy`).
   - Nastavnik cita svoju laboratoriju: `GET /api/laboratories/{id}` vraca `200` ili `404`.
-  - Nastavnik menja naslov svoje laboratorije: `PATCH /api/laboratories/{id}/title`; `Id`, autor, status i vreme kreiranja ostaju isti.
-  - `/api/labs` je alias iz timskog plana: iste rute, isti handleri i iste provere. `Location` uvek pokazuje kanonsku putanju `/api/laboratories`. Ako tim odluci da ostane samo jedna putanja, brise se jedna linija u `LaboratoriesEndpoints.MapLaboratoriesEndpoints`.
-- **Sta ovaj deo NE radi:** ne cuva podatke sam (koristi `ILaboratoryRepository`, Gordana), ne menja domenska pravila (`Laboratory`, Visnja), ne izdaje objavljene revizije (REV-01), ne vezuje laboratoriju za kurs (LAB-03) i ne bira jezik sadrzaja (LAB-07, Lana).
+  - Nastavnik menja naslov svoje laboratorije: `PATCH /api/laboratories/{id}/title`; `Id`, kurs, autor, status i vreme kreiranja ostaju isti.
+  - `/api/labs` je alias iz timskog plana: iste rute, isti handleri i iste provere. `Location` uvek pokazuje kanonsku putanju `/api/laboratories`.
+- **Sta ovaj deo NE radi:** ne cuva podatke sam (koristi `ILaboratoryRepository`), ne menja domenska pravila (`Laboratory`), ne odredjuje ko je clan kursa (LAB-03, `ICourseMembership`), ne izdaje objavljene revizije (REV-01) i ne bira jezik sadrzaja (LAB-07).
 - **Ugovori sa drugim delovima:**
 
 | Veza | Svrha | Stanje |
 | --- | --- | --- |
-| `IIdentityContext` (lokalni port LAB modula) | ko je pozivalac | razvoj: `FakeIdentityContext` (`X-Test-User`); van Development-a `AnonymousIdentityContext` (niko nije prijavljen) |
-| `IAccessDecision` (lokalni port LAB modula) | sme li uloga da izvrsi radnju | razvoj: `FakeAccessDecision`; van Development-a `DenyAllAccessDecision`. Planiran adapter na `Platform.Access.Contracts.IAccessDecision` |
-| `ILaboratoryRepository` | cuvanje i citanje | KT1: `InMemoryLaboratoryRepository` (singleton), KT2: PostgreSQL implementacija istog ugovora |
-| `Laboratory` (domen) | trajni ID, validacija naslova | koristi se novi konstruktor za kreiranje i `Rename()` za izmenu |
-| Frontend `api/labs.ts` (Marija) | poziva `POST /api/laboratories/`, cita `id` iz odgovora i prevodi kod greske `INVALID_TITLE` | uskladjeno: kodovi gresaka su `INVALID_TITLE`, `INVALID_BODY`, `NOT_FOUND` |
-| LAB-07 citanje po jeziku (Lana) | frontend planira `GET /api/laboratories/{id}?lang=` | **otvoreno pitanje:** ista ruta danas vraca LAB-01 podatke i ignorise `lang`. Treba dogovoriti da li LAB-07 dobija posebnu rutu (npr. `/{id}/content?lang=`) ili prosiruje ovaj odgovor |
+| `IIdentityContext` (lokalni port LAB modula) | ko je pozivalac | razvoj: `FakeIdentityContext` (`X-Test-User`); van Development-a `AnonymousIdentityContext` (niko nije prijavljen). **Prava prijava jos nije povezana** (vidi "KT2: provera toka kroz aplikaciju") |
+| `IAccessDecision` (lokalni port LAB modula) | sme li uloga da izvrsi radnju | razvoj: `FakeAccessDecision`; van Development-a `DenyAllAccessDecision` |
+| Centralni ACC-05 middleware (`RequireAccess`) | ista provera radnje kroz `LaboratoryAccessPolicy` | povezano (issue #185, opis u `LAB-03.md`) |
+| `ICourseMembership` + `LabCoursePolicy` / `LabOpenPolicy` (LAB-03) | uloga na kursu pri kreiranju i citanju | povezano; LAB-01 samo prosledjuje `courseId` i mapira ishod u HTTP odgovor |
+| `ILaboratoryRepository` | cuvanje i citanje | `PostgresLaboratoryRepository` kada postoji `ConnectionStrings:Authoring`; bez nje u Development-u `InMemoryLaboratoryRepository`, a van njega `UnavailableLaboratoryRepository` (bez tihog upisa u memoriju) |
+| `Laboratory` (domen) | trajni ID, validacija naslova, obavezan kurs | koristi se `Create` za kreiranje i `Rename()` za izmenu |
+| Frontend `api/labs.ts` i `CreateLabForm` (Marija) | salje `{ title, courseId }`, cita `id` iz odgovora, prevodi kodove gresaka | **uskladjeno u KT2:** kodovi `INVALID_TITLE`, `INVALID_COURSE`, `INVALID_BODY`, `NOT_FOUND`; 401/403 kao ProblemDetails |
 
-- **Stanje implementacije:** POST, GET po ID-u i PATCH naslova su implementirani i pokriveni HTTP i jedinicnim testovima. `GET /` (lista) je ostao kostur koji vraca praznu listu.
+- **Stanje implementacije:** POST, GET po ID-u i PATCH naslova su implementirani i pokriveni HTTP i jedinicnim testovima. U KT2 su dodati negativni testovi za ugovor (neispravan JSON, polja koja klijent ne sme da zada, tudja laboratorija, sadrzaj poruka o gresci), frontend salje kurs, a ceo tok je rucno proveren kroz aplikaciju.
+
+## Ugovor zahteva i odgovora (KT2, frontend uskladjen; usaglaseno s Marijom)
+
+**Kreiranje:** `POST /api/laboratories`, `Content-Type: application/json`, najvise 4 KB.
+
+```json
+{ "title": "RBAC", "courseId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }
+```
+
+**Promena naslova:** `PATCH /api/laboratories/{id}/title`, isto zaglavlje i limit.
+
+```json
+{ "title": "RBAC v2" }
+```
+
+Server cita samo navedena polja. Ostala polja (`id`, `createdBy`, `status`, `createdAt`, i `courseId` kod PATCH-a) se ignorisu, bez obzira na velicinu slova u imenu polja.
+
+**Uspesan odgovor** (201 za POST, 200 za GET i PATCH):
+
+```json
+{
+  "id": "b0427232-f9f6-4d59-b97c-3deb1c729e65",
+  "courseId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "title": "RBAC",
+  "status": "Draft",
+  "createdBy": "11111111-1111-1111-1111-111111111111",
+  "createdAt": "2026-11-26T00:45:07.3592247+00:00"
+}
+```
+
+**Odgovori sa greskom:**
+
+| Status | Telo | Kada | Poruka korisniku na frontendu |
+| --- | --- | --- | --- |
+| 400 | `{ "code": "INVALID_BODY", "message": "Request body is invalid." }` | telo nije JSON, nije `application/json`, vece od 4 KB, prazno ili nije objekat | "Zahtev nije ispravan. Osvezite stranicu i pokusajte ponovo." |
+| 400 | `{ "code": "INVALID_TITLE", "message": "Laboratory title is required and must not exceed 200 characters." }` | naslov nedostaje, prazan je ili ima vise od 200 znakova | poruka uz polje naslova |
+| 400 | `{ "code": "INVALID_COURSE", "message": "Laboratory course is required." }` | `courseId` nedostaje ili je `Guid.Empty` (samo POST) | "Izaberite kurs na kome predajete." uz polje kursa |
+| 401 | ProblemDetails `{ "type", "title", "status" }` uz `correlationId` ili `traceId` | nema identiteta, neispravno ili visestruko `X-Test-User` zaglavlje | "Niste prijavljeni. Izaberite test korisnika." |
+| 403 | ProblemDetails, naslov `Access denied` | uloga ne dozvoljava radnju, ili nastavnik ne predaje na trazenom kursu (isti odgovor za postojeci i nepostojeci kurs) | "Nemate dozvolu za ovu radnju. Server je odbio zahtev." + ID zahteva |
+| 404 | `{ "code": "NOT_FOUND", "message": "Laboratory was not found." }` | laboratorija ne postoji **ili** nije pozivaocu dostupna (isti odgovor) | "Laboratorija nije pronadjena." |
+| 500 | ProblemDetails `Unexpected error` + `traceId` | neocekivana greska | "Doslo je do greske. Pokusajte ponovo." |
+
+Redosled provera pri kreiranju: identitet i radnja (401/403), telo (400 `INVALID_BODY`), kurs (400 `INVALID_COURSE`), uloga na tom kursu (403), naslov (400 `INVALID_TITLE`). Kurs se proverava pre naslova, pa ko nije nastavnik na kursu ne dobija ni povratnu informaciju o naslovu. Kod PATCH-a: identitet i radnja, telo, vlasnistvo (404), naslov (400). Odbijen zahtev ne menja skladiste.
 
 ## Matrica odluka o pristupu (Subject – Action – Resource)
 
@@ -36,13 +80,24 @@
 | anoniman / neispravno `X-Test-User` / vise zaglavlja | bilo koja | bilo koji | Deny, 401 |
 | Student | `laboratory.create` | nova laboratorija | Deny, 403 |
 | Student | `laboratory.read`, `laboratory.rename` | bilo koja laboratorija | Deny, 403 (bez sadrzaja) |
-| Nastavnik | `laboratory.create` | nova laboratorija | Allow, 201 |
-| Nastavnik, autor | `laboratory.read`, `laboratory.rename` | sopstvena laboratorija | Allow, 200 |
-| Nastavnik, nije autor | `laboratory.read`, `laboratory.rename` | tudja laboratorija | Deny, 404 (isti odgovor kao za nepostojecu) |
+| Nastavnik na kursu C | `laboratory.create` | nova laboratorija na kursu C | Allow, 201 |
+| Nastavnik koji ne predaje na kursu C | `laboratory.create` | nova laboratorija na kursu C | Deny, 403 |
+| Nastavnik, autor, na kursu laboratorije | `laboratory.read`, `laboratory.rename` | sopstvena laboratorija | Allow, 200 |
+| Nastavnik, nije autor (i kad predaje na istom kursu) | `laboratory.read`, `laboratory.rename` | tudja laboratorija | Deny, 404 (isti odgovor kao za nepostojecu) |
 | bilo ko | nepoznata radnja | bilo koji | Deny (nema politike) |
 | bilo ko, van Development okruzenja | bilo koja | bilo koji | Deny, 401 |
 
-Uloga se proverava u `AccessCheckFilter` kroz `IAccessDecision`, a vlasnistvo nad konkretnom laboratorijom u `LaboratoryService`. Tudja laboratorija vraca 404, ne 403, da odgovor ne otkrije da laboratorija sa tim ID-em postoji. Siri pristup (saradnici, nastavnici istog kursa) dolazi sa LAB-03 i ACC integracijom.
+Uloga se proverava u centralnom middleware-u i `AccessCheckFilter`, uloga na kursu u `LabCoursePolicy`/`LabOpenPolicy`, a vlasnistvo u `LaboratoryService`.
+
+### Zasto tudja laboratorija vraca 404, a ne 403
+
+Zadatak za KT2 pominje 403 za PATCH tudje laboratorije. Zadrzan je 404, isti kao za nepostojecu laboratoriju:
+
+- 403 bi potvrdio da laboratorija sa tim ID-em postoji, pa bi napadac mogao da proverava ID-eve (enumeracija, IDOR).
+- Isto pravilo vec vazi za `GET /{id}` (LAB-01 i LAB-03, `LAB-03.md`, "Zasto 404, a ne 403") i za pretragu (LAB-05). Drugaciji odgovor samo za PATCH bi bio nedosledan i otkrivao bi isto sto GET krije.
+- 403 ostaje za slucajeve kada problem nije konkretan resurs: pogresna uloga (student) ili kurs na kome nastavnik ne predaje.
+
+To proverava `PatchLabTitle_ForeignLab_ReturnsSameResponseAsMissingAndKeepsTitle`: status i telo odgovora za tudju i nepostojecu laboratoriju su identicni, i kada drugi nastavnik predaje na istom kursu.
 
 ## Dijagram arhitekture API sloja
 
@@ -50,32 +105,31 @@ Puna strelica oznacava postojecu vezu, isprekidana planiranu integraciju.
 
 ```mermaid
 flowchart TB
-  CLIENT["Klijent (frontend, curl, testovi)"] -->|"HTTP /api/laboratories, /api/labs"| ROUTES
+  CLIENT["Klijent (frontend, curl, testovi)"] -->|"HTTP /api/laboratories, /api/labs"| ACC5
 
   subgraph API["Platform.Api / Modules/Laboratories"]
     direction TB
+    ACC5["RequireAccess (ACC-05)<br/>LaboratoryAccessPolicy: 401 / 403"]
     ROUTES["LaboratoriesEndpoints<br/>POST /, GET /{id:guid}, PATCH /{id:guid}/title"]
     SAFE["SafeErrors filter<br/>neocekivana greska: genericki 500 + traceId"]
     FILTER["AccessCheckFilter (RequireLabAccess)<br/>401 / 403 pre citanja tela"]
-    BODY["TryReadBodyAsync<br/>JSON, max 4 KB, samo polje title (400)"]
-    SERVICE["LaboratoryService<br/>autor iz identiteta, vlasnistvo (404), validacija (400)"]
-    CALLER["CallerId<br/>UserId -> Guid autora"]
-    DOMAIN["Domain: Laboratory<br/>novi Id na serveru, Rename cuva Id"]
+    BODY["TryReadBodyAsync<br/>JSON, max 4 KB, samo title i courseId (400)"]
+    SERVICE["LaboratoryService<br/>autor iz identiteta, kurs (400/403), vlasnistvo (404)"]
+    COURSE["LabCoursePolicy / LabOpenPolicy<br/>ICourseMembership (LAB-03)"]
+    DOMAIN["Domain: Laboratory<br/>novi Id na serveru, Rename cuva Id i kurs"]
     REPO[["ILaboratoryRepository"]]
-    MEM[("InMemoryLaboratoryRepository<br/>KT1")]
 
-    ROUTES --> SAFE --> FILTER --> BODY --> SERVICE
-    SERVICE --> CALLER
+    ACC5 --> ROUTES --> SAFE --> FILTER --> BODY --> SERVICE
+    SERVICE --> COURSE
     SERVICE --> DOMAIN
-    SERVICE --> REPO --> MEM
+    SERVICE --> REPO
   end
 
+  REPO --> PG[("PostgreSQL (ConnectionStrings:Authoring)")]
+  REPO --> MEM[("InMemory, samo Development bez baze")]
   FILTER --> IDC["IIdentityContext<br/>Development: FakeIdentityContext<br/>ostalo: AnonymousIdentityContext"]
   FILTER --> ACD["IAccessDecision<br/>Development: FakeAccessDecision<br/>ostalo: DenyAllAccessDecision"]
-  REPO -.-> PG[("PostgreSQL, KT2")]
-  IDC -.-> IDN["Identity modul (planiran adapter)"]
-  ACD -.-> ACC["Platform.Access (planiran adapter)"]
-  MODULE["LaboratoriesModule.AddLaboratories<br/>registruje repozitorijum, servis, fake/deny implementacije"] --> API
+  IDC -.-> IDN["Prava sesija (SessionIdentityContext / LabCaller), planiran adapter"]
 ```
 
 ## DFD sa granicom poverenja klijent–server
@@ -85,24 +139,26 @@ flowchart LR
   T["Nastavnik / student<br/>(nepouzdana zona)"]
 
   subgraph BROWSER["Klijent: nepouzdana zona"]
-    FE["Frontend / HTTP klijent<br/>salje title i X-Test-User"]
+    FE["Frontend / HTTP klijent<br/>salje title, courseId i X-Test-User"]
   end
 
-  T -->|"naslov, ID laboratorije"| FE
+  T -->|"naslov, kurs, ID laboratorije"| FE
 
   subgraph SERVER["Server: granica poverenja"]
     P1(("1. Identitet<br/>IIdentityContext"))
-    P2(("2. Uloga i poznata radnja<br/>IAccessDecision"))
-    P3(("3. Citanje i validacija tela<br/>samo title, max 4 KB"))
-    P4(("4. Slucaj upotrebe<br/>autor iz identiteta, vlasnistvo"))
+    P2(("2. Uloga i poznata radnja<br/>ACC-05 + IAccessDecision"))
+    P3(("3. Citanje i validacija tela<br/>title, courseId, max 4 KB"))
+    P4(("4. Slucaj upotrebe<br/>kurs, autor, vlasnistvo"))
     D1[("Laboratorije<br/>ILaboratoryRepository")]
+    D2[("Clanstvo na kursu<br/>ICourseMembership")]
     LOG[("Serverski log<br/>odbijanja, kreiranja, greske")]
 
     P1 -->|"subjekat ili anoniman"| P2
     P2 -->|"dozvoljeno"| P3
-    P3 -->|"ispravan naslov"| P4
+    P3 -->|"ispravan naslov i kurs"| P4
+    D2 -->|"uloga pozivaoca na kursu"| P4
     P4 -->|"nova laboratorija / izmena naslova"| D1
-    D1 -->|"sacuvana laboratorija (Rehydrate)"| P4
+    D1 -->|"sacuvana laboratorija"| P4
     P2 -->|"radnja, korisnik, razlog odbijanja"| LOG
     P4 -->|"laboratoryId, createdBy (bez tajni)"| LOG
   end
@@ -110,83 +166,117 @@ flowchart LR
   FE ==>|"HTTP zahtev: preko granice poverenja"| P1
   P1 -->|"401"| FE
   P2 -->|"403"| FE
-  P3 -->|"400 INVALID_BODY / INVALID_TITLE"| FE
-  P4 -->|"201 / 200 / 404 NOT_FOUND"| FE
+  P3 -->|"400 INVALID_BODY / INVALID_TITLE / INVALID_COURSE"| FE
+  P4 -->|"201 / 200 / 403 / 404 NOT_FOUND"| FE
 ```
 
-Sve sto dolazi preko granice poverenja smatra se nepouzdanim: naslov, ID iz putanje, `X-Test-User` i eventualna dodatna polja u JSON-u (`id`, `createdBy`, `status`, `createdAt`). Server iz tela uzima samo `title`; `Id`, autor, status i vreme nastaju na serveru. Odbijen zahtev nikad ne stize do skladista.
+Sve sto dolazi preko granice poverenja smatra se nepouzdanim: naslov, kurs, ID iz putanje, `X-Test-User` i eventualna dodatna polja u JSON-u (`id`, `createdBy`, `status`, `createdAt`). `Id`, autor, status i vreme nastaju na serveru, a kurs se proverava na serveru. Odbijen zahtev nikad ne stize do skladista.
 
-## Model pretnji: imovina -> zloupotreba -> kontrola -> test -> dokaz
+## Model pretnji: imovina -> zloupotreba -> kontrola -> test
 
 | Imovina | Moguca zloupotreba | Kontrola | Test |
 | --- | --- | --- | --- |
-| Trajni ID laboratorije | klijent salje svoj `id` i pregazi ili zauzme tudji ID | zahtev nema polje `id`; domen generise `Guid`; skladiste odbija duplikat | `PostLabs_WhenClientSendsOwnId_ServerIgnoresItAndAssignsNewId` |
-| Autor laboratorije | klijent salje `createdBy` i predstavlja se kao drugi nastavnik | autor dolazi iz `IIdentityContext` | isti test + `Create_UsesServerIdentityAsCreatorAndServerTime` |
-| Pravo kreiranja | student kreira laboratoriju | `RequireLabAccess(laboratory.create)`, samo nastavnik | `PostLabs_WhenStudentCreates_Returns403AndStoresNothing` |
-| Tudji nacrt (IDOR) | nastavnik cita ili menja tudju laboratoriju pogadjanjem ID-a | provera vlasnistva u `LaboratoryService`, 404 isti kao za nepostojecu | `GetLabById_WhenLabBelongsToAnotherTeacher_Returns404SameAsMissing`, `PatchLabTitle_WhenAnotherTeacherRenames_Returns404AndKeepsTitle` |
-| Interni detalji servera | 404 ili 500 odgovor otkriva ID, tip izuzetka, stack trace ili konekcioni string | fiksne poruke sa kodom; `SafeErrors` vraca genericki 500 + `traceId` | `GetLabById_WhenIdDoesNotExist_Returns404WithoutInternalDetails`, `WhenStorageFails_Returns500WithoutInternalDetails` |
-| Integritet podataka | prazan, predug ili neispravan unos | validacija pre domena + domensko pravilo; JSON samo sa `application/json`, max 4 KB | `PostLabs_WhenTitleIsMissingOrBlank_...`, `PostLabs_WhenTitleIsTooLong_...`, `PostLabs_WhenBodyIsMalformed_...` |
-| Razvojni identitet | `X-Test-User: marko:Teacher` u produkciji | fake se registruje samo u Development-u; drugde `AnonymousIdentityContext` + `DenyAllAccessDecision` | `OutsideDevelopment_TestTeacherHeaderDoesNotGrantAccess` |
+| Trajni ID laboratorije | klijent salje svoj `id` i pregazi ili zauzme tudji ID | zahtev nema polje `id`; domen generise `Guid` | `PostLabs_WhenClientSendsOwnId_ServerIgnoresItAndAssignsNewId`, `PostLabs_WhenClientSetsIdCreatorOrStatus_StoredLabHasServerValues` |
+| Autor i status | klijent salje `createdBy` ili `status` (i kao `CreatedBy`, `Status`) | autor iz `IIdentityContext`, status uvek `Draft`; proverava se i sacuvan zapis, ne samo odgovor | `PostLabs_WhenClientSetsIdCreatorOrStatus_StoredLabHasServerValues`, `PatchLabTitle_CannotChangeIdCreatorOrCourseThroughBody` |
+| Pravo kreiranja | student kreira, ili nastavnik na tudjem kursu | uloga (ACC-05 + filter) i uloga na kursu (LAB-03) | `PostLabs_WhenStudentCreates_Returns403AndStoresNothing`, `PostLabs_WhenTeacherSwapsCourseId_Returns403AndStoresNothing` |
+| Tudji nacrt (IDOR) | nastavnik cita ili menja tudju laboratoriju pogadjanjem ID-a | provera vlasnistva, 404 isti kao za nepostojecu | `GetLabById_WhenLabBelongsToAnotherTeacher_Returns404SameAsMissing`, `PatchLabTitle_ForeignLab_ReturnsSameResponseAsMissingAndKeepsTitle` |
+| Interni detalji servera | odgovor otkriva tip izuzetka, stack trace, imena klasa, ID ili unos | fiksne poruke sa kodom; dozvoljena su samo poznata polja; `SafeErrors` | `ErrorResponses_DoNotRevealInternalDetailsOrInput`, `WhenStorageFails_Returns500WithoutInternalDetails` |
+| Integritet podataka | neispravan JSON, pogresan `Content-Type`, prazan ili predug naslov | rucno citanje tela, max 4 KB, validacija pre domena; izmena se ne upisuje | `PostLabs_WhenBodyIsMalformed_Returns400WithoutInternalDetails`, `PatchLabTitle_WhenBodyIsMalformed_Returns400AndKeepsTitle`, `PostLabs_WhenTitleIsTooLong_...` |
+| Razvojni identitet | `X-Test-User: marko:Teacher` u produkciji | fake se registruje samo u Development-u | `OutsideDevelopment_TestTeacherHeaderDoesNotGrantAccess` |
 
 ## Bezbednosni zahtevi
 
-- **Provere na serveru:** svaka ruta ima `RequireLabAccess` sa svojom radnjom (`laboratory.create`, `laboratory.read`, `laboratory.rename`). Provera prava ide pre citanja tela zahteva. Vlasnistvo se proverava u svakom slucaju upotrebe koji radi nad postojecom laboratorijom.
-- **Validacija ulaza:** telo se cita rucno: samo `application/json`, najvise 4 KB, a neispravan JSON daje kontrolisan `400 INVALID_BODY` i u Development rezimu (bez developer exception page). Naslov je obavezan i ima najvise 200 znakova posle `Trim()`. ID iz putanje mora biti `Guid` (ogranicenje rute `{id:guid}`), inace 404.
-- **Osetljivi podaci:** odgovori ne sadrze tip izuzetka, stack trace, ID iz zahteva u poruci o gresci ni interni tekst greske. Log belezi ID laboratorije i autora, bez tajni.
+- **Provere na serveru:** svaka ruta ima `RequireAccess` i `RequireLabAccess` sa svojom radnjom (`laboratory.create`, `laboratory.read`, `laboratory.rename`). Provera prava ide pre citanja tela. Kurs i vlasnistvo se proveravaju u svakom slucaju upotrebe.
+- **Validacija ulaza:** samo `application/json`, najvise 4 KB; neispravan JSON daje kontrolisan `400 INVALID_BODY` i u Development rezimu. Naslov je obavezan, najvise 200 znakova posle `Trim()`. `courseId` je obavezan pri kreiranju. ID iz putanje mora biti `Guid`, inace 404.
+- **Osetljivi podaci:** odgovori o gresci imaju samo polja `code`, `message`, `type`, `title`, `status`, `traceId`, `correlationId`. Ne sadrze tip izuzetka, stack trace, imena klasa, ID iz zahteva ni poslati naslov. Log belezi ID laboratorije i autora, bez tajni.
 - **Ogranicenja (poznata):**
-  - `X-Test-User` je simulacija identiteta, ne dokaz. Fake ne proverava postojanje naloga. Van Development okruzenja pristup laboratorijama se odbija dok se ne poveze Identity modul.
-  - Razvojni korisnik (`marko`) se deterministicki mapira u `Guid` autora (`CallerId`). Pravi Identity ID je vec `Guid` i koristi se direktno.
-  - Dva istovremena preimenovanja iste laboratorije: poslednji upis pobedjuje. Kontrola verzije (kao `LabDraft.Version` kod tima 11) nije deo LAB-01.
-  - Skladiste je u memoriji: podaci nestaju posle restarta.
+  - `X-Test-User` je simulacija identiteta, ne dokaz. LAB modul jos nije povezan sa pravom prijavom (vidi ispod). Van Development okruzenja pristup laboratorijama se odbija.
+  - Razvojni korisnik (`marko`) se deterministicki mapira u `Guid` autora (`CallerId`). Pravi korisnicki ID je vec `Guid` i koristi se direktno.
+  - Dva istovremena preimenovanja iste laboratorije: poslednji upis pobedjuje.
+
+## KT2: provera toka kroz aplikaciju
+
+Provereno 26. novembra 2026. na lokalnom racunaru: backend `dotnet run --project backend/Platform.Api/Platform.Api.csproj --launch-profile Platform.Api` (Development, `http://localhost:5080`, bez baze, pa `InMemoryLaboratoryRepository`), frontend `npm run dev` iz `frontend/`. Korisnik 1111 je nastavnik na demo kursu `aaaaaaaa-...`, 3333 nije nastavnik na tom kursu (demo podaci iz `Program.cs`).
+
+| # | Korak | Kroz | Korisnik | Dobijeno |
+| --- | --- | --- | --- | --- |
+| 1 | kreiranje na "Demo kurs" | aplikacija (forma) | nastavnik 1111 | 201, ID `b0427232-f9f6-4d59-b97c-3deb1c729e65` |
+| 2 | kreiranje na "Drugi demo kurs" | aplikacija | nastavnik 1111 | 403 |
+| 3 | kreiranje | aplikacija | student | 403 sa ID-em zahteva |
+| 4 | citanje laboratorije iz koraka 1 | HTTP (`curl.exe`) | 1111 | 200, isti `id`, `courseId`, naslov `lab01`, `createdBy` 1111, status `Draft` |
+| 5 | citanje iste laboratorije | HTTP | 3333 kao Teacher | 404 `NOT_FOUND`, isto kao nepostojeca |
+| 6 | promena naslova sa pokvarenim JSON-om (greska u PowerShell navodnicima) | HTTP | 1111 | 400 `INVALID_BODY`, bez detalja; naslov ostao `lab01` |
+| 7 | promena naslova u "Promenjen naslov" | HTTP (`Invoke-RestMethod`) | 1111 | 200, isti `id`, novi naslov |
+| 8 | ponovno citanje | HTTP | 1111 | 200, naslov "Promenjen naslov", `id`, kurs, autor i `createdAt` nepromenjeni |
+
+**Zakljucak:** kreiranje, citanje i preimenovanje rade kroz pravi host, sa istim kodovima kao u testovima. Trajni ID je isti posle preimenovanja.
+
+**Nalazi:**
+
+- **Prava prijava nije povezana sa LAB modulom.** Aplikacija nije trazila prijavu: identitet dolazi iz razvojnog `X-Test-User` zaglavlja (`FakeIdentityContext`). Platforma vec ima sesiju (`SessionIdentityContext`, `LabCaller`), ali je koriste samo LabVisibility/AUT-07 rute, a Identity za nju trazi PostgreSQL. Povezivanje je posao sa Identity timom: adapter koji iz sesije daje `CallerId` i proverava status naloga, dok uloga na kursu ostaje iz `ICourseMembership`. Do tada je tok proveren sa razvojnim identitetom, a van Development-a LAB rute odbijaju svaki zahtev (401).
+- **Citanje i preimenovanje nemaju ekran.** Frontend ima samo formu za kreiranje, pa su koraci 4–8 provereni direktno preko API-ja.
+- Kod `curl.exe` u PowerShell-u JSON telo se lako pokvari zbog navodnika. Za rucnu proveru koristiti `Invoke-RestMethod` (primer ispod).
 
 ## Dokaz rada
 
 - **Fajlovi:**
   - `backend/Platform.Api/Modules/Laboratories/Api/LaboratoriesEndpoints.cs` (rute, citanje tela, `SafeErrors`)
   - `backend/Platform.Api/Modules/Laboratories/Api/LaboratoryContracts.cs` (zahtevi, odgovor, kodovi gresaka)
-  - `backend/Platform.Api/Modules/Laboratories/Application/LaboratoryService.cs` (slucajevi upotrebe, vlasnistvo)
-  - `backend/Platform.Api/Modules/Laboratories/Application/CallerId.cs`
-  - `backend/Platform.Api/Modules/Laboratories/Application/LabActions.cs` (`laboratory.read`, `laboratory.rename`)
-  - `backend/Platform.Api/Modules/Laboratories/Infrastructure/FakeAccessDecision.cs` (politike za nove radnje)
-  - `backend/Platform.Api/Modules/Laboratories/LaboratoriesModule.cs` (registracija repozitorijuma i servisa)
+  - `backend/Platform.Api/Modules/Laboratories/Application/LaboratoryService.cs` (slucajevi upotrebe, kurs, vlasnistvo)
+  - `backend/Platform.Api/Modules/Laboratories/Application/CallerId.cs`, `LabActions.cs`
   - `backend/Laboratories.Tests/LaboratoriesHttpTests.cs`, `LaboratoryServiceTests.cs`, `FakeAccessDecisionTests.cs`
-- **Pokretanje testova** (iz korena repozitorijuma, .NET SDK 10):
+  - `frontend/src/api/labs.ts`, `frontend/src/components/labs/CreateLabForm.tsx` i njihovi testovi
+- **Pokretanje testova** (iz korena repozitorijuma):
 
 ```powershell
 dotnet test backend/Laboratories.Tests/Laboratories.Tests.csproj
-dotnet test backend/SecurityLab.slnx --configuration Release
+cd frontend; npm ci; npm test; npm run build
 ```
 
-- **Kljucni testovi (stavke iz zaduzenja):**
+Ostali test projekti u `SecurityLab.slnx` traze PostgreSQL i prolaze u CI-ju.
+
+- **Kljucni testovi KT1:**
 
 | Stavka | Test |
 | --- | --- |
 | POST uz proveru uloge nastavnika -> 201 + Id | `PostLabs_WhenTeacherCreates_Returns201WithServerIdAndLocation` |
-| ignorisanje klijentskog `id` | `PostLabs_WhenClientSendsOwnId_ServerIgnoresItAndAssignsNewId` |
 | GET -> 200 ili 404 bez internih detalja | `GetLabById_WhenOwnerReads_Returns200WithSameData`, `GetLabById_WhenIdDoesNotExist_Returns404WithoutInternalDetails` |
 | PATCH naslova, isti Id | `PatchLabTitle_WhenTeacherRenamesLab_UpdatesTitleAndKeepsSameId`, `PatchLabTitle_RenamedTwice_IdStaysTheSame` |
-| negativan: student kreira -> 403 | `PostLabs_WhenStudentCreates_Returns403AndStoresNothing` |
-| negativan: neispravan naslov -> 400 | `PostLabs_WhenTitleIsMissingOrBlank_Returns400AndStoresNothing`, `PostLabs_WhenTitleIsTooLong_Returns400AndStoresNothing` |
-| negativan: nepostojeci ID -> 404 bez curenja | `GetLabById_WhenIdDoesNotExist_Returns404WithoutInternalDetails` |
+| student kreira -> 403 | `PostLabs_WhenStudentCreates_Returns403AndStoresNothing` |
+| neispravan naslov -> 400 | `PostLabs_WhenTitleIsMissingOrBlank_Returns400AndStoresNothing`, `PostLabs_WhenTitleIsTooLong_Returns400AndStoresNothing` |
+
+- **Kljucni testovi KT2:**
+
+| Stavka iz zaduzenja | Test |
+| --- | --- |
+| klijent pri kreiranju ne moze da zada id, autora ili status | `PostLabs_WhenClientSetsIdCreatorOrStatus_StoredLabHasServerValues` (camelCase, PascalCase, `status` kao broj) |
+| PATCH tudje laboratorije je odbijen (404, vidi obrazlozenje) | `PatchLabTitle_ForeignLab_ReturnsSameResponseAsMissingAndKeepsTitle` (drugi nastavnik, i na istom kursu) |
+| neispravan JSON -> 400 | `PatchLabTitle_WhenBodyIsMalformed_Returns400AndKeepsTitle`, `PostLabs_WhenBodyIsMalformed_Returns400WithoutInternalDetails` |
+| poruke 400/401/403/404 bez internih detalja | `ErrorResponses_DoNotRevealInternalDetailsOrInput` (8 scenarija) |
+| frontend salje `{ title, courseId }` i prevodi kodove | `labsApi.test.ts`, `CreateLabForm.test.tsx` |
 
 - **Rucna demonstracija** (Development, API na portu 5080):
 
 ```powershell
-$env:ASPNETCORE_ENVIRONMENT = 'Development'
-dotnet run --project backend/Platform.Api/Platform.Api.csproj --no-launch-profile --urls http://localhost:5080
+dotnet run --project backend/Platform.Api/Platform.Api.csproj --launch-profile Platform.Api
 
 # drugi terminal
-# 1) nastavnik kreira; klijentski id se ignorise -> 201, novi id u odgovoru
-curl.exe -i -X POST http://localhost:5080/api/laboratories -H "X-Test-User: marko:Teacher" -H "Content-Type: application/json" -d '{\"id\":\"11111111-1111-1111-1111-111111111111\",\"title\":\"RBAC\"}'
-# 2) student kreira -> 403
-curl.exe -i -X POST http://localhost:5080/api/laboratories -H "X-Test-User: ana:Student" -H "Content-Type: application/json" -d '{\"title\":\"RBAC\"}'
-# 3) prazan naslov -> 400 INVALID_TITLE
-curl.exe -i -X POST http://localhost:5080/api/laboratories -H "X-Test-User: marko:Teacher" -H "Content-Type: application/json" -d '{\"title\":\"  \"}'
-# 4) citanje (zameniti <ID> vrednoscu iz koraka 1) -> 200; drugi nastavnik -> 404
-curl.exe -i http://localhost:5080/api/laboratories/<ID> -H "X-Test-User: marko:Teacher"
-curl.exe -i http://localhost:5080/api/laboratories/<ID> -H "X-Test-User: jelena:Teacher"
-# 5) promena naslova -> 200, isti id
-curl.exe -i -X PATCH http://localhost:5080/api/laboratories/<ID>/title -H "X-Test-User: marko:Teacher" -H "Content-Type: application/json" -d '{\"title\":\"RBAC v2\"}'
+$base = "http://localhost:5080/api/laboratories"
+$marko = @{ "X-Test-User" = "11111111-1111-1111-1111-111111111111:Teacher" }
+$drugi = @{ "X-Test-User" = "33333333-3333-3333-3333-333333333333:Teacher" }
+
+# 1) kreiranje na kursu na kome 1111 predaje -> 201
+$lab = Invoke-RestMethod -Method Post -Uri $base -Headers $marko -ContentType "application/json" `
+  -Body '{"title":"RBAC","courseId":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}'
+$lab
+
+# 2) citanje -> 200; drugi nastavnik -> 404 (crvena greska sa 404)
+Invoke-RestMethod -Uri "$base/$($lab.id)" -Headers $marko
+Invoke-RestMethod -Uri "$base/$($lab.id)" -Headers $drugi
+
+# 3) promena naslova -> 200, isti id
+Invoke-RestMethod -Method Patch -Uri "$base/$($lab.id)/title" -Headers $marko -ContentType "application/json" `
+  -Body '{"title":"RBAC v2"}'
 ```
 
-- **Sledeci koraci:** dogovor sa Lanom oko rute za LAB-07 sadrzaj po jeziku; adapter na pravi Identity i `Platform.Access` (predlog u `LAB-01-LAB-07.md`); PostgreSQL repozitorijum (Gordana, KT2); veza sa kursom (LAB-03) umesto provere samo po autoru; strukturisan audit zapis kroz `Platform.Audit` umesto serverskog loga.
+- **Sledeci koraci:** adapter na pravu sesiju (sa Identity timom); ekran za citanje i preimenovanje na frontendu; dogovor sa LAB-07 oko rute za sadrzaj po jeziku; strukturisan audit zapis kroz `Platform.Audit`.
