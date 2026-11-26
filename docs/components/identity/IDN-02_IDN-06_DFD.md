@@ -222,7 +222,7 @@ Present in the repository now:
 - Session revocation: `SessionManager.RevokeAllForUser`, `RevokeSession` and `ListForUser` work against `identity.sessions`. `ChangeAccountStatus` (IDN-03) calls `RevokeAllForUser` when it blocks or archives an account.
 - US-09 development seed: `DevelopmentDatabase` and `DevelopmentAccountSeeder` (four accounts, Development only), test helper `TestUsers` in `Platform.Identity.Tests`.
 - Frontend: `frontend/src/auth/authApi.ts` calls `/api/auth/me`, `/api/auth/login` and `/api/auth/logout`, `frontend/src/api/accounts.ts` calls `POST /api/admin/accounts`.
-- Not used on the request path: `StubIdentityContext`, `AnonymousIdentityContext` and `StoreSessionManager` (a stub whose revoke and list methods do nothing, no longer registered in `Program.cs`).
+- Not used on the request path: `StubIdentityContext` and `AnonymousIdentityContext`. The old `StoreSessionManager` stub has been deleted.
 
 Planned (this DFD describes them, but the code does not exist yet): P2 MFA verify, P5 MFA enroll, `IMfaPolicy`, MFA columns in D1, CSRF token, endpoints for revoke one and list sessions.
 

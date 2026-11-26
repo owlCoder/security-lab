@@ -23,6 +23,49 @@ namespace Platform.Identity.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("ExternalLogin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("account_id");
+
+                    b.Property<string>("Issuer")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("issuer");
+
+                    b.Property<DateTimeOffset>("LastLoginAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_login_at");
+
+                    b.Property<DateTimeOffset>("LinkedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("linked_at");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("subject");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "Issuer")
+                        .IsUnique()
+                        .HasDatabaseName("ux_external_logins_account_issuer");
+
+                    b.HasIndex("Issuer", "Subject")
+                        .IsUnique()
+                        .HasDatabaseName("ux_external_logins_issuer_subject");
+
+                    b.ToTable("external_logins", "identity");
+                });
+
             modelBuilder.Entity("Platform.Identity.Entities.Session", b =>
                 {
                     b.Property<Guid>("Id")
@@ -128,6 +171,15 @@ namespace Platform.Identity.Migrations
                         .HasDatabaseName("ux_accounts_email");
 
                     b.ToTable("accounts", "identity");
+                });
+
+            modelBuilder.Entity("ExternalLogin", b =>
+                {
+                    b.HasOne("Platform.Identity.Entities.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Platform.Identity.Entities.Session", b =>

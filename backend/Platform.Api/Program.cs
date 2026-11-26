@@ -6,12 +6,13 @@ using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.Competencies;
 using Platform.Api.Modules.Administration.Api;
+using Platform.Api.Modules.Access.Api;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
-
+using Platform.Api.Modules.Identity.Federation;
 using Platform.Access.Application.Options;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
@@ -67,6 +68,7 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
+var attemptsEnabled = builder.Services.AddRuntimeAttempts(builder.Configuration);
 builder.Services.AddCentralAccessAudit();
 builder.Services.AddRevisionAuthorization();
 builder.Services.AddRevisionAccessPolicies();
@@ -152,7 +154,12 @@ builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
 builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
+// IDN-05: administrator unlock (account.unlock, registered by REV-05), same store and transaction as IDN-03.
+builder.Services.AddScoped<UnlockAccount>();
 builder.Services.AddScoped<ILoginService, LoginService>();
+// IDN-08: login via an external OIDC identity
+builder.Services.AddScoped<IFederatedLoginService, FederatedLoginService>();
+var oidcEnabled = builder.Services.AddOidcFederation(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 builder.Services.AddScoped<IdentityAuditProducer>();
@@ -232,11 +239,12 @@ builder.Services.AddPrg04CompetencyOperations();
 builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
 if (kt1Enabled) builder.Services.AddKt1RequestIdentity();
+if (attemptsEnabled) builder.Services.AddAttemptResourceResolution();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
 AuthoringAccessSubjectProvider.Register(builder.Services);
-if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+if (administrationEnabled || attemptsEnabled) builder.Services.AddAdministrationRequestIdentity();
 builder.Services.AddPrg04RequestIdentity();
 
 var app = builder.Build();
@@ -245,7 +253,9 @@ app.UseRouting();
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
 app.UseMiddleware<PrerequisitePersistenceExceptionMiddleware>();
-if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
+
+if (administrationEnabled || attemptsEnabled)
+    app.UseMiddleware<AdministrationResponseMiddleware>();
 // Preserve KT1's non-enumerating public denial contract using the same central decider.
 if (kt1Enabled) app.UseMiddleware<Kt1AccessContractMiddleware>();
 // Identity and catalog routes retain their invalid-session response before ACC-05 checks access.
@@ -256,11 +266,16 @@ app.UseWhen(
 app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
 
 app.UseAccessControl();
-if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
+if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
 
 // Identity Rate Limiting
 app.UseIdentityRateLimiting();
+
+// IDN-08: the OIDC handler processes /api/auth/oidc/callback here. KT1 adds the same middleware itself.
+if (oidcEnabled && !kt1Enabled)
+    app.UseAuthentication();
+
 if (kt1Enabled)
 {
     app.UseAuthentication();
@@ -330,6 +345,7 @@ app.UseWhen(
 
 app.MapControllers();
 if (administrationEnabled) app.MapPersistentCourseAdministration();
+if (attemptsEnabled) app.MapRuntimeAttempts();
 app.MapLaboratories();
 app.MapCompetencyEndpoints();
 app.MapCatalog(app.Configuration);

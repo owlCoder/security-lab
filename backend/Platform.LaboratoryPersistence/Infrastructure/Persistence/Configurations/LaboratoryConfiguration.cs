@@ -8,7 +8,9 @@ public sealed class LaboratoryConfiguration : IEntityTypeConfiguration<Laborator
 {
     public void Configure(EntityTypeBuilder<LaboratoryRecord> builder)
     {
-        builder.ToTable("laboratories");
+        builder.ToTable("laboratories", table => table.HasCheckConstraint(
+            "CK_laboratories_CourseId", "\"CourseId\" IS NULL OR \"CourseId\" <> '00000000-0000-0000-0000-000000000000'::uuid"));
+        builder.HasIndex(x => x.CourseId);
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.Title).IsRequired().HasMaxLength(200);

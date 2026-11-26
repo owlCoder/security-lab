@@ -1,0 +1,31 @@
+flowchart TD
+  subgraph CLIENT["Trust boundary: untrusted client"]
+    client["Browser / PowerShell; real session cookie"]
+  end
+  subgraph SERVER["Trusted consumer API / explicit operator"]
+    api["ACC-04 HTTP API; owner read / teacher review / draft update"]
+    access["Shared Platform.Access; existing read policies + concrete draft policy"]
+    resolver["Attempt resource resolver; server-owned owner/course attributes"]
+    member["Shared IMembershipReader adapter; no runtime demo membership"]
+    service["AttemptService; validation + snapshot/session checks"]
+    transport["Fixed-origin HTTPS ATT adapter; no redirects/cookies; bounded deadline"]
+  end
+  subgraph PROVIDERS["Provider and storage boundary"]
+    identity["Real Identity provider; current accounts and persistent sessions"]
+    membership["ACC-02 persistent provider; NOT ON MAIN: acceptance/integration pending"]
+    att["ATT read / CAS / durable receipt provider; NOT ON MAIN: contract proposal only"]
+    logs["Metadata-only request diagnostics; central Access denial audit"]
+  end
+  client -->|"HTTPS + DTO"| api
+  api -->|"validate session"| identity
+  api -->|"explicit requirement"| access
+  access -->|"owner/course"| resolver
+  access -->|"current course membership"| member
+  member -->|"published shared reader"| membership
+  resolver -->|"metadata only"| transport
+  api -->|"allowed operation"| service
+  service -->|"fresh account/session"| identity
+  service -->|"recheck current scope"| member
+  service -->|"bound read / CAS write"| transport
+  transport -->|"proposed acc04-att-v1"| att
+  service -->|"no answers or credentials"| logs

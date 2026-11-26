@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="1010" viewBox="0 0 1160 1010">
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#526882"/></marker></defs>
+<rect width="1160" height="1010" fill="white"/>
+<text x="580" y="34" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="23" fill="#172b45">ACC-04 runtime data flow</text>
+<rect x="245" y="62" width="340" height="77" rx="12" fill="#fff0e5" stroke="#8192aa" stroke-dasharray="7 5"/>
+<text x="415" y="88" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Untrusted client</text>
+<text x="415" y="107" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Real session cookie; resource IDs and DTO</text>
+<rect x="40" y="185" width="625" height="620" rx="12" fill="#f8fbff" stroke="#8192aa" stroke-dasharray="7 5"/>
+<text x="350" y="210" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Trusted API / application boundary</text>
+<rect x="750" y="185" width="370" height="620" rx="12" fill="#fafcfb" stroke="#8192aa" stroke-dasharray="7 5"/>
+<text x="935" y="210" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Provider and storage boundary</text>
+<rect x="90" y="245" width="525" height="80" rx="12" fill="#edf3ff" stroke="#8192aa"/>
+<text x="352.5" y="272" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">P1 Validate real session and current account</text>
+<text x="352.5" y="291" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Used at entry and for final freshness checks</text>
+<rect x="90" y="425" width="525" height="105" rx="12" fill="#edf3ff" stroke="#8192aa"/>
+<text x="352.5" y="452" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">P2 Shared Access + concrete authorization</text>
+<text x="352.5" y="471" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Validate DTO, exact grant/snapshot and version</text>
+<text x="352.5" y="490" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">Fresh provider checks; authorized read / mutation</text>
+<rect x="90" y="675" width="525" height="80" rx="12" fill="#edf3ff" stroke="#8192aa"/>
+<text x="352.5" y="702" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">P3 Normalize public result / rejection</text>
+<text x="352.5" y="721" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#172b45">No forbidden resource details or internal reasons</text>
+<rect x="780" y="245" width="310" height="80" rx="12" fill="#e8f5ed" stroke="#8192aa"/>
+<text x="935" y="271" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">D1 Identity accounts and sessions</text>
+<text x="935" y="288" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">Real persistent provider</text>
+<rect x="780" y="395" width="310" height="80" rx="12" fill="#fff5cd" stroke="#8192aa" stroke-dasharray="7 5"/>
+<text x="935" y="421" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">D2 Shared membership contract</text>
+<text x="935" y="438" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">Persistent ACC-02 provider not on main</text>
+<rect x="780" y="545" width="310" height="95" rx="12" fill="#fff5cd" stroke="#8192aa" stroke-dasharray="7 5"/>
+<text x="935" y="571" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">D3 Proposed ATT provider</text>
+<text x="935" y="588" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">Metadata / atomic snapshot read / CAS + audit</text>
+<text x="935" y="605" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">Actual implementation not on main</text>
+<rect x="780" y="695" width="310" height="80" rx="12" fill="#e8f5ed" stroke="#8192aa"/>
+<text x="935" y="721" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">D4 Local request diagnostics</text>
+<text x="935" y="738" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">No answers / credentials; not durable ATT audit</text>
+<polyline points="415,139 415,245" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="490" y="190" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">HTTPS request</text>
+<polyline points="352,325 352,425" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="480" y="375" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Validated subject / fresh recheck</text>
+<polyline points="352,530 352,675" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="485" y="610" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Authorized result, conflict or denial</text>
+<polyline points="615,282 780,282" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="697" y="253" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Session/account</text>
+<text x="697" y="269" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">↔ current status or failure</text>
+<polyline points="615,452 700,452 700,433 780,433" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="698" y="395" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Course/member ID</text>
+<text x="698" y="411" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">↔ current state</text>
+<polyline points="615,498 690,498 690,585 780,585" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="700" y="552" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Bound read/write</text>
+<text x="700" y="568" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">↔ result/failure</text>
+<polyline points="615,520 720,520 720,735 780,735" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="715" y="665" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Metadata only</text>
+<polyline points="90,283 65,283 65,715 90,715" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="62" y="400" text-anchor="end" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Deny</text>
+<rect x="245" y="860" width="340" height="77" rx="12" fill="#fff0e5" stroke="#8192aa" stroke-dasharray="7 5"/>
+<text x="415" y="888" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">Same client: public response</text>
+<text x="415" y="905" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">200 / 400 / 401 / 404 / 409 / 413 / 503</text>
+<polyline points="352,755 352,860" fill="none" stroke="#526882" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="490" y="840" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="11" fill="#172b45">Permitted data or generic rejection</text>
+<text x="580" y="967" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">ATT/membership positive tests use explicit contract doubles until real providers are integrated.</text>
+<text x="580" y="984" text-anchor="middle" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#172b45">No cross-provider transaction or durable ATT implementation is claimed by this consumer.</text>
+</svg>

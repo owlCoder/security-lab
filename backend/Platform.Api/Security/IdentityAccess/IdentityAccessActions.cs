@@ -1,6 +1,7 @@
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.LabVisibility.Contracts;
 using Platform.Identity.Services;
+using Platform.Api.Security.RevisionAuthorization;
 
 namespace Platform.Api.Security.IdentityAccess;
 
@@ -26,6 +27,13 @@ public static class IdentityAccessActions
     public const string AccountStatusChange = "account.status.change";
 
     /// <summary>
+    /// IDN-05: an administrator unlocks a locked account (<c>POST /api/admin/accounts/{id}/unlock</c>).
+    /// This is the single action id agreed with REV-05 (#85), which registers it (System scope, privileged) with
+    /// <c>RevisionActionPolicy</c>; it is not registered a second time here.
+    /// </summary>
+    public const string AccountUnlock = RevisionActions.UnlockAccount;
+
+    /// <summary>
     /// Routes of the Identity module itself (a subset of <see cref="SessionBound"/>). IDN-07 promises these a stable
     /// <c>401 session_invalid</c> (cookie cleared, <c>no-store</c>) for a missing, unknown, revoked or expired session.
     /// </summary>
@@ -33,6 +41,7 @@ public static class IdentityAccessActions
         new HashSet<string>(StringComparer.Ordinal)
         {
             AccountStatusChange,
+            AccountUnlock,
             SessionRead,
             SessionList,
             SessionRevoke,
@@ -43,6 +52,7 @@ public static class IdentityAccessActions
         new HashSet<string>(StringComparer.Ordinal)
         {
             AccountStatusChange,
+            AccountUnlock,
             CreateAccountPolicy.ActionId,
             SessionRead,
             SessionList,

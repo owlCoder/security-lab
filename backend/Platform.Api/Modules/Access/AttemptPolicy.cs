@@ -12,10 +12,29 @@ public sealed class AttemptPolicy(IAccountReader accounts, IMembershipReader mem
     public string Id => "acc04.ownership";
     public string Version => "acc04:v3";
 
-    public ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default)
+    public async ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Resolve(request) == "ALLOW");
+        if (request.Subject is null || !Guid.TryParse(request.Subject.Id, out var actor) ||
+            request.Resource?.Type != "attempt" || !Guid.TryParse(request.Resource.Id, out var id) ||
+            request.Action is not (Read or Update)) return false;
+        var a = await attempts.FindAttemptAsync(id, cancellationToken);
+        return a is { Status: PortStatus.Ok, Value: not null } && a.Value.Id == id &&
+            await CheckSnapshotAsync(actor, a.Value, request.Action, cancellationToken);
+    }
+
+    public async ValueTask<bool> CheckSnapshotAsync(Guid actor, AttemptSnapshot a, string action, CancellationToken ct = default)
+    {
+        if (actor == Guid.Empty || a.Id == Guid.Empty || a.OwnerId == Guid.Empty || a.CourseId == Guid.Empty ||
+            a.Version < 1 || !Enum.IsDefined(a.State) || action is not (Read or Update)) return false;
+        var account = await accounts.FindAccountAsync(actor, ct);
+        if (account is not { Status: PortStatus.Ok, Value.IsActive: true } || account.Value.Id != actor) return false;
+        var member = await memberships.FindMembershipAsync(actor, a.CourseId, ct);
+        if (member is not { Status: PortStatus.Ok, Value.IsActive: true } || member.Value.AccountId != actor ||
+            member.Value.CourseId != a.CourseId || !Enum.IsDefined(member.Value.Role)) return false;
+        var role = member.Value.Role;
+        return action == Update ? a.OwnerId == actor && role == CourseRole.Student && a.State == AttemptState.InProgress
+            : a.OwnerId == actor || (role == CourseRole.Teacher && a.State != AttemptState.InProgress);
     }
 
     // Internal reasons are used by tests/diagnostics; never returned to an unauthorized HTTP caller.

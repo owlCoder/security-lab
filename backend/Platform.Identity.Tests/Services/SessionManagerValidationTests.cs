@@ -105,6 +105,36 @@ public class SessionManagerValidationTests
     }
 
     [Test]
+    public async Task ListForUser_DropsASession_AtTheExactExpiryTime()
+    {
+        var userId = Guid.NewGuid();
+        var (_, session) = await CreateSessionAsync(userId);
+
+        _clock.Advance(Lifetime - TimeSpan.FromSeconds(1));
+        Assert.That((await _manager.ListForUser(userId)).Select(info => info.Handle),
+            Is.EqualTo(new[] { session.SessionHandle }));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.That(await _manager.ListForUser(userId), Is.Empty);
+    }
+
+    [Test]
+    public async Task RevokeSession_AndRevokeAllForUser_StampTheRevocationFromTheClock()
+    {
+        var userId = Guid.NewGuid();
+        var (_, first) = await CreateSessionAsync(userId);
+        var (_, second) = await CreateSessionAsync(userId);
+        _clock.Advance(TimeSpan.FromMinutes(10));
+
+        Assert.That(await _manager.RevokeSession(userId, first.SessionHandle), Is.True);
+        Assert.That(ReadSaved(first.Id).RevokedAt, Is.EqualTo(_clock.GetUtcNow()));
+
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.That(await _manager.RevokeAllForUser(userId, "test"), Is.EqualTo(1));
+        Assert.That(ReadSaved(second.Id).RevokedAt, Is.EqualTo(_clock.GetUtcNow()));
+    }
+
+    [Test]
     public async Task RevokingOneSession_LeavesOtherSessionsOfTheUserValid()
     {
         var userId = Guid.NewGuid();

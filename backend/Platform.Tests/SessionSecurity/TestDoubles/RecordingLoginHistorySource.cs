@@ -5,7 +5,7 @@ using Platform.SessionSecurity.Domain;
 namespace Platform.Tests.SessionSecurity.TestDoubles;
 
 /// <summary>
-/// Decorator over a real <see cref="ILoginHistorySource"/> that records how it was called, so tests
+/// IDN-22: decorator over a real <see cref="ILoginHistorySource"/> that records how it was called, so tests
 /// can prove that the source is not called for a rejected request and is called only for the caller.
 /// </summary>
 internal sealed class RecordingLoginHistorySource(ILoginHistorySource inner) : ILoginHistorySource

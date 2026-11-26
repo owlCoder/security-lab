@@ -1,6 +1,6 @@
 # IDN-05: Ograničenje broja pokušaja (rate limiting)
 
-Limit po IP adresi klijenta za prijavu i reset lozinke. Prekoračenje vraća `429 Too Many Requests`
+Limit po IP adresi klijenta za prijavu, reset lozinke i promenu statusa naloga (IDN-03, `PUT /api/admin/accounts/{id}/status`). Prekoračenje vraća `429 Too Many Requests`
 sa `Retry-After` (sekunde) i generičkim telom `{ "code": "rate_limited", ... }` koje ne otkriva da li nalog postoji.
 
 ## Kako se koristi (IDN-02 / IDN-04)
@@ -29,6 +29,8 @@ app.MapPost("/api/auth/password-reset", ...).RequireRateLimiting(RateLimitPolici
 | `RateLimiting__Login__WindowSeconds` | 60 |
 | `RateLimiting__PasswordReset__PermitLimit` | 10 |
 | `RateLimiting__PasswordReset__WindowSeconds` | 900 |
+| `RateLimiting__AccountStatusChange__PermitLimit` | 20 |
+| `RateLimiting__AccountStatusChange__WindowSeconds` | 60 |
 | `RateLimiting__KnownProxies__0`, `__1`, ... | prazno |
 | `RateLimiting__KnownNetworks__0`, ... (CIDR) | prazno |
 
