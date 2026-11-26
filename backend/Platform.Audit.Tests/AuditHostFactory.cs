@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
@@ -26,7 +27,7 @@ internal sealed class AuditHostFactory(string runtimeConnectionString, TimeSpan?
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment("Testing").UseMfaTestKeyRing();
         builder.ConfigureLogging(logging => logging.ClearProviders());
         builder.ConfigureTestServices(services =>
         {

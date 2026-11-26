@@ -17,21 +17,15 @@ public static class IdentityModule
 {
     public const string ConnectionStringName = "Identity";
 
-    /// <summary>IDN-06: folder of the Data Protection keys that encrypt the TOTP secrets.</summary>
-    public const string DataProtectionKeysPathKey = "Identity:DataProtection:KeysPath";
-
     public static IServiceCollection AddIdentityModule(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString(ConnectionStringName);
 
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
 
-        // IDN-06: with KeysPath the keys survive a restart and can be backed up with the database. Without it the
-        // framework default location is used. The keys are not encrypted at rest (IDN-02_TOTP_MFA.md, key storage).
-        var dataProtection = services.AddDataProtection().SetApplicationName("SecurityLab");
-        var keysPath = configuration[DataProtectionKeysPathKey];
-        if (!string.IsNullOrWhiteSpace(keysPath))
-            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+        // US-22: where the keys are kept and how they are encrypted at rest is set only by AddMfaKeyRing
+        // (Program.cs), which needs the environment to refuse a start without a protected key ring.
+        services.AddDataProtection().SetApplicationName(MfaKeyRingRegistration.ApplicationName);
         // IDN-06: no plain IDataProtector is registered; only MFA gets the MFA purpose.
         services.AddSingleton<ITotpSecretProtector, DataProtectionTotpSecretProtector>();
 

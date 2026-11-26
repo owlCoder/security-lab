@@ -1,3 +1,4 @@
+using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -14,7 +15,7 @@ namespace Platform.Kt1.Tests;
 public sealed class Kt1Factory(string environment = "Development", bool enabled = true) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder) =>
-        builder.UseEnvironment(environment).UseSetting("Kt1Demo:Enabled", enabled.ToString());
+        builder.UseEnvironment(environment).UseMfaTestKeyRing().UseSetting("Kt1Demo:Enabled", enabled.ToString());
 }
 [TestFixture]
 public class Kt1HttpTests
