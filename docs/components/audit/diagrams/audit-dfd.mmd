@@ -1,47 +1,60 @@
 flowchart LR
-  subgraph B1["Trust boundary 1: untrusted client / producer input"]
-    CLIENT["Browser or upstream module\nUntrusted route, body, headers"]
+  subgraph B1["Trust boundary 1: untrusted client"]
+    CLIENT["Browser or API client\nRoute, body, headers and cookies are untrusted"]
   end
 
-  subgraph B2["Trust boundary 2: trusted application process"]
-    HOST["Platform.Api host\nAddAudit currently registers no services"]
-    ID["Identity producer\nCurrent logger writer; no persistent Audit link"]
-    ACCESS["Platform.Access decision\nCurrent NullAccessAuditWriter"]
-    DRAFT["AuditEventDraft\nCatalog + outcome + detail allowlist"]
-    CTX["Trusted context + TimeProvider\nWriter implementation; provider not registered"]
-    VALIDATE["AuditDraftValidator\nReject invalid context/schema/details"]
-    DOMAIN["Immutable AuditEvent\nServer event ID and UTC occurrence time"]
-    STORE["PostgresAuditEventStore\nParameterized append; idempotent ID"]
-    QUERY["AUD-06 course query / API\nNOT IMPLEMENTED / NOT EXPOSED"]
+  subgraph B2["Trust boundary 2: Platform.Api process"]
+    CORR["UseCorrelationContext\nFirst middleware; server-generated correlation ID"]
+    SESS["SessionCheckMiddleware\nValidated session; actor is never taken from the client"]
+    ACCESS["UseAccessControl\nDefault deny; decision per action"]
+    HANDLERS["Business handlers\nIdentity, Review, Administration and others"]
+    IDP["IdentityAuditProducer\nLogin, logout, throttled login, account status"]
+    FWD["CentralAccessAuditWriter\nWrites denials only; failure is logged, decision unchanged"]
+    RELAY["AdministrationAuditRelay\nOperator batch from the ADM-08 outbox; stable event IDs"]
+    TXW["PostgresTransactionalAuditWriter\nStatus change, unlock, revision review"]
+    CTX["ServerAuditContextProvider\nActor from session, correlation from middleware\nAmbient writer path has no caller yet"]
+    WRITER["AuditWriter\nIAuditWriter and ITrustedAuditWriter"]
+    VALIDATE["AuditDraftValidator\nEvent catalog, detail allowlist, secret-like keys rejected"]
+    DOMAIN["Immutable AuditEvent\nServer event ID and UTC time"]
+    STORE["PostgresAuditEventStore\nParameterized append; idempotent event ID"]
+    QUERY["CourseAuditQueryService + CourseAuditReadPolicy\nImplemented; not registered, no HTTP endpoint on main"]
+    LEGACY["Identity IAuditWriter to LoggerAuditWriter\nApplication log only; no production caller found (D1)"]
   end
 
   subgraph B3["Trust boundary 3: PostgreSQL"]
-    DB[("audit.audit_events\nRuntime role: SELECT / INSERT")]
-    MIG["Migration/bootstrap operator\nSeparate privileged setup"]
+    DB[("audit.audit_events\nRuntime role: SELECT, INSERT\nTrigger rejects UPDATE and DELETE")]
+    OUTBOX[("coursework_admin.outbox\nADM-08 producer events")]
   end
 
-  CLIENT -. "Proposed future request" .-> HOST
-  HOST --> ID
-  HOST --> ACCESS
-  ID -. "No current shared-writer flow" .-> DRAFT
-  ACCESS -. "No current forwarder" .-> DRAFT
-  HOST -. "Module not composed" .-> DRAFT
-  DRAFT -. "Writer exists but is not registered" .-> CTX
-  CTX --> VALIDATE
-  DRAFT --> VALIDATE
-  VALIDATE -->|"Accepted"| DOMAIN
-  VALIDATE -->|"Rejected: stable code; no write"| HOST
-  DOMAIN --> STORE
-  STORE -->|"Parameterized INSERT; duplicate check"| DB
-  DB -->|"Appended / already present / conflict"| STORE
-  STORE -. "Unavailable maps at writer boundary" .-> HOST
-  MIG -->|"DDL and grants"| DB
-  DB -. "Future authorized query only; no API currently" .-> QUERY
-  QUERY -. "Must authorize course before select/count/page" .-> CLIENT
+  subgraph B4["Trust boundary 4: privileged operator"]
+    MIG["Migration and bootstrap\ndotnet ef, bootstrap-runtime.sql, separate account"]
+  end
 
-  classDef implemented fill:#e8f5e9,stroke:#2e7d32,color:#111;
-  classDef partial fill:#fff8e1,stroke:#f9a825,color:#111;
-  classDef absent fill:#ffebee,stroke:#c62828,color:#111;
-  class CLIENT,DB,MIG,VALIDATE,DOMAIN,STORE implemented;
-  class HOST,ID,ACCESS,DRAFT,CTX partial;
-  class QUERY absent;
+  CLIENT -->|"HTTP request"| CORR
+  CORR --> SESS
+  SESS --> ACCESS
+  ACCESS --> HANDLERS
+  ACCESS -->|"Deny decision"| FWD
+  HANDLERS --> IDP
+  HANDLERS -->|"Business change"| TXW
+  IDP -->|"Draft + explicit server context"| WRITER
+  FWD -->|"Draft + server context"| WRITER
+  OUTBOX --> RELAY
+  RELAY -->|"Draft + stored actor and correlation"| WRITER
+  CTX -.->|"Ambient context; not used by a producer yet"| WRITER
+  WRITER --> VALIDATE
+  VALIDATE -->|"Rejected: stable code, nothing written"| HANDLERS
+  VALIDATE -->|"Accepted"| DOMAIN
+  DOMAIN --> STORE
+  STORE -->|"Parameterized INSERT"| DB
+  STORE -.->|"Unavailable: no internal details returned"| HANDLERS
+  TXW -->|"INSERT inside the caller transaction"| DB
+  MIG -->|"DDL and grants"| DB
+  DB -.->|"Future authorized read only"| QUERY
+  QUERY -.->|"audit.events.read per course; not reachable over HTTP"| CLIENT
+  HANDLERS -.->|"Registered, not called"| LEGACY
+
+  classDef implemented fill:#e8f5e9,stroke:#2e7d32,color:#111
+  classDef partial fill:#fff8e1,stroke:#f9a825,color:#111
+  class CLIENT,CORR,SESS,ACCESS,HANDLERS,IDP,FWD,RELAY,TXW,WRITER,VALIDATE,DOMAIN,STORE,DB,OUTBOX,MIG implemented
+  class CTX,QUERY,LEGACY partial
