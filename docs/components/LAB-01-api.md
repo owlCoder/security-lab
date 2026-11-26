@@ -26,11 +26,11 @@
 | `ICourseMembership` + `LabCoursePolicy` / `LabOpenPolicy` (LAB-03) | uloga na kursu pri kreiranju i citanju | povezano; LAB-01 samo prosledjuje `courseId` i mapira ishod u HTTP odgovor |
 | `ILaboratoryRepository` | cuvanje i citanje | `PostgresLaboratoryRepository` kada postoji `ConnectionStrings:Authoring`; bez nje u Development-u `InMemoryLaboratoryRepository`, a van njega `UnavailableLaboratoryRepository` (bez tihog upisa u memoriju) |
 | `Laboratory` (domen) | trajni ID, validacija naslova, obavezan kurs | koristi se `Create` za kreiranje i `Rename()` za izmenu |
-| Frontend `api/labs.ts` i `CreateLabForm` (Marija) | salje `{ title, courseId }`, cita `id` iz odgovora, prevodi kodove gresaka | **uskladjeno u KT2:** kodovi `INVALID_TITLE`, `INVALID_COURSE`, `INVALID_BODY`, `NOT_FOUND`; 401/403 kao ProblemDetails |
+| Frontend `api/labs.ts` i `CreateLabForm` | treba da salje `{ title, courseId }`, cita `id` iz odgovora i prevodi kodove gresaka | **ugovor dogovoren sa Marijom u KT2** (sekcija ispod); izmenu frontenda radi Marija (LAB-07, povezivanje frontenda sa serverom) |
 
-- **Stanje implementacije:** POST, GET po ID-u i PATCH naslova su implementirani i pokriveni HTTP i jedinicnim testovima. U KT2 su dodati negativni testovi za ugovor (neispravan JSON, polja koja klijent ne sme da zada, tudja laboratorija, sadrzaj poruka o gresci), frontend salje kurs, a ceo tok je rucno proveren kroz aplikaciju.
+- **Stanje implementacije:** POST, GET po ID-u i PATCH naslova su implementirani i pokriveni HTTP i jedinicnim testovima. U KT2 su dodati negativni testovi za ugovor (neispravan JSON, polja koja klijent ne sme da zada, tudja laboratorija, sadrzaj poruka o gresci), ugovor zahteva i odgovora je dogovoren sa frontendom, a ceo tok je rucno proveren kroz aplikaciju.
 
-## Ugovor zahteva i odgovora (KT2, frontend uskladjen; usaglaseno s Marijom)
+## Ugovor zahteva i odgovora (dogovoreno sa Marijom, KT2)
 
 **Kreiranje:** `POST /api/laboratories`, `Content-Type: application/json`, najvise 4 KB.
 
@@ -61,7 +61,7 @@ Server cita samo navedena polja. Ostala polja (`id`, `createdBy`, `status`, `cre
 
 **Odgovori sa greskom:**
 
-| Status | Telo | Kada | Poruka korisniku na frontendu |
+| Status | Telo | Kada | Poruka korisniku na frontendu (dogovor) |
 | --- | --- | --- | --- |
 | 400 | `{ "code": "INVALID_BODY", "message": "Request body is invalid." }` | telo nije JSON, nije `application/json`, vece od 4 KB, prazno ili nije objekat | "Zahtev nije ispravan. Osvezite stranicu i pokusajte ponovo." |
 | 400 | `{ "code": "INVALID_TITLE", "message": "Laboratory title is required and must not exceed 200 characters." }` | naslov nedostaje, prazan je ili ima vise od 200 znakova | poruka uz polje naslova |
@@ -70,6 +70,8 @@ Server cita samo navedena polja. Ostala polja (`id`, `createdBy`, `status`, `cre
 | 403 | ProblemDetails, naslov `Access denied` | uloga ne dozvoljava radnju, ili nastavnik ne predaje na trazenom kursu (isti odgovor za postojeci i nepostojeci kurs) | "Nemate dozvolu za ovu radnju. Server je odbio zahtev." + ID zahteva |
 | 404 | `{ "code": "NOT_FOUND", "message": "Laboratory was not found." }` | laboratorija ne postoji **ili** nije pozivaocu dostupna (isti odgovor) | "Laboratorija nije pronadjena." |
 | 500 | ProblemDetails `Unexpected error` + `traceId` | neocekivana greska | "Doslo je do greske. Pokusajte ponovo." |
+
+Poruke za `INVALID_BODY` i `INVALID_COURSE` su dogovoreni predlog; na frontend ih dodaje Marija. Ostale poruke frontend vec prikazuje.
 
 Redosled provera pri kreiranju: identitet i radnja (401/403), telo (400 `INVALID_BODY`), kurs (400 `INVALID_COURSE`), uloga na tom kursu (403), naslov (400 `INVALID_TITLE`). Kurs se proverava pre naslova, pa ko nije nastavnik na kursu ne dobija ni povratnu informaciju o naslovu. Kod PATCH-a: identitet i radnja, telo, vlasnistvo (404), naslov (400). Odbijen zahtev ne menja skladiste.
 
@@ -196,7 +198,7 @@ Sve sto dolazi preko granice poverenja smatra se nepouzdanim: naslov, kurs, ID i
 
 ## KT2: provera toka kroz aplikaciju
 
-Provereno 26. novembra 2026. na lokalnom racunaru: backend `dotnet run --project backend/Platform.Api/Platform.Api.csproj --launch-profile Platform.Api` (Development, `http://localhost:5080`, bez baze, pa `InMemoryLaboratoryRepository`), frontend `npm run dev` iz `frontend/`. Korisnik 1111 je nastavnik na demo kursu `aaaaaaaa-...`, 3333 nije nastavnik na tom kursu (demo podaci iz `Program.cs`).
+Provereno 26. novembra 2026. na lokalnom racunaru: backend `dotnet run --project backend/Platform.Api/Platform.Api.csproj --launch-profile Platform.Api` (Development, `http://localhost:5080`, bez baze, pa `InMemoryLaboratoryRepository`), frontend `npm run dev` iz `frontend/`, sa lokalnom probnom izmenom forme (izbor kursa i slanje `courseId`) koju sada u svom commitu radi Marija. Korisnik 1111 je nastavnik na demo kursu `aaaaaaaa-...`, 3333 nije nastavnik na tom kursu (demo podaci iz `Program.cs`).
 
 | # | Korak | Kroz | Korisnik | Dobijeno |
 | --- | --- | --- | --- | --- |
@@ -213,8 +215,8 @@ Provereno 26. novembra 2026. na lokalnom racunaru: backend `dotnet run --project
 
 **Nalazi:**
 
-- **Prava prijava nije povezana sa LAB modulom.** Aplikacija nije trazila prijavu: identitet dolazi iz razvojnog `X-Test-User` zaglavlja (`FakeIdentityContext`). Platforma vec ima sesiju (`SessionIdentityContext`, `LabCaller`), ali je koriste samo LabVisibility/AUT-07 rute, a Identity za nju trazi PostgreSQL. Povezivanje je posao sa Identity timom: adapter koji iz sesije daje `CallerId` i proverava status naloga, dok uloga na kursu ostaje iz `ICourseMembership`. Do tada je tok proveren sa razvojnim identitetom, a van Development-a LAB rute odbijaju svaki zahtev (401).
-- **Citanje i preimenovanje nemaju ekran.** Frontend ima samo formu za kreiranje, pa su koraci 4–8 provereni direktno preko API-ja.
+- **Prava prijava nije povezana sa LAB modulom.** Aplikacija nije trazila prijavu: identitet dolazi iz razvojnog `X-Test-User` zaglavlja (`FakeIdentityContext`). Platforma vec ima sesiju (`SessionIdentityContext`, `LabCaller`), ali je koriste samo LabVisibility/AUT-07 rute, a Identity za nju trazi PostgreSQL. Povezivanje LAB ruta sa pravom sesijom radi Natasa (LAB-01, prava prijava). Do tada je tok proveren sa razvojnim identitetom, a van Development-a LAB rute odbijaju svaki zahtev (401).
+- **Citanje i preimenovanje nemaju ekran.** Frontend ima samo formu za kreiranje, pa su koraci 4–8 provereni direktno preko API-ja. Formu za promenu naslova radi Marija.
 - Kod `curl.exe` u PowerShell-u JSON telo se lako pokvari zbog navodnika. Za rucnu proveru koristiti `Invoke-RestMethod` (primer ispod).
 
 ## Dokaz rada
@@ -225,12 +227,10 @@ Provereno 26. novembra 2026. na lokalnom racunaru: backend `dotnet run --project
   - `backend/Platform.Api/Modules/Laboratories/Application/LaboratoryService.cs` (slucajevi upotrebe, kurs, vlasnistvo)
   - `backend/Platform.Api/Modules/Laboratories/Application/CallerId.cs`, `LabActions.cs`
   - `backend/Laboratories.Tests/LaboratoriesHttpTests.cs`, `LaboratoryServiceTests.cs`, `FakeAccessDecisionTests.cs`
-  - `frontend/src/api/labs.ts`, `frontend/src/components/labs/CreateLabForm.tsx` i njihovi testovi
 - **Pokretanje testova** (iz korena repozitorijuma):
 
 ```powershell
 dotnet test backend/Laboratories.Tests/Laboratories.Tests.csproj
-cd frontend; npm ci; npm test; npm run build
 ```
 
 Ostali test projekti u `SecurityLab.slnx` traze PostgreSQL i prolaze u CI-ju.
@@ -253,7 +253,7 @@ Ostali test projekti u `SecurityLab.slnx` traze PostgreSQL i prolaze u CI-ju.
 | PATCH tudje laboratorije je odbijen (404, vidi obrazlozenje) | `PatchLabTitle_ForeignLab_ReturnsSameResponseAsMissingAndKeepsTitle` (drugi nastavnik, i na istom kursu) |
 | neispravan JSON -> 400 | `PatchLabTitle_WhenBodyIsMalformed_Returns400AndKeepsTitle`, `PostLabs_WhenBodyIsMalformed_Returns400WithoutInternalDetails` |
 | poruke 400/401/403/404 bez internih detalja | `ErrorResponses_DoNotRevealInternalDetailsOrInput` (8 scenarija) |
-| frontend salje `{ title, courseId }` i prevodi kodove | `labsApi.test.ts`, `CreateLabForm.test.tsx` |
+| oblik zahteva, odgovora i kodovi gresaka dogovoreni sa frontendom | sekcija "Ugovor zahteva i odgovora" |
 
 - **Rucna demonstracija** (Development, API na portu 5080):
 
@@ -279,4 +279,4 @@ Invoke-RestMethod -Method Patch -Uri "$base/$($lab.id)/title" -Headers $marko -C
   -Body '{"title":"RBAC v2"}'
 ```
 
-- **Sledeci koraci:** adapter na pravu sesiju (sa Identity timom); ekran za citanje i preimenovanje na frontendu; dogovor sa LAB-07 oko rute za sadrzaj po jeziku; strukturisan audit zapis kroz `Platform.Audit`.
+- **Sledeci koraci (zadaci drugih clanova tima):** prava prijava na LAB rutama (Natasa); izbor kursa, poruke za nove kodove i forma za promenu naslova na frontendu (Marija); sadrzaj po jeziku `GET /api/laboratories/{id}/content?lang=` (Lana); revizijski zapis kreiranja i promene naslova (Visnja).
