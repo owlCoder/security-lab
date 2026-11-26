@@ -15,7 +15,7 @@
 
   | Contract | Direction | State |
   |-|-|-|
-  | `IRotateSessionUseCase` | we provide | Implemented by `SessionRotationService`. Planned callers: the login flow (Team 1) and the privilege change hook used by MFA (IDN-06) and re-authentication (IDN-18). |
+  | `IRotateSessionUseCase` | we provide | Implemented by `SessionRotationService`. Planned callers: the login flow (Team 1) and the privilege change hook used by re-authentication (IDN-18) and role change. MFA (IDN-06) replaces the session itself (see [Decisions](#decisions-and-open-questions)). |
   | `ISearchLoginHistoryUseCase` | we provide | Implemented by `LoginHistoryService`. Planned caller: `GET /api/auth/login-history`. |
   | `ISessionRotationStore` | we use | `InMemorySessionRotationStore` for tests. Planned: an adapter over `identity.sessions` of Team 1, without schema changes. |
   | `ISessionTokenGenerator` | we use | `CryptoSessionTokenGenerator`: `RandomNumberGenerator`, 32 bytes, Base64Url, SHA-256 hash (the same token format as `Platform.Identity`). |
@@ -38,7 +38,7 @@ flowchart LR
   subgraph HOST["Platform.Api - host"]
     AC["AuthController - login - Team 1"]
     SCM["SessionCheckMiddleware - Team 1"]
-    MFA["MFA verify - IDN-06, PR 196"]
+    MFA["MFA verify - IDN-06, PR 232 - replaces the session itself"]
     subgraph SSH["Modules/SessionSecurity - Team 09"]
       REG["AddSessionSecurity - DI"]
       RET["Previous session retirement - login"]
@@ -98,7 +98,7 @@ flowchart LR
   UI -.->|"filter, no userId"| HC
   HC -.-> PU2
   AC -.-> RET
-  MFA -.-> HOOK
+  MFA -.->|"new Active session"| SESS
   HOOK -.-> PU1
   SA -.->|implements| P1
   AA -.->|implements| P3
@@ -136,7 +136,7 @@ flowchart LR
     P2(("2 Session check - Team 1"))
     P3(("3 Rotate session - Team 09"))
     P4(("4 Search login history - Team 09"))
-    P5(("5 MFA or re-authentication - IDN-06, IDN-18"))
+    P5(("5 Re-authentication or role change - IDN-18"))
   end
 
   subgraph TB2["TB2 Data zone - PostgreSQL"]
@@ -167,7 +167,7 @@ flowchart LR
   class P5 planned;
 ```
 
-Today P3 and P4 run only with in-memory stores in the tests. The flows F4, F5, F8 and the connection of P3 and P4 to D1, D2 and D3 are planned (see [Next steps](#next-steps-and-external-dependencies)).
+Today P3 and P4 run only with in-memory stores in the tests. The flows F4, F5, F8 and the connection of P3 and P4 to D1, D2 and D3 are planned (see [Next steps](#next-steps-and-external-dependencies)). MFA verification (IDN-06, Team 1) is not a caller of P3: it replaces the `MfaPending` session with a new `Active` session in D2 itself.
 
 Trust boundaries:
 
@@ -225,11 +225,13 @@ These tests run against the in-memory store and source. The same threats will be
 ### Decisions and open questions
 
 - Privilege change triggers (`RotationTrigger`): login, completed MFA (IDN-06), re-authentication for a sensitive change (IDN-18), role change. The specification does not define a privilege change; this is the team's interpretation.
+- Completed MFA is implemented by Team 1, not by our hook: MFA verification (#232) revokes the `MfaPending` session and issues a new `Active` session with a new token and handle, in the same transaction as the MFA audit record, and its integration tests are tagged `IDN-11`. Calling our hook as well would rotate twice and write two audit records. Our `MfaCompleted` trigger stays in `RotationTrigger` and is covered by unit tests, but has no caller in the host. The hook is for re-authentication (IDN-18) and role change.
+- Expiry after MFA: our service copies the absolute expiry of the old session (IDN-20). An `MfaPending` session has a short lifetime (US-14, #224), so a rotation through our service would end the `Active` session within minutes. Because Team 1 replaces the session after MFA, the new `Active` session gets the normal lifetime from Team 1; this is their decision, not a prolonged rotation chain.
 - Concurrent rotations with the same token: exactly one succeeds; the others get `RotationConflict` or `SessionRevoked`.
 - Fail-closed order: rotate first and keep the replacement pending, then audit, then activate; on audit failure the whole chain is revoked. The user has to log in again, but a session without an audit record never becomes active. If the compensation itself fails, the exception is propagated and no token is returned; the pending replacement is never active and ends at the absolute expiry at the latest. This is part of the `IRotateSessionUseCase` contract.
 - History limits: at most 90 days per query (30 by default), at most 50 items per page (20 by default), in `LoginHistoryLimits`.
 - Adapters live in the API host (`backend/Platform.Api/Modules/SessionSecurity/`), so the core module keeps no references to other modules.
-- Planned session adapter over `identity.sessions`, without schema changes: the token format is the same as in `Platform.Identity` (only the hash encoding differs, hex here and bytes there); the chain ID is the session handle; the account is read with `FOR SHARE`, so a blocked account is not rotated (IDN-03); revoking a chain revokes every session of the subject, because `identity.sessions` has no chain column; `Elevated` is stored as `Active`, because Team 1 has no higher level.
+- Planned session adapter over `identity.sessions`, without schema changes: the token format is the same as in `Platform.Identity` (only the hash encoding differs, hex here and bytes there); the chain ID is the session handle; the account is read with `FOR SHARE`, so a blocked account is not rotated (IDN-03); revoking a chain revokes every session of the subject, because `identity.sessions` has no chain column; `Elevated` is stored as `Active`, because Team 1 has no higher level. A session that has expired because of inactivity (US-14, #224) is returned as expired, so the adapter never rotates a session that the session check of Team 1 already rejects.
 - Planned audit: the event type `session.rotated`, with an `Account` resource and `trigger` and `reasonCode` details in lower snake case, to be added to the catalog of Team 12. Login events get an optional `sourceAddress` detail, masked by `SourceAddressMasker` on read.
 
 ## Evidence of work
@@ -254,17 +256,18 @@ These tests run against the in-memory store and source. The same threats will be
 
 Planned work, one pull request each, in this order:
 
-1. Host skeleton: reference from `Platform.Api`, one `AddSessionSecurity()` call in `Program.cs` and the folder `backend/Platform.Api/Modules/SessionSecurity/` with temporary registrations. The temporary audit writer always fails, so every rotation is fail-closed until the real adapter exists.
+1. Host skeleton (#229): reference from `Platform.Api`, one `AddSessionSecurity()` call in `Program.cs` and the folder `backend/Platform.Api/Modules/SessionSecurity/` with temporary registrations. The temporary audit writer always fails, so every rotation is fail-closed until the real adapter exists. The temporary session store is an empty in-memory singleton, which is safe only while nothing calls the use case: every rotation returns `SessionNotFound`, and `RevokeAllForSubjectAsync` revokes nothing in `identity.sessions` (IDN-03). For that reason the login call (step 5) is connected only after the session store adapter (step 2); connected earlier, it would fail every login.
 2. Session store adapter over `identity.sessions` (see the decisions above), tested against PostgreSQL in `backend/Platform.Identity.Tests/SessionSecurity/`.
 3. Audit: `session.rotated` and the `sourceAddress` detail in the Team 12 catalog, then our adapter to `ITrustedAuditWriter`.
 4. Login history: a public reader of `auth.login` events of one account in `Platform.Audit` (Team 12), our source adapter, `GET /api/auth/login-history` with its own Access action, the subject from `IIdentityContext`, and a rate limit.
-5. Login and privilege change: on a successful login the session of the incoming cookie is revoked; a rotation hook for MFA (IDN-06, pull request #196), re-authentication (IDN-18) and role change; end-to-end session fixation tests over HTTP.
+5. Login and privilege change: on a successful login the session of the incoming cookie is revoked; a rotation hook for re-authentication (IDN-18) and role change; end-to-end session fixation tests over HTTP.
 6. React page for IDN-22: period and outcome filters, paged list, keyboard access, error messages without secrets.
 7. This file: diagrams and evidence updated to the final implementation.
 
 To agree with other teams:
 
-- Team 1 (IDN-02, IDN-06): the call from `AuthController` on login, the adapter writing to `identity.sessions`, the `SessionBound` entry for the new Access action, and the source address and the `Account` resource on failed `auth.login` events. MFA (#196) is not merged yet; until it is, the hook has no caller.
+- Team 1 (IDN-02, IDN-06): the call from `AuthController` on login, the adapter writing to `identity.sessions`, the `SessionBound` entry for the new Access action, and the source address and the `Account` resource on failed `auth.login` events. MFA is a stack of pull requests that is not merged yet: #243 (audit events), #232 (TOTP verification, which replaces the session) and #250 (secret protection). MFA verification and our session adapter both write to `identity.sessions`, so the order of their merges is agreed with Team 1.
+- Team 12 (AUD-01), MFA audit: #243 changes `AuditEventCatalog`, `AuditEventTypes` and `docs/components/audit/CONTRACTS.md`, the same files as our `session.rotated` entry, so the two changes are aligned before either is merged.
 - Team 12 (AUD-01):
   - `session.rotated` is not in their event catalog yet (needs a catalog entry, a detail schema and a test); their reason codes are lower snake case (`session_revoked`), so the adapter maps our codes;
   - `auth.login` events store no source IP address, so IDN-22 masking shows `*` until the `sourceAddress` detail exists;
