@@ -6,19 +6,24 @@ using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.Competencies;
 using Platform.Api.Modules.Administration.Api;
+
+using Platform.Api.Modules.Access.Api;
 using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
+
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
+using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Modules.Identity.Federation;
 using Platform.Access.Application.Options;
+using Platform.Access.AspNet;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Constants;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.AspNet;
+using Platform.Api.Authorization;
 using Platform.Api.Development;
 using Platform.Api.Endpoints;
 using Platform.Api.Endpoints.Identity;
@@ -26,6 +31,9 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Modules.Identity.SessionExpiry;
+using Platform.Api.Modules.Laboratories.Application;
+using Platform.Api.Modules.Laboratories.Infrastructure;
+using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Services.Identity;
 using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
@@ -42,11 +50,13 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
 
 // Oba modula imaju IAccessDecision, zato koristimo alias.
 using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
-using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
+using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddTeam21Acc();
@@ -64,6 +74,7 @@ if (builder.Environment.IsDevelopment())
 
 // Access module
 
+var attemptsEnabled = builder.Services.AddRuntimeAttempts(builder.Configuration);
 builder.Services.AddCentralAccessAudit();
 builder.Services.AddRevisionAuthorization();
 builder.Services.AddRevisionAccessPolicies();
@@ -114,7 +125,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddLaboratoriesPersistence(
-    builder.Configuration.GetConnectionString("Laboratories"));
+builder.Configuration.GetConnectionString("Laboratories"));
 builder.Services.AddRevisionReviews();
 builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
@@ -176,16 +187,22 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Author
 {
     builder.Services.AddLaboratoryPersistence(builder.Configuration);
     builder.Services.AddScoped<ILaboratoryRepository, PostgresLaboratoryRepository>();
+    builder.Services.AddScoped<IPrerequisiteRepository, LabPrerequisiteStoreAdapter>();
 }
 else if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
+    builder.Services.AddSingleton<IPrerequisiteRepository, InMemoryPrerequisiteRepository>();
 }
 else
 {
     // Keep unrelated API routes available, but never silently write laboratories to memory.
     builder.Services.AddSingleton<ILaboratoryRepository, UnavailableLaboratoryRepository>();
+    builder.Services.AddSingleton<IPrerequisiteRepository, UnavailablePrerequisiteRepository>();
 }
+
+// LAB-07: lokalizacija laboratorija
+builder.Services.AddLabLocalizationModule();
 
 // Kreiranje aplikacije
 var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
@@ -201,14 +218,38 @@ builder.Services.AddSingleton(new AccessConfigurationOptions
     }
 });
 builder.Services.AddPrg04CompetencyOperations();
+
+// LAB-06: registracija akcija i politike autorizacije
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.add",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.remove",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.read",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
 builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
 if (kt1Enabled) builder.Services.AddKt1RequestIdentity();
+if (attemptsEnabled) builder.Services.AddAttemptResourceResolution();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
 AuthoringAccessSubjectProvider.Register(builder.Services);
-if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+if (administrationEnabled || attemptsEnabled) builder.Services.AddAdministrationRequestIdentity();
 builder.Services.AddPrg04RequestIdentity();
 
 var app = builder.Build();
@@ -216,7 +257,7 @@ app.UseRouting();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
-if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
+if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 // Preserve KT1's non-enumerating public denial contract using the same central decider.
 if (kt1Enabled) app.UseMiddleware<Kt1AccessContractMiddleware>();
 // Identity and catalog routes retain their invalid-session response before ACC-05 checks access.
@@ -227,7 +268,7 @@ app.UseWhen(
 app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
 
 app.UseAccessControl();
-if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
+if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
 
 // Identity Rate Limiting
@@ -306,7 +347,9 @@ app.UseWhen(
 
 app.MapControllers();
 if (administrationEnabled) app.MapPersistentCourseAdministration();
+if (attemptsEnabled) app.MapRuntimeAttempts();
 app.MapLaboratories();
+app.MapLabLocalizationModule();
 app.MapCompetencyEndpoints();
 app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();

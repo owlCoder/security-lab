@@ -1,0 +1,25 @@
+flowchart TD
+  subgraph CLIENT["Trust boundary: untrusted client"]
+    C["Client: session, resource IDs, DTO"]
+    R["Same client: public response"]
+  end
+  subgraph API["Trusted API / application boundary"]
+    P1["P1 Real session/current account: entry and final checks"]
+    P2["P2 Access, validation, fresh scope and bound operation"]
+    P3["P3 Public result / generic rejection"]
+  end
+  subgraph PROVIDERS["Provider and storage boundary"]
+    D1["D1 Identity accounts and sessions; Real persistent provider"]
+    D2["D2 Shared membership contract; Persistent ACC-02 provider not on main"]
+    D3["D3 Proposed ATT provider; Metadata / atomic snapshot read / CAS + audit; Actual implementation not on main"]
+    D4["D4 Local request diagnostics; No answers / credentials; not durable ATT audit"]
+  end
+  C -->|"HTTPS request"| P1
+  P1 <-->|"Validated subject / fresh recheck"| P2
+  P1 -->|"Unauthenticated or unavailable"| P3
+  P2 -->|"Authorized result / conflict / denial"| P3
+  P1 <-->|"Session/account; current status or failure"| D1
+  P2 <-->|"Course/member ID; current state"| D2
+  P2 <-->|"Bound read/write; result or failure"| D3
+  P2 -->|"Metadata only"| D4
+  P3 -->|"Permitted data or generic rejection"| R

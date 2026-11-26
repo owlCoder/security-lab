@@ -17,6 +17,7 @@
   <Project Path="Platform.Kt1.Tests/Platform.Kt1.Tests.csproj" />
   <Project Path="Platform.Coursework.Tests/Platform.Coursework.Tests.csproj" />
   <Project Path="Platform.Coursework.AdminTool/Platform.Coursework.AdminTool.csproj" />
+  <Project Path="Platform.Coursework.Demo/Platform.Coursework.Demo.csproj" />
   <Project Path="Platform.LabLocalization.Tests/Platform.LabLocalization.Tests.csproj" />
   <Project Path="Platform.LabLocalization/Platform.LabLocalization.csproj" />
   <Project Path="Platform.LaboratoryPersistence.Tests/Platform.LaboratoryPersistence.Tests.csproj" />

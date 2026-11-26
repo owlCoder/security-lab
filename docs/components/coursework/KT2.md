@@ -1,200 +1,228 @@
-# KT2 — ACC-04 and ADM-08
+# KT2 — ACC-04 (J) and ADM-08 (N)
 
-This is an incremental KT2 implementation, starting with criterion 1. It does not
-certify the complete KT2 rubric. The assigned requirements remain ACC-04 (J) and
-ADM-08 (N). No ACC-08 implementation belongs to this contribution.
+Team 8 owns concrete-resource authorization and scoped multi-course administration.
+This document describes the current delivered source, including increments 3 and 4.
+It does **not** certify complete KT2 or neighboring-team acceptance.
 
-Specification checked: `docs/spec/PROJECT_SPECIFICATION_OIB.pdf`, sections 2,
-2.1, 3.1, 4.2 and 4.12. SHA-256:
+## Current status — 2026-11-17
+
+PR [#199](https://github.com/owlCoder/security-lab/pull/199) was merged on 2026-11-15
+as `b53a9bc`. It contains the first two KT2 increments. The new delivery is based on
+current main `29db660` and includes the previously unpublished third increment.
+Continue on a new `feature/kt2-acc04-adm08-demo` branch and a new PR; do not attach
+new work to the already merged PR. No remote PR/CI result for this delivery is inferred.
+
+| KT2 criterion | Current implementation/evidence | Still open |
+|---|---|---|
+| 1. Assigned functionality | ACC-04 server policies, read/draft consumer API and ATT adapter; ADM-08 persistent scoped delegation/settings/revocation and first-root operator | Actual ATT read/CAS and persistent ACC-02 providers; actual provider acceptance |
+| 2. Module integration | Real ADM-08 Identity/session, ACC-01 catalog, shared Access and supported central Audit delivery; actual Kestrel/HTTPS lifecycle | ATT/membership integration; missing central audit mappings; human contract acknowledgement |
+| 3. Tests/security | Strict PostgreSQL/HTTP/adapter NUnit suite, existing KT1 and Access regressions, real HTTPS live checks | Actual latest remote CI; coverage against the eventual real ATT/membership providers |
+| 4. Startup/documentation | Repeatable live launcher, isolated seed/cleanup, operator commands, current architecture/DFD and actual evidence | Final ACC-04 provider startup/configuration and browser/UI deployment if required for the agreed product |
+| 5. Individual contribution | Published first/second increment history and merged #199; key-code defense map below | Student publishes this delivery, records real Tapiz/PR links and explains it individually |
+
+The specification source is `docs/spec/PROJECT_SPECIFICATION_OIB.pdf`, sections 2,
+2.1, 3.1, 4.2 and 4.12; SHA-256
 `e74f73cf4fdfd25fe469b799488274c826325fd09c3498757e0aa37fd097676c`.
 
-## 1. Implemented component — in progress
+## Reproduce the real ADM-08 live flow
 
-| Use case | Existing implementation | This increment | Still required before full closure |
-|---|---|---|---|
-| ACC-04: own attempt read and foreign-ID rejection | Server-side ownership, active account, current membership and exact authorized snapshot | Existing behavior retained | Real ATT adapter and real-session/membership composition |
-| ACC-04: own draft update | Owner/student/state checks, validation, atomic simulator CAS, historical answers protected | Existing behavior retained | ATT persistence and its atomic snapshot/version contract |
-| ADM-08: scoped administrative view | Explicit per-course grant, separate from teaching roles | PostgreSQL current-authority read; new operation sessions see committed grants | Trusted course directory and agreed root provisioning/recovery |
-| ADM-08: limited delegation | Root-only creation; view/settings allowlist; no redelegation or teaching rights | Persistent grant with one active grant per account/course | Agreed operator root provisioning/recovery; account provider now uses Identity |
-| ADM-08: settings update | Validation and expected version | Course-row locking and compare/version update across connections | The stored label is administrative metadata; it does not rename the ACC-01 catalog course |
-| ADM-08: immediate revocation | Active authority rechecked, same-cookie KT1 regression on its integration branch | Previously captured database authority cannot read/write after a committed revocation; revoked rows retained | External course-provider review; actual-session HTTP lifecycle is covered in this increment |
-| Change audit | KT1 metadata-only in-memory log | Matching producer event and business change commit together; missing/failed audit rolls back | Delivery/acknowledgement with Platform.Audit under an agreed event contract |
+Prerequisites: .NET 10, PowerShell and Docker Desktop running. From a clean checkout
+containing this delivery, run:
 
-### Storage and transaction boundary
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo-coursework-live.ps1
+```
 
-`backend/Platform.Api/Modules/Administration/Persistence/` contains:
+This builds the demo/API and operator tool, starts its own PostgreSQL 17 container,
+creates a uniquely named database, applies real provider migrations and seeds
+fictional Identity accounts and two ACC-01 courses. It invokes the actual ADM
+operator executable to migrate and provision each course root. Those accounts are
+isolated demonstration fixtures, not real users or a normal production seeding route.
 
-- `AdministrationSchema`: explicit, transactional, serialized v1 migration and runtime-role grants.
-- `PostgresAdministrationSession`: one connection/transaction per operation, persistent grants and settings, read binding to the exact grant, per-course write lock, version checks and matching audit enforcement.
-- `PersistentAdministrationService`: invokes the existing application logic and returns a result only after commit. Storage/audit failure does not report success.
-- `PersistentAdministrationPolicy`: a singleton-safe policy that creates a fresh database session per evaluation and calls the existing scoped administrative rules. It consumes the shared `IAccessDecision` architecture; there is no second decision engine.
+The launcher then starts the actual `Platform.Api.dll` as a separate Kestrel process
+in **Production** with a temporary HTTPS certificate and a random loopback port.
+No TestServer, synthetic KT1 cookie, fake subject header, ATT service or membership
+provider is substituted in this ADM flow. Existing KT1 routes are disabled. The
+certificate is pinned in this demo client only; it is never imported/trusted in the
+user certificate store, and another certificate pin is explicitly rejected.
 
-Only schema `coursework_admin` is owned. `course_settings` stores an administrative
-label for a trusted course ID; `grants` stores technical permissions. Neither is a
-replacement for the course catalog, course membership, teacher assignment, ATT
-answers or grade history. No other team's tables are changed.
+The flow demonstrates normal password login, root/course isolation, limited and
+view-only delegation, settings update, stale-version/input/Origin/header rejection,
+separation from teaching/global account administration, a genuine server restart,
+revocation using the exact previously issued delegate cookie, current blocked-account
+and archived-course checks, real central Audit delivery/retry, and real logout.
+The administrative label survives restart; it does not rename the shared catalog.
 
-The migration deliberately creates no accounts, courses in the shared catalog,
-or root grants. Synthetic test roots are created only in disposable test databases.
-There is no HTTP root-provisioning endpoint. A schema-owner operator must use
-confirmed course/account IDs under the future agreed provisioning process.
+Result: `TestResults/coursework-live-<run>/live-administration.json`. Its check list
+contains HTTP status checks, TLS and state assertions, with explicit kinds. This is
+not a NUnit test count. It records no passwords, raw cookies, private certificate or
+connection strings. The launcher requires successful same-cookie/restart checks,
+fresh evidence and cleanup. The API child, uniquely created database and temporary
+certificate directory are removed; partial initialization failure is also cleaned up.
+No Tapiz database or existing project database is modified by the default launcher.
 
-The runtime permission helper grants reads, limited updates and non-root grant
-inserts, plus INSERT-only producer audit. It grants no schema creation, root
-columns, deletion or audit rewrite. Use a dedicated role with no pre-existing
-owner/superuser privileges. Credentials are supplied externally.
+An existing-server run is optional and must use an explicitly dedicated test server:
+set `COURSEWORK_TEST_POSTGRES` and add `-UseExistingServer`. Test bootstrap needs
+CREATE DATABASE permissions. It creates/deletes only its GUID-named database.
+`-NoBuild` is intended for CI after the full solution build. The normal default builds
+what it needs. The CI workflow adds one live-demo step and preserves existing jobs.
 
-### Durable producer audit is not delivered central audit
+## Repeat the NUnit regression/integration checks
 
-`outbox` is a transactionally persisted producer record, with actor, action,
-target/course, outcome, reason, policy/version, time and server correlation ID.
-It contains no display labels, answers, cookies, passwords or raw request bodies.
-An administrative mutation cannot commit without its corresponding event. This
-increment does **not** implement a relay, central delivery acknowledgement,
-retention or a new audit-reading API. Those remain integration work with the audit
-team; no central-delivery claim is made.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-coursework-postgres.ps1
+dotnet test backend/Platform.Kt1.Tests --configuration Release
+dotnet test backend/Platform.Access.Tests --configuration Release
+```
 
-### Increment 2: real-session administration API
+The first command uses its own disposable PostgreSQL container and requires discovery
+and successful execution of the service, HTTP and adapter fixtures. Skipped cases
+are rejected. `-Demonstrate` repeats one ADM lifecycle and one explicitly doubled
+ACC-04 consumer lifecycle after the suite; those repetitions do not add distinct
+NUnit cases. A general solution test run without `COURSEWORK_TEST_POSTGRES` skips the
+PostgreSQL fixtures, so it is not proof those cases executed. Actual results and
+scope are recorded in `KT2-VALIDATION.md`; new remote CI must be checked separately.
 
-`Program.cs` now wires the PostgreSQL adapter when
-`CourseworkAdministration:Enabled=true`. Four routes exist under
-`/api/course-administration/{courseId}`:
+## Normal ADM-08 runtime configuration
 
-| HTTP operation | Application action | Required current capability |
-|---|---|---|
-| GET course administration | `course.admin.read` | ViewAdministration |
-| PUT `settings` | `course.settings.update` | ManageSettings |
-| POST `delegations` | `course.delegation.create` | Root with ManageDelegations |
-| POST `delegations/{grantId}/revoke` | `course.delegation.revoke` | Root with ManageDelegations |
+The repeatable live tool above supplies isolated fixture configuration automatically.
+For a manually provisioned runtime, configure secrets externally:
 
-All routes carry one explicit central Access requirement. The module decorates
-request identity only for its own endpoint metadata, forwarding all other routes
-to the existing provider chain. Only `SecurityLab.Session`, validated through
-Identity's `ISessionManager`, supplies the caller. An active account is re-read
-through `IAccountStatusReader`; roles, headers, `Http.User` and the synthetic KT1
-cookie do not create authority.
+| Configuration | Meaning |
+|---|---|
+| `CourseworkAdministration:Enabled=true` | Explicitly enable the four ADM endpoints |
+| `ConnectionStrings:Identity` | Real current account/session provider |
+| `ConnectionStrings:Team21` | Existing ACC-01 catalog provider |
+| `ConnectionStrings:CourseworkAdministration` | ADM-owned schema, with narrow runtime grants |
+| `ConnectionStrings:Audit` | Durable Identity/central audit provider |
 
-Database/account calls are asynchronous and cancellable. The default async port
-adapters preserve the existing in-memory KT1 consumers; no synchronous wait on
-Identity tasks is used. Persistent policies open their own short-lived sessions,
-so singleton policies do not capture scoped EF contexts.
-
-The API revalidates the original Identity session in a fresh scope immediately
-before committing an operation. If it has been revoked/expired or its account is
-inactive, the staged change and success event are rolled back. When producer storage
-is available, a separate `DENY / SESSION_INVALIDATED` event records that rejection. Administrative
-revocation is serialized with course mutations in the database. Identity and
-administration are separate provider transactions: there is **no distributed
-transaction** guaranteeing that an Identity change concurrent with the final
-commit has the same atomic boundary. Every following request re-reads state.
-
-Unauthenticated requests receive 401. A narrow response formatter maps central
-403 denials to the module's uniform 404, after the central engine has denied the
-request; it never admits/retries a denial. Identity-provider outage returns a
-uniform 503 before resource lookup. Denied/missing resources during an
-administration-store outage have the same public 404. Endpoint responses use
-`no-store`. Mutations require `X-Coursework-Request: 1`; a supplied Origin must
-match the request's scheme/host. Bodies are bounded at 16 KiB.
-
-The existing `/api/kt1` and React screen still demonstrate the explicitly enabled
-KT1 simulator. They are separate from this real-session API. No ACC-04 ATT or
-membership adapter is claimed by this increment.
-
-### Startup after operator provisioning
-
-Required runtime configuration: `ConnectionStrings:Identity` and
-`ConnectionStrings:CourseworkAdministration`; configure `ConnectionStrings:Audit`
-for Identity's durable login/logout audit. These may be separate PostgreSQL
-connections. Keep credentials in environment variables or existing user secrets.
-The ordinary platform startup remains unchanged when the feature flag is absent.
-
-Schema migration is an explicit operator command, using a schema-owner connection
-in `COURSEWORK_MIGRATION_CONNECTION`:
+Provider migrations remain owned by their modules. The web host does not perform
+ADM operator provisioning or migrations on an HTTP request. Configure the
+schema-owner connection in `COURSEWORK_MIGRATION_CONNECTION`, then run:
 
 ```powershell
 dotnet run --project backend/Platform.Coursework.AdminTool -- migrate
 dotnet run --project backend/Platform.Coursework.AdminTool -- grant-runtime YOUR_EXISTING_RUNTIME_ROLE
+dotnet run --project backend/Platform.Coursework.AdminTool -- bootstrap-root COURSE_GUID ACCOUNT_GUID --confirm-initial-root
 ```
 
-The tool grants only the narrow privileges already tested in increment 1. It
-creates no login role/password, identity account, shared course or root grant.
-The root setup/recovery and import of confirmed course IDs remain an operator
-agreement with the course provider. With no configured roots, API access is denied.
+Bootstrap additionally consumes external `ConnectionStrings__Identity` and
+`ConnectionStrings__Team21`. Actual confirmed IDs must refer to an existing active
+account/course. The tool creates neither account nor catalog course. It serializes
+competing initial-root attempts, is idempotent for the same root and rejects replacing
+another root. Local metadata/root/operator audit commit together or roll back. There
+is no HTTP root endpoint or implicit teaching/global-role promotion. Operator events
+identify their operator origin without inventing an end-user actor. The HTTP runtime
+role cannot provision root columns or rewrite/delete producer audit. Root recovery or
+transfer still requires an agreed operator procedure; no recovery API is claimed.
 
-For local HTTPS after configuration/provisioning, use dedicated local/test databases
-(the existing Development startup also owns its development seed):
+For configured local HTTPS, the existing `AdministrationKt2` profile listens on
+`https://localhost:7188` after `dotnet dev-certs https --trust`. That optional manual
+profile uses the existing Development startup and its module seeds; use dedicated
+local/test provider connections. It is separate from the Production live launcher,
+which needs no certificate-store changes. A real reverse proxy must provide the
+correct trusted scheme/host; production forwarding/deployment is not added here.
+
+| API operation | Required administrative authority |
+|---|---|
+| GET `/api/course-administration/{courseId}` | ViewAdministration in that exact course |
+| PUT `/{courseId}/settings` | ManageSettings; expected current version |
+| POST `/{courseId}/delegations` | Root with ManageDelegations; allowed limited capabilities only |
+| POST `/{courseId}/delegations/{grantId}/revoke` | Same-course root; active non-root target; expected version |
+
+All routes use shared Access metadata. Actor identity comes only from a validated
+real session; no client-supplied actor, global role/header or synthetic cookie grants
+authority. Mutations require `X-Coursework-Request: 1`; a supplied Origin must match
+the request scheme/host. Bodies are bounded at 16 KiB. Unauthenticated requests use
+401; foreign/missing/administrative-store-failure responses use the same public 404;
+Identity outage uses uniform 503. Responses are `no-store`.
+
+`CatalogCourseDirectory` reads the published ACC-01 context without writing its
+tables. Current active course status is checked in policy and before own commit.
+Per-course locks order administrative changes/revocation; exact grants and versions
+are bound to reads/writes. Identity/catalog/administrative providers are independent
+transactions: no distributed atomic revocation guarantee is claimed. A change racing
+after a final provider check can overlap an already running operation; every following
+request reads current state. Final provider failure rolls back staged local changes.
+
+## Central Audit relay and deliberate unmapped records
+
+Normal writes require their matching durable producer event in the same ADM
+PostgreSQL transaction. Outbox records contain metadata only. For explicit central
+delivery, configure `ConnectionStrings__Audit` and the producer operator connection:
 
 ```powershell
-dotnet dev-certs https --trust
-dotnet run --project backend/Platform.Api --launch-profile AdministrationKt2
+dotnet run --project backend/Platform.Coursework.AdminTool -- relay-once
 ```
 
-This listens on `https://localhost:7188`. Use the normal `/api/auth/login` with an
-existing provisioned account, then the routes above. The cookie is Secure,
-HttpOnly and SameSite=Strict. A reverse proxy must supply the correct trusted
-scheme/host for HTTPS and same-origin checks; deployment forwarding is not added
-by this increment. Production enables the same module via configuration, without
-the Development-only launch profile.
+The batch consumes server-authored records via the published `ITrustedAuditWriter`,
+uses stored trusted actor/correlation, stable source/action event IDs and separate
+acknowledgement receipts. Successful delegation/revocation maps to the existing
+`course.delegation.*` types, per administrative capability; producer DENY maps to
+`access.denied`. Central failure leaves records unacknowledged; a crash after central
+append can be retried without duplicated event content. Original producer events
+are never rewritten/deleted. This is at-least-once delivery with central idempotency,
+not a distributed transaction. Central occurrence time is delivery time; original
+producer occurrence time remains in the outbox.
 
-Current architecture and DFD:
-`diagrams/adm08-kt2-architecture.mmd/.svg` and `adm08-kt2-dfd.mmd/.svg`.
-The older diagrams retain their KT1 simulator scope.
+The central catalog still has no agreed ADM settings-change/root-bootstrap/read-success
+type. Those records stay durable locally and are counted as
+`retained_without_catalog_mapping`. They are not silently retyped or falsely marked
+delivered. The relay is an explicit operator command, not a hidden scheduled task.
+Human audit-schema acceptance remains pending.
 
-## Repeatable check for this increment
+## ACC-04 actual-provider boundary remains open
 
-Prerequisites: .NET 10, Docker Desktop running, PowerShell. From the repository root:
+The source includes a real-session consumer API and adapters:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-coursework-postgres.ps1
-```
-
-This creates a uniquely named PostgreSQL 17 test container on a random loopback
-port with an ephemeral secret, creates a separate database for each test, and
-cleans up its own container. It does not use the user's Identity, Tapiz or course
-database. The TRX report is written under `TestResults/coursework-postgres-<run>/`.
-The script fails if any case is failed/skipped, and requires discovery of both
-the PostgreSQL and real-session HTTP fixtures. For the visible HTTP lifecycle:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-coursework-postgres.ps1 -Demonstrate
-```
-
-The full suite runs first, followed by one fresh, detailed lifecycle demonstration:
-real password login for separate clients, delegation, persisted settings change,
-stale-version rejection, revocation and denial with the exact previously issued
-cookie. The HTTP host is ASP.NET TestServer with real Identity/session, Audit,
-shared Access and PostgreSQL services. It is not a claim of browser/Kestrel or
-production deployment verification. Accounts, roots and courses are fictional,
-isolated test fixtures; no production credentials/data are used.
-
-Alternatively, on an explicitly dedicated test server, set
-`COURSEWORK_TEST_POSTGRES` and use `-UseExistingServer`. The test role requires
-CREATE DATABASE and CREATE ROLE on that disposable server; those are **test
-bootstrap permissions**, not runtime privileges. Never point this test fixture
-at a production server. The runtime-role test proves the application can work
-with the narrower grants in `runtime-permissions.sql`.
-
-A normal solution test run without that environment variable explicitly skips
-the PostgreSQL fixture. It must not be reported as proof that database tests ran.
-The backend workflow has a separate ADM-08 PostgreSQL step so its database cases
-are required in CI as well. Existing jobs and result uploads are preserved. The
-new remote run has not yet been observed.
-
-## Remaining rubric items
-
-| Criterion | Status | Completion evidence still needed |
+| Route | Shared Access requirement | Additional application checks |
 |---|---|---|
-| 1. Assigned functionality | In progress | Complete actual-provider ACC-04 flow, trusted course/root provisioning and remaining ADM-08 product integration |
-| 2. Module integration | Partial | ADM-08 uses actual Identity/session and Access providers; course/membership, ATT and administrative outbox delivery/review remain |
-| 3. Tests/security | Started | PostgreSQL and real-session HTTP suites/CI step exist; confirm the actual remote run and complete ACC-04 integration coverage |
-| 4. Startup/documentation | Started | ADM-08 API startup, operator tool, architecture and DFD are updated; finalize whole-product deployment/ACC-04 flow |
-| 5. Individual contribution | Started | First increment is visible in commit `f8f551d`; this increment still needs the student's actual commit/PR and explanation |
+| GET `/api/resource-attempts/{id}` | existing `attempt.read` | Current owner/account/membership and exact snapshot |
+| GET `/{id}/review` | existing `attempt.read.course` | Same-course teacher, Submitted/Completed only |
+| PUT `/{id}/answer` | `attempt.draft.update` concrete policy | Student owner, InProgress, valid answer, exact snapshot/CAS and provider audit receipt |
 
-Validation for this source increment is recorded in `KT2-VALIDATION.md`. Remote CI,
-actual Tapiz state and external contract acceptance are not inferred from local tests.
+The shared read policies are preserved. A resolver decorator supplies trusted owner/
+course metadata and forwards unrelated resource types to the existing resolver. A
+fresh-scope bridge consumes `Platform.Access.Contracts.IMembershipReader`; the current
+Empty provider grants nothing. No memberships are synthesized by runtime composition.
 
+Enable `CourseworkAttempts:Enabled=true` only with an available trusted provider.
+Configuration requires Identity plus `CourseworkAttempts:ProviderBaseUrl` (fixed HTTPS
+URL ending in `/`, no credentials/query/fragment) and external `ProviderToken`. The
+ATT adapter forwards no browser cookies or client credentials, follows no redirects,
+strictly validates/bounds responses at 64 KiB, and applies a five-second deadline to
+headers and body. It never automatically retries a mutation.
 
-The first increment's published Git trace is
-[commit f8f551d](https://github.com/owlCoder/security-lab/commit/f8f551d658cd4edb539eb24e7c20358d6da59a72).
-Record this continuation's actual commit and PR after publishing it; no future
-Git history or completed Tapiz card is fabricated by this document.
+The proposed `acc04-att-v1` transport contract is in `CONTRACTS.md`. Its provider must
+atomically bind Id/OwnerId/CourseId/State/Version, preserve historical answers and
+commit mutation audit with a nonempty receipt; operation IDs support deduplication.
+A lost reply can leave an unknown remote commit outcome; clients must re-read state
+before an intentional subsequent change. The consumer checks the current session
+before provider dispatch and before returning a read, but no cross-provider rollback
+of an already started remote write is claimed. Local request logs are diagnostic,
+not proof of durable ATT audit.
+
+**Actual ATT read/answer/CAS and persistent ACC-02 are still absent on this main
+revision.** Positive ACC-04 HTTP cases use real Identity plus explicit ATT/membership
+contract doubles. A returned fake receipt does not certify real ATT persistence.
+The real ADM live demonstration does not start an invented ATT provider and leaves
+those routes disabled. Obtain the actual provider contract, integration and human
+acknowledgement before marking criteria 1/2 fully complete.
+
+## Individual defense map
+
+| Key code | Explain and demonstrate |
+|---|---|
+| `Modules/Access/AttemptPolicy.cs`, `AttemptService.cs` | Server ownership/scope; snapshot binding; authorized-only conflict; immutable submitted/completed answers |
+| `Modules/Access/Integration/` | Public membership contract; trusted ATT metadata; fixed-origin credential boundary; exact CAS/audit provider obligation |
+| `Modules/Administration/AdministrationPolicy.cs` | Course-scoped capabilities; root-only delegation/revocation; separation from teaching/global account powers |
+| `Modules/Administration/Persistence/` | Course locks, version checks, fresh authority, transactionally matched change/audit; rollback on failure |
+| `Modules/Administration/Integration/` | Real read-only catalog; controlled first-root bootstrap; central relay acknowledgement/idempotency and unmapped records |
+| `Platform.Coursework.Demo/` and live script | Real HTTPS/Kestrel process, pinned temporary certificate, normal login, restart persistence, exact-cookie revocation and cleanup |
+| `Platform.Coursework.Tests/` | Identify which cases use real providers and which deliberately use neighboring-provider doubles; explain a positive and negative case |
+
+Use actual Git/PR links and dates for contribution evidence. Published #199 proves
+prior work, not this unpublished continuation, external contract review or real
+Tapiz creation. No separate CONTRIBUTION file or fabricated completion history is
+required. Architecture/DFD links are in `diagrams/README.md`; recorded local checks
+are in `KT2-VALIDATION.md`.

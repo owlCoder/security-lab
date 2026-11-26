@@ -1,95 +1,79 @@
-# KT2 — Luka: preostali posao i granice odgovornosti
+# KT2 — Luka: autorizacija, audit i preostale integracije
 
-Pregledano 19.11.2026, na osnovi `main` commita `b43cdd0`.
-Ovaj pregled odnosi se na politike pristupa i audit, prema Lukinom pojašnjenju zaduženja.
-Ne pripisuje mu cijeli IDN-05 ili REV-01/02/05 domen, API, frontend i skladište.
+Pregledano 23.11.2026. Osnova: main `e2c97fe`, nakon PR-ova #197, #204, #212 i #214.
+Ovaj dokument prati Lukin individualni dio, a ne cijeli timski REV-05 / IDN-05.
+Ponovljivo pokretanje i granice dokaza: [KT2-DEMO](KT2-DEMO.md).
 
-## Šta je čije
+## Implementirano i spojeno
 
-| Dio | Odgovornost | Trenutno stanje / sljedeći korak |
+| Stavka | Implementacija i dokaz | Odgovornost |
 | --- | --- | --- |
-| Predaja, vraćanje i odobrenje revizije | Markov REV API i tok; Luka povezuje provjere prava i audit | Postoje povezani tokovi i testovi trajnog audita, rollbacka i idempotentnosti. |
-| Administrator/saradnik bez automatskog prava odobravanja | Lukine politike i mapiranje pouzdanih prava | Postoji: produkcioni host traži eksplicitne grantove, a globalna administracija ne dodjeljuje course approval pravo. |
-| Audit odgovora 429 | Luka — producent i povezivanje s postojećim Audit ugovorom; limiter ostaje IDN-05 komponenta | Završeno i spojeno u main kroz [PR #204](https://github.com/owlCoder/security-lab/pull/204), squash commit `1c0f579`. Stari commit ne mora biti predak main-a nakon squash merge-a. |
-| Zaključavanje naloga | Identity/IDN-05 vlasnik (dokumentacija i istorija navode Milana); Luka provjerava audit integraciju | Mehanizam zaključavanja nije Lukina implementacija. Postoji audit `auth.login` Failure sa `reasonCode=account_locked`; sada su dodati pravi HTTP/PostgreSQL dokazi. |
-| Poseban događaj upravo nastalog zaključavanja | Zajednički dogovor Identity/IDN-05 i Audit vlasnika; Luka povezuje događaj | Još otvoreno: `CredentialResult.IsLockedOut` ne razlikuje novo od postojećeg zaključavanja. Ne dodavati novu semantiku ili katalog događaja jednostrano. |
-| Stvarna operacija otključavanja | Identity vlasnik; Luka daje provjeru prava i povezuje audit | Postoje akcija/politika `account.unlock`, ali nema povezanog endpointa/use case-a koji uklanja blokadu i zapisuje uspjeh. Ovo nije Markov REV poslovni tok. |
-| Usklađenost laboratorije i kursa pri kreiranju revizije | Zajednička granica: Markov `DraftRevisionService` + javni LAB ugovor; Luka provjerava da odluka koristi pouzdan resurs | Još otvoreno. API koristi courseId iz zahtjeva, a LAB `StoredLaboratory` nema CourseId. Potrebna je pouzdana javna veza laboratorija–kurs, pa provjera prije kreiranja. |
-| Individualna dokumentacija i demonstracija | Luka za svoj dio; Marko i ostali za njihove komponente | Može se pripremati odmah, sa jasnim razdvajanjem završenog i otvorenih integracija. Predložene DFD slike nisu ovim izmjenama mijenjane. |
+| Konkretne REV akcije i kurs | Registrovane politike, serverski identitet i eksplicitni grantovi bez fallback-a na ulogu kada je persistent izvor ukljucen | Luka; Access ugovor Tim 3 |
+| Nema automatskog approve prava administratora/saradnika | RevisionPermissions i RevisionApprovalPolicy; samoodobravanje zavisi od politike i potrebnih prava | Luka; domensko pravilo Matija |
+| Predaja, vracanje i odobrenje sa auditom | ReviewService i ITransactionalAuditWriter potvrde promjenu, operaciju i audit u jednoj transakciji; retry ne ponavlja dogadjaj | Markov API + Lukina integracija; Audit ugovor Tim 12 |
+| Odbijeni pristup | Program registruje CentralAccessAuditWriter; jedan access.denied sa serverskim identitetom/korelacijom i alarm pri izgubljenom upisu | Tim 3/12 centralni tok; Luka koristi javni ugovor |
+| Audit 429 za login | auth.login.throttled/Denied, Anonymous akter, bez naloga i detalja zahtjeva; PR #204 | Luka; IP limiter Nemanja |
+| Audit prijave zakljucanog naloga | auth.login/Failure, reasonCode=account_locked; nalog je cilj, akter Anonymous; HTTP/PostgreSQL dokaz PR #212 | Milanov lockout + Lukina audit provjera |
+| Pouzdani kurs laboratorije | StoredLaboratory.CourseId, AddLaboratoryCourse i provjera prije kreiranja; PR #214 | Marko uz LAB/persistence vlasnike; sigurnosni pregled Luka |
 
-Dokaz Markovog obima je [REV-05-use-cases-api.md](../REV-05-use-cases-api.md), koji navodi autora i API tok.
-Identity granice opisuje [IDN-05-lockout.md](../identity/IDN-05-lockout.md).
-Audit 429 detaljno je opisan u [IDN-05-throttled-audit.md](../identity/IDN-05-throttled-audit.md).
+PR #192 je bio namijenjen strogoj ACC-05 grani; #197 je tu integraciju spojio u main.
+Za zavrsene stavke ne ceka se ponovno spajanje drugih grana.
 
-## Šta je sada urađeno bez promjene tuđeg poslovnog koda
+## Dorada ovog paketa
 
-U `IdentityAuditPostgresIntegrationTests` dodata su dva slučaja. Koriste stvarni
-Program/login, verifier, Identity bazu i Audit writer, sa zasebnim ograničenim
-SELECT/INSERT audit nalogom u privremenom PostgreSQL kontejneru. Ne zamjenjuju audit
-uspješnim fake writer-om.
+- README i DATA-FLOW prate centralni Access audit umjesto stare produkcione
+  registracije RevisionAuditForwarder-a. Stari adapter nije ponovo ukljucen.
+- Dodati su RevisionAuthoritativePermissionTests: administrator, nastavnik ili
+  saradnik sa imenovanom delegacijom ne zaobilaze nedostajuci, opozvani, istekli
+  ili drugi kursni grant. Nova odluka ponovo cita pravo. Koriste stvarni permission
+  reader i politike uz EF InMemory; ovo nije dokaz PostgreSQL ponasanja.
+- Dopunjeno je uputstvo za demonstraciju individualnog doprinosa.
+- Produkcioni algoritam, Identity operacije, Audit katalog i migracije ovim
+  paketom nisu mijenjani.
 
-1. `AccountLockoutHttpFlow_PersistsAuditAtThreshold_AndForLaterRejectedLogin`
-   - Dva pogrešna pokušaja još ne zaključavaju nalog.
-   - Treći pokušaj aktivira stvarni lockout; nov DB kontekst potvrđuje promjenu.
-   - I zahtjev koji dostiže prag i kasnija ispravna lozinka nad zaključanim nalogom
-     imaju po jedan stvarno sačuvan `auth.login`/Failure zapis sa razlogom `account_locked`.
-   - Akter je Anonymous, nalog je cilj događaja, a korelacija je serverska.
-   - Lažni korisnički/correlation headeri ne određuju aktera; detalji ne sadrže email ili lozinku.
-   - Odgovor ostaje generički 401, bez Retry-After i bez nove sesije.
-2. `AccountLockout_WhenAuditInsertFails_StaysLockedAndIssuesNoSession`
-   - PostgreSQL stvarno odbije INSERT ograničenom runtime nalogu pri zaključavanju.
-   - Stanje ostaje zaključano; nema nove sesije niti lažne potvrde da je događaj sačuvan.
-   - Poslije vraćanja prava sljedeća prijava se i dalje odbija i njen audit zapis se sačuva.
+Lokalna ciljana provjera 23.11: 109 REV autorizacionih + 11 Identity audit producent +
+38 rate limiting testova = 158 proslo, 0 palo, 0 preskocenih. Nakon pokretanja Dockera
+kompletan scripts/audit/test-postgres.ps1 prosao je sa 2370 uspjesnih, 0 neuspjesnih
+i 70 konfiguraciono preskocenih testova; svih 58 REV PostgreSQL i 441 Identity
+test proslo je bez preskakanja. Ciljana grupa je dio punog zbira. Detalji su u KT2-DEMO.
 
-Testni host sada može podešavati IP prag i prag zaključavanja. Postojeći 429 testovi
-zadržavaju svoje podrazumijevane vrijednosti. Nisu mijenjani produkcioni kod,
-Audit katalog, javni ugovori, migracije, Markov API ni Identity algoritam.
+## Stvarno otvorene zavisnosti
 
-## Šta ovaj dokaz ne zatvara
+| Stavka | Sta postoji | Naredni korak |
+| --- | --- | --- |
+| Nastanak blokade naspram ponovljenog pokusaja | IsLockedOut i auth.login/account_locked opisuju odbijenu prijavu | Milan/Identity potvrdjuje atomski nastanak prelaza; Luka i Tim 12 dogovaraju mapiranje |
+| Audit svakog prelaza pri padu writera ili prekidu zahtjeva | Blokada ostaje na snazi, zapis moze izostati; bez outbox-a | Identity + Tim 12 usaglasavaju transakciju ili ponovljivu isporuku i idempotentnost |
+| Administratorsko otkljucavanje | account.unlock provjerava aktivnog administratora; nema operacije koja uklanja blokadu | Milan implementira Identity operaciju i ciljni nalog; Luka veze prava i audit prema potvrdjenom ugovoru |
+| Stare laboratorije bez kursa | Podaci i NULL pripadnost su sacuvani, kreiranje revizije je odbijeno | Marko + Tim 13/LAB-03 + Tim 20 potvrde pouzdan izvor i kontrolisano dopunjavanje |
 
-Ovo dokazuje postojeći normalan tok i ponašanje pri odbijenom audit upisu.
-Ne uvodi novi događaj `account.locked` i ne tvrdi da postoji razlika između novog
-zaključavanja i ponovljene odbijene prijave. Promjena lockout stanja i audit i dalje
-nisu jedna atomska transakcija; kod pada audita ili prekida zahtjeva nije garantovan
-zapis svakog prelaza. Ta garancija traži dogovor s vlasnikom Identity transakcije
-i Audit ugovora. Nisu implementirani otključavanje, outbox ni retroaktivna rekonstrukcija izgubljenih događaja.
+Audit katalog na ovoj osnovi nema poseban tip zakljucavanja/otkljucavanja.
+account.status.changed opisuje Active/Blocked/Archived, a ne privremeni lockout;
+ne koristi se kao zamjena. Allow za account.unlock nije izvrseno otkljucavanje
+niti audit uspjeha. Trenutni IAdminDirectory koristi serversku konfiguraciju
+Stub:AdminIds; to nije zaseban produkcioni registar administratora.
 
-## Provjere i ponovljivo pokretanje
+Prije Identity/audit dorade potrebno je dogovoriti:
 
-Lokalna Release provjera 19.11.2026:
+1. Koja Identity operacija potvrdjuje prelaz i razlikuje retry od nove promjene.
+2. Potvrdjenog aktera, ciljni nalog i serversku korelaciju. Nepotvrdjeni login je
+   Anonymous; uspjesno administratorsko otkljucavanje ima potvrdenog aktera.
+3. Tip/ishod/polja koje Audit katalog prihvata; bez emaila, lozinke, cookie-ja,
+   tokena i slobodnog teksta.
+4. Granicu transakcije, odgovor pri padu audita i zastitu od duplih/izgubljenih
+   dogadjaja. Test provjerava i stanje naloga i trajni zapis.
 
-| Grupa | Prošlo | Palo | Preskočeno |
-| --- | ---: | ---: | ---: |
-| Identity audit producent i pravi HTTP/PostgreSQL tokovi | 18 | 0 | 0 |
-| REV autorizacija i audit pravila | 87 | 0 | 0 |
-| REV HTTP/PostgreSQL integracija | 48 | 0 | 0 |
-| Ukupno | 153 | 0 | 0 |
+To su zajednicke zavisnosti. UI, glavni lockout algoritam i reset lozinke pripadaju
+njihovim vlasnicima; ovaj paket ih ne predstavlja kao zavrsene.
 
-`git diff --check` prolazi. Ovo je ciljana provjera, ne nova puna CI kampanja.
-Nema produkcionih izmjena koje bi zahtijevale migraciju ili frontend build.
+## Istorijski dokaz PR-a #212
 
-```powershell
-dotnet test backend/Platform.Identity.Tests/Platform.Identity.Tests.csproj --configuration Release --filter "FullyQualifiedName~IdentityAuditProducerTests|FullyQualifiedName~IdentityAuditPostgresIntegrationTests"
-dotnet test backend/Platform.Tests/Platform.Tests.csproj --configuration Release --filter "FullyQualifiedName~RevisionAuthorization"
-dotnet test backend/Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj --configuration Release
-```
+Lokalno 19.11.2026. na osnovi b43cdd0: 18 Identity audit, 87 REV autorizacionih i
+48 REV HTTP/PostgreSQL testova: ukupno 153 prosla, 0 pala, 0 preskocenih. To je
+istorijski rezultat, ne broj testova danasnjeg main-a.
 
-Za PostgreSQL testove potreban je pokrenut Docker. Svaka grupa koristi svoje
-privremene podatke; REVOKE/GRANT testovi mijenjaju samo runtime nalog u vlastitom
-testnom kontejneru i vraćaju prava u finally bloku. Sirovi TRX izvještaji ove
-provjere su lokalno u `TestResults/lockout-audit-evidence`.
-
-## Konkretni dogovori koji još trebaju
-
-- **Marko + LAB vlasnik:** koji javni ugovor pouzdano vraća kurs postojeće laboratorije
-  i kako obraditi stare laboratorije bez te veze. Zatim odbiti podmetnuti courseId
-  bez kreiranja revizije; Luka provjerava sigurnosni dio.
-- **Identity/IDN-05 vlasnik:** operacija otključavanja i razlikovanje upravo nastale
-  blokade od već zaključanog naloga. Potrebni su pouzdani identitet, cilj, rezultat i
-  dogovorena transakcijska/ponavljajuća obrada audita.
-- **Audit vlasnik:** potvrda eventualnih novih tipova i dozvoljenih polja; postojeći
-  `auth.login` razlog ne predstavljati kao novi zaseban događaj koji još ne postoji.
-
-Luka ne treba sam mijenjati tuđe tabele ili tvrditi da politika Allow znači da je
-otključavanje izvršeno. Može sam završavati audit adaptere za postojeće ugovore,
-negativne testove, dokumentaciju i dokaz svog individualnog doprinosa.
+AccountLockoutHttpFlow_PersistsAuditAtThreshold_AndForLaterRejectedLogin provjerava
+stvarni prag i kasnije odbijanje: Anonymous akter, nalog kao cilj, serverska
+korelacija, isti genericki 401 i bez nove sesije.
+AccountLockout_WhenAuditInsertFails_StaysLockedAndIssuesNoSession stvarno ukida
+INSERT pravo ogranicenom Audit runtime nalogu u privremenoj bazi: blokada ostaje,
+a audit uspjeh nije lazno potvrdjen. REVOKE/GRANT ne dira razvojnu bazu.

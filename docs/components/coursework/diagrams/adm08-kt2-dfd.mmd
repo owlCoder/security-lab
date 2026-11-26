@@ -1,38 +1,25 @@
 flowchart TD
-  subgraph CLIENT["Trust boundary 1: untrusted client"]
-    ACTOR["Course administrator or delegate"]
-    INPUT["Cookie; course/grant IDs; settings or capability DTO"]
-    ACTOR --> INPUT
+  subgraph CLIENT["Trust boundary: untrusted client"]
+    C["Client: session, resource IDs, DTO"]
+    R["Same client: public response"]
   end
-  subgraph API["Trusted API and application"]
-    AUTH["P1: validate real session and current account"]
-    DECIDE["P2: shared Access and exact-course capability"]
-    CHANGE["P3: validate DTO; bind grant/version; perform operation"]
-    RECHECK["P4: recheck Identity session before commit"]
-    DENY["Normalize rejection; central audit for Access denials"]
-    OUT["Public JSON: 200 / 400 / 401 / 404 / 409 / 413 / 503"]
-    AUTH --> DECIDE
-    DECIDE -->|"Allow"| CHANGE
-    AUTH -->|"Invalid session or unavailable Identity"| DENY
-    DECIDE -->|"Deny or unavailable authority"| DENY
-    CHANGE -->|"Invalid input"| DENY
-    CHANGE --> RECHECK
-    RECHECK -->|"Invalidated: rollback"| DENY
-    RECHECK -->|"Commit success"| OUT
-    DENY --> OUT
+  subgraph API["Trusted API / application boundary"]
+    P1["P1 Real session/current account: entry and final checks"]
+    P2["P2 Access, validation, fresh scope and bound operation"]
+    P3["P3 Public result / generic rejection"]
   end
-  subgraph PROVIDERS["Trust boundary 2: provider contracts and databases"]
-    ID[("D1: Identity accounts and sessions")]
-    ADM[("D2: administrative labels and current grants")]
-    EVENTS[("D3: durable producer outbox")]
+  subgraph PROVIDERS["Provider and storage boundary"]
+    D1["D1 Identity accounts and sessions; Real persistent provider"]
+    D2["D2 ACC-01 catalog; Current course status; read-only"]
+    D3["D3 Own PostgreSQL; Settings + grants + immutable producer audit"]
+    D4["D4 Central Access audit; Denied Access requests"]
   end
-  INPUT -->|"HTTPS request"| AUTH
-  AUTH -->|"Opaque session token"| ID
-  ID -->|"Validated subject/current status or failure"| AUTH
-  DECIDE -->|"Actor and course"| ADM
-  ADM -->|"Current grant/version or absence"| DECIDE
-  CHANGE -->|"Bound reads; course lock; compare version"| ADM
-  CHANGE -->|"Metadata-only event in same transaction"| EVENTS
-  RECHECK --> ID
-  ID -->|"Current session status"| RECHECK
-  OUT -->|"Permitted metadata or generic denial"| ACTOR
+  C -->|"HTTPS request"| P1
+  P1 <-->|"Validated subject / fresh recheck"| P2
+  P1 -->|"Unauthenticated or unavailable"| P3
+  P2 -->|"Authorized result / conflict / denial"| P3
+  P1 <-->|"Session/account; current status or failure"| D1
+  P2 <-->|"Course/member ID; current state"| D2
+  P2 <-->|"Bound read/write; result or failure"| D3
+  P2 -->|"Metadata only"| D4
+  P3 -->|"Permitted data or generic rejection"| R

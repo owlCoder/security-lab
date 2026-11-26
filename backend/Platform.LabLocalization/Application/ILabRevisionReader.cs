@@ -1,12 +1,15 @@
 namespace Platform.LabLocalization.Application;
 
-/// <summary>What LAB-07 needs to know about a revision. Grading comes from here, never from a translation.</summary>
-public sealed record RevisionInfo(Guid RevisionId, string EvaluatorVersion);
+/// <summary>The revision's own text, in the default language (Serbian). It is part of the revision, not a translation.</summary>
+public sealed record RevisionText(string Title, string Description, string Instructions);
 
 /// <summary>
-/// LAB-07's view of the revision module. The real implementation is an adapter
-/// over LabRevision, added once the revision exposes its evaluator.
+/// What LAB-07 needs to know about a revision. Grading and the default-language text come from here,
+/// never from a translation. <see cref="IsDraft"/> is true only while the revision can still be edited.
 /// </summary>
+public sealed record RevisionInfo(Guid RevisionId, string EvaluatorVersion, RevisionText Text, bool IsDraft);
+
+/// <summary>LAB-07's view of the revision module.</summary>
 public interface ILabRevisionReader
 {
     /// <summary>

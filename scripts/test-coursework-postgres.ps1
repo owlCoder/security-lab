@@ -65,17 +65,18 @@ try {
     if ([int]$counters.total -lt 1 -or [int]$counters.passed -ne [int]$counters.total) {
         throw 'Some PostgreSQL tests were not executed successfully (including skipped cases).'
     }
-    foreach ($fixture in @('Platform.Coursework.Tests.AdministrationPostgresTests', 'Platform.Coursework.Tests.AdministrationHttpTests')) {
+    foreach ($fixture in @('Platform.Coursework.Tests.AdministrationPostgresTests', 'Platform.Coursework.Tests.AdministrationHttpTests', 'Platform.Coursework.Tests.AttemptProviderAdapterTests')) {
         $discovered = @($trx.TestRun.TestDefinitions.UnitTest | Where-Object {
             ($_.TestMethod.className -split ',', 2)[0] -eq $fixture
         })
         if ($discovered.Count -eq 0) { throw "Required integration fixture was not discovered: $fixture" }
     }
-    Write-Host "ADM-08 PostgreSQL PASS: $($counters.passed)/$($counters.total). Results: $report"
+    Write-Host "Coursework PostgreSQL/HTTP/adapter PASS: $($counters.passed)/$($counters.total). Results: $report"
     if ($Demonstrate) {
-        # A separate, fresh fixture demonstrates the complete HTTP lifecycle.
+        # Fresh fixtures: real ADM-08 providers; ACC-04 ATT/membership contract doubles are explicit.
+        Write-Host 'ADM-08 uses real Identity/catalog/PostgreSQL/Audit; ACC-04 uses real Identity with explicit ATT and membership contract doubles.'
         dotnet test backend/Platform.Coursework.Tests/Platform.Coursework.Tests.csproj --configuration Release --no-build `
-            --filter 'FullyQualifiedName~RealLoginDelegationSettingsRevocationRejectsTheExactPreviouslyIssuedCookie' `
+            --filter 'FullyQualifiedName~RealLoginDelegationSettingsRevocationRejectsTheExactPreviouslyIssuedCookie|FullyQualifiedName~Acc04RealSessionUsesSharedMembershipAndAttContractForOwnerReadAndCasWrite' `
             --logger 'console;verbosity=detailed'
         if ($LASTEXITCODE -ne 0) { throw 'The real-session HTTP demonstration failed.' }
     }
