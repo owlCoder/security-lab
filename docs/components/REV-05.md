@@ -7,9 +7,9 @@
 | Tim          | Tim 4                                                                                          |
 | Zahtev       | REV-05 — dvostepeno odobrenje objave                                                           |
 | Zaduženje    | Domenski modeli, pravila i baza podataka                                                       |
-| Status       | Domen i baza implementirani i lokalno testirani; povezivanje sa ostalim komponentama predstoji |
+| Status       | Domen i baza integrisani sa REV API-jem, autorizacijom i transakcionim auditom na `main` |
 | Projekti     | `Platform.Laboratories.Domain`, `Platform.Laboratories.Infrastructure`                         |
-| Grana        | `feature/REV-05-domain-persistence`                                                            |
+| Prvobitna implementacija | `feature/REV-05-domain-persistence`, PR #37 (`b8db7e7`) |
 
 ## Moje zaduženje
 
@@ -17,11 +17,11 @@ Moj deo obuhvata statuse revizije i dozvoljene prelaze, politiku objavljivanja z
 
 Osnovno pravilo REV-05 je da autor ne može da odobri sopstvenu reviziju kada politika kursa zahteva nezavisno odobrenje.
 
-Numerisanje i sadržaj snapshot-a pripadaju REV-01, a validacija tipa laboratorije i evaluator-a pripada REV-02. Frontend, endpoint-i i utvrđivanje korisničkih ovlašćenja nisu deo ovog zaduženja. U API je dodata samo registracija persistence servisa.
+Numerisanje i sadržaj snapshot-a pripadaju REV-01, validacija tipa laboratorije i evaluatora pripada REV-02, a provera pristupa i audit povezani su kroz REV API. Moj deo obezbeđuje pravila koja taj tok primenjuje i PostgreSQL model u kojem čuva reviziju, politiku kursa i odluke.
 
 ## Ugovor za druge module
 
-Za čuvanje odluke koristi se `IRevisionDecisionStore`:
+Za direktno čuvanje domenske odluke postoji `IRevisionDecisionStore`:
 
 ```csharp
 Task<DecisionSaveResult> SaveDecisionAsync(
@@ -31,7 +31,7 @@ Task<DecisionSaveResult> SaveDecisionAsync(
 
 Zahtev sadrži ID revizije, ID pregledaoca, očekivanu verziju, hash pregledanog sadržaja i odluku. Uspešan rezultat vraća ID zapisa istorije, novi status i novu verziju. Neuspešan rezultat sadrži razlog odbijanja, na primer `SelfApprovalForbidden`, `ConcurrencyConflict` ili `ContentChanged`.
 
-Pozivalac mora prethodno proveriti ovlašćenja i obezbediti identitet pregledaoca iz pouzdanog serverskog izvora. Prosleđivanje tuđeg ID-ja iz klijentskog zahteva nije dokaz identiteta. Pre objavljivanja mora biti izvršena i validacija iz REV-02.
+Pozivalac direktnog ugovora obezbeđuje proveru pristupa, pouzdan identitet pregledaoca i validaciju sadržaja pre objave. Produkcijski HTTP tok koristi iste domenske modele i isti `LaboratoriesDbContext`, a `ReviewService` vodi transakciju koja obuhvata i potvrdu operacije i audit.
 
 ## Implementacija
 
@@ -66,7 +66,7 @@ Prelazi prate dijagram 4.5.1 iz specifikacije:
 
 Nova revizija počinje u stanju `Draft`, sa `RowVersion = 1`. Status nema javni setter. Odbijena operacija ne menja stanje ni verziju.
 
-### Čuvanje odluke
+### Direktno čuvanje odluke
 
 `RevisionDecisionStore` izvršava sledeći tok:
 
@@ -93,9 +93,9 @@ Migracije se nalaze u `Platform.Laboratories.Infrastructure/Persistence/Migratio
 - `CreateReviewTables` pravi politiku kursa i istoriju odluka.
 - `AddRevisionState` dodaje metapodatke revizije sa verzijom i ograničenjima.
 
-Obe migracije su primenjene na lokalnu razvojnu bazu. Provereni su i instalacija na praznoj test bazi i nadogradnja prve migracije uz očuvanje podataka. `Down` metode uklanjaju odgovarajuće tabele i njihove podatke.
+Prvobitne migracije proverene su na praznoj test bazi i pri nadogradnji sa prve migracije uz očuvanje podataka. HTTP tok koristi i migracije `AddReviewOperations` za potvrde operacija i objave i `AddReviewDefinitions` za definicije nacrta. `LabRevision` čuva metapodatke revizije, dok se definicija i objavljeni snapshot čuvaju u tabelama tog toka.
 
-`LabRevision` trenutno sadrži samo metapodatke potrebne ovom delu. Sadržaj i numerisanje revizije treba povezati sa modelom REV-01. Strani ključevi prema drugim modulima nisu dodati; tipove identifikatora i provere postojanja treba usaglasiti pri povezivanju. Trenutno su identifikatori `Guid`.
+Kurs pri kreiranju nacrta dolazi iz sačuvanog zapisa laboratorije. Migracija `AddLaboratoryCourse` čuva ranije laboratorije sa nepoznatim kursom. Kreiranje revizije za takvu laboratoriju se odbija dok se kurs pouzdano ne dopuni. Identifikatori revizije, kursa i korisnika su tipa `Guid`.
 
 ## Dijagram arhitekture
 
@@ -109,34 +109,44 @@ flowchart LR
   CTX --> DB[(PostgreSQL)]
 ```
 
-Registracija je u `Platform.Laboratories.Infrastructure/Composition`, a `Program.cs` poziva `AddLaboratoriesPersistence()`. Domenski projekat ne referencira API ili infrastrukturu.
+Dijagram prikazuje direktan persistence ugovor. `Program.cs` poziva `AddLaboratoriesPersistence()` za registraciju konteksta i store-a. Domenski projekat je nezavisan od API-ja i infrastrukture.
 
 ## Dijagram toka podataka
 
 ```mermaid
 flowchart LR
-  CALLER[Serverski pozivalac] -->|Odluka, identitet, verzija i hash| STORE[Čuvanje odluke]
-  STORE -->|Učitavanje| DATA[(Revizija i politika)]
-  DATA --> RULES[Provera domenskih pravila]
-  RULES -->|Odbijanje| RESULT[Definisan rezultat]
-  RULES -->|Dozvoljena promena| TX[Transakcija]
-  TX --> STATE[(Status i verzija)]
-  TX --> HISTORY[(Istorija odluka)]
+  USER["Autor ili pregledalac"] -->|"ID revizije, verzija, hash i zahtev"| API["REV API i serverski identitet"]
+  API --> GRANT["Access provera prava za radnju i kurs"]
+  GRANT -->|"Odbijanje"| RESULT["HTTP odgovor"]
+  GRANT -.->|"Odbijeni pristup"| ACCESSAUDIT[("Centralni Access audit")]
+  GRANT -->|"Dozvola"| REVIEW["ReviewService"]
+  STATE[("Revizija i politika kursa")] --> REVIEW
+  OPS[("Potvrde operacija i snapshot-i")] --> REVIEW
+  DEFINITIONS[("Sačuvane definicije")] --> PUB
+  REVIEW --> DOMAIN["LabRevision i CoursePublishPolicy"]
+  DOMAIN -->|"Odbijena promena"| RESULT
+  DOMAIN -->|"Dozvoljena promena"| TX["Potvrda jedne PostgreSQL transakcije"]
+  REVIEW -->|"Pri odobrenju validira sadržaj i hash"| PUB["REV-01 snapshot i REV-02 validacija"]
+  PUB -->|"Validirani snapshot i broj objave"| TX
+  TX --> STATE
+  TX --> OPS
+  TX --> HISTORY[("Istorija odluka")]
+  TX --> AUDIT[("Audit mutacije")]
   TX --> RESULT
-  RESULT --> CALLER
 ```
 
-Dijagram prikazuje implementirani domenski i persistence deo. Autentikacija, provera prava i HTTP zahtev pripadaju komponentama koje pozivaju ovaj ugovor.
+Prava se proveravaju nad kursom postojeće revizije. Pri novoj odluci servis učitava aktuelnu politiku pod zaključavanjem, poziva domensko pravilo i pri odobrenju proverava sačuvanu definiciju i hash. Nova predaja, vraćanje ili odobrenje potvrđuju se u istoj transakciji sa auditom. Vraćanje i odobrenje upisuju i domenski zapis odluke. Ako audit mutacije ne uspe, nema potvrde transakcije. Ponavljanje već potvrđenog zahteva sa istim ključem vraća raniji rezultat bez nove odluke i audit događaja mutacije.
+
+Tok kreiranja i HTTP ugovor opisani su u [REV-05 API dokumentaciji](REV-05-use-cases-api.md). Provera prava i audit opisani su u [REV-05 dokumentaciji autorizacije](REV-05-authorization/README.md).
 
 ## Bezbednosne provere i ograničenja
 
 - Autor se poredi sa sačuvanim `AuthorId`, a pravilo se čita iz politike odgovarajućeg kursa. Nedostajuća politika odbija odluku.
 - Promenjen hash ili zastarela verzija ne dozvoljavaju upis odluke.
-- SHA-256 se računa nad tačnim bajtovima. Format i kompletan sadržaj snapshot-a treba usaglasiti sa REV-01/02; ova komponenta ne normalizuje JSON.
+- SHA-256 se računa nad sačuvanim bajtovima. Pri odobrenju HTTP tok ponovo računa hash nad validiranim snapshot-om.
 - Istorija čuva vrednost politike koja je važila pri odluci. Naknadna promena politike ne prepisuje taj zapis.
-- Store dodaje nove zapise istorije; zasebna zabrana direktnog SQL menjanja ili brisanja istorije nije uvedena.
+- Aplikacija upisuje nove zapise istorije. Direktne SQL izmene ostaju pod kontrolom dozvola baze.
 - Lozinka razvojne baze je u lokalnom, ignorisanom `.env` fajlu. API connection string je u user-secrets ili promenljivoj okruženja.
-- Povezivanje sa serverskom autorizacijom i auditom objavljivanja ostaje odvojen korak. Testovi ovog dela ne potvrđuju ceo HTTP tok objavljivanja.
 
 ## Demonstracija i testovi
 
@@ -149,16 +159,34 @@ dotnet test backend/Platform.Laboratories.Tests/Platform.Laboratories.Tests.cspr
 dotnet test backend/Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj --configuration Release
 ```
 
-Za integracione testove mora biti pokrenut Docker sa Linux kontejnerima. Testcontainers sam pravi poseban PostgreSQL kontejner na slobodnom portu i uklanja ga nakon testiranja. Razvojna baza i drugi projekti se ne koriste za ove testove.
+Za integracione testove pokrenuti Docker sa Linux kontejnerima. Testcontainers podiže privremeni PostgreSQL na slobodnom portu i uklanja ga na kraju. Testovi sami pripremaju sintetičke naloge, laboratoriju, grantove i politiku kursa.
 
-Poslednja lokalna provera: **61 jedinični/modelski i 20 integracionih testova prolazi**, a API build nema upozorenja ni greške.
+Za demonstraciju Matijinog dela kroz stvarni HTTP tok pokrenuti:
 
-Za prikaz ključnih scenarija mogu se pokrenuti:
+```powershell
+dotnet test backend/Platform.Laboratories.IntegrationTests/Platform.Laboratories.IntegrationTests.csproj --configuration Release --filter "FullyQualifiedName~RevisionTwoStepApprovalHttpTests"
+```
 
-- `Approval_AppliesCoursePolicyAndSavesHistoryAtomically` — zabrana samoodobravanja i primena politike.
-- `ConcurrentDecisions_OnlyOneCommitsStateAndHistory` — dva zahteva nad istom verzijom.
-- `FailedHistoryInsert_RollsBackRevisionChange` — poništavanje promene kada istorija ne može da se sačuva.
-- `UpgradeFromFirstMigration_PreservesPolicyAndDecisionHistory` — očuvanje podataka pri nadogradnji.
+Pokaži kako autor sa pravom odobravanja predaje nacrt i dobija `403` kada kurs zahteva nezavisnog pregledaoca. Revizija ostaje `InReview`. Pregledalac sa pravima za taj kurs zatim objavljuje istu reviziju. Proveri da postoje jedna odluka i jedan uspešan audit odobrenja. Ista grupa testova pokazuje da se politika primenjuje u trenutku odluke i da se zahtev odbija ako politika ili pravo nedostaju.
+
+Za demonstraciju transakcije i migracija u bazi koristi se grupa `PublicationDatabaseTests`. Scenariji `ConcurrentDecisions_OnlyOneCommitsStateAndHistory` i `FailedHistoryInsert_RollsBackRevisionChange` prikazuju ponašanje pod konkurencijom i pri grešci upisa. `UpgradeFromFirstMigration_PreservesPolicyAndDecisionHistory` proverava podatke pri nadogradnji.
+
+## Rezultati provera
+
+Release provera 26.11.2026. na osnovi `main` (`1ea6a41`), sa .NET SDK 10.0.404 i Dockerom:
+
+| Grupa | Prošlo | Palo | Preskočeno |
+| --- | ---: | ---: | ---: |
+| `Platform.Laboratories.Tests` | 62 | 0 | 0 |
+| `PublicationDatabaseTests` | 29 | 0 | 0 |
+| `RevisionHttpWorkflowTests` | 21 | 0 | 0 |
+| `RevisionTwoStepApprovalHttpTests` | 8 | 0 | 0 |
+| `LabLocalizationHttpTests` | 26 | 0 | 0 |
+| **Ukupno** | **146** | **0** | **0** |
+
+Četiri integracione grupe čine svih 84 testa iz `Platform.Laboratories.IntegrationTests`. API je izgrađen tokom provere sa tri postojeća `CS0105` upozorenja o duplim `using` direktivama u `Program.cs`. `dotnet ef migrations has-pending-model-changes` potvrdio je da `LaboratoriesDbContext` odgovara poslednjoj migraciji.
+
+## Lokalna razvojna baza
 
 Razvojna baza se pokreće komandom `docker compose up -d --wait db`. Na novom računaru prvo treba napraviti lokalni `.env` prema `.env.example`, podesiti sopstvenu lozinku i connection string. Docker Compose čita `.env`, a API koristi `ConnectionStrings:Laboratories` kroz user-secrets u Development okruženju ili `ConnectionStrings__Laboratories` iz okruženja.
 
@@ -168,17 +196,6 @@ Kada je promenljiva `ConnectionStrings__Laboratories` lokalno podešena, migraci
 dotnet ef database update --project backend/Platform.Laboratories.Infrastructure --startup-project backend/Platform.Laboratories.Infrastructure --context LaboratoriesDbContext
 ```
 
-U zasebnom `.github/workflows/rev05.yml` definisane su REV-05 domenske, PostgreSQL integracione i migracione provere. Zajednički backend i frontend CI zadržan je iz main grane.
+## Solution i CI
 
-## Povezivanje sa zajedničkim solution-om
-
-REV-05 projekti su u solution folderu `Publication`. Reference iz API-ja su u posebnoj `Laboratories` grupi u `Platform.Api.csproj`. Namespace za registraciju je izdvojen u `GlobalUsings.Laboratories.cs`, a `AddLaboratoriesPersistence` se poziva nakon registracije `TimeProvider` servisa u `Program.cs`.
-
-Pri usklađivanju sa `main` granom 04.11.2026. sačuvani su svi integrisani moduli. Prošli su build svih 22 projekta, svih 497 testova solution-a, frontend build, provera migracionog snapshot-a i 41 KT1 HTTP demo provera. REV-05 i dalje ima 61 domenski/model test i 20 PostgreSQL integracionih testova.
-
-Otvoreni PR-ovi drugih modula provereni su radi preklapanja u zajedničkim fajlovima; njihov neintegrisani kod nije preuzet. Odvojene reference smanjuju preklapanje, ali nove izmene istih fajlova mogu ponovo zahtevati usklađivanje pre merge-a.
-
-
-## Odvojene CI provere
-
-REV-05 workflow je u zasebnom fajlu `.github/workflows/rev05.yml`. Zajednički `ci.yml` zadržava backend i frontend provere iz main-a, uključujući UI testove. Oba workflow-a se pokreću za pull request i push na main. Time se uklanja preklapanje pri dodavanju koraka u zajednički CI fajl, bez preskakanja provera.
+REV-05 projekti su u solution folderu `Publication`. API referencira domenski i infrastrukturni projekat i registruje persistence servise pri pokretanju. [REV-05 workflow](../../.github/workflows/rev05.yml) pokreće domenske i PostgreSQL testove, proverava migracioni snapshot i čuva TRX izveštaje kao CI artefakte pri izvršavanju na PR-u i posle push-a na `main`.
