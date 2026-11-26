@@ -28,6 +28,9 @@ jobs:
       - name: Test LAB-02 metadata and catalog with isolated PostgreSQL
         shell: pwsh
         run: ./scripts/test-metadata-postgres.ps1 -NoBuild
+      - name: Test AUT-04 LabVisibility persistence with isolated PostgreSQL
+        shell: pwsh
+        run: ./scripts/test-labvisibility-postgres.ps1 -NoBuild
       - name: Live ADM-08 HTTPS demonstration with isolated PostgreSQL
         shell: pwsh
         run: ./scripts/demo-coursework-live.ps1 -NoBuild
