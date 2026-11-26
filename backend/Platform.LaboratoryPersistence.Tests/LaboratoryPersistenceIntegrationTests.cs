@@ -62,6 +62,7 @@ public class LaboratoryPersistenceIntegrationTests
                 Assert.Multiple(() =>
                 {
                     Assert.That(result!.Id, Is.EqualTo(lab.Id));
+                    Assert.That(result.CourseId, Is.EqualTo(lab.CourseId));
                     Assert.That(result.CreatedBy, Is.EqualTo(lab.CreatedBy));
                     Assert.That((result.CreatedAt - lab.CreatedAt).Duration(), Is.LessThan(TimeSpan.FromMilliseconds(1)));
                     Assert.That(result.Status, Is.EqualTo(LabStatus.Draft));
@@ -87,6 +88,7 @@ public class LaboratoryPersistenceIntegrationTests
                 var result = await new PostgresLaboratoryRepository(new PostgresLaboratoryStore(db)).GetByIdAsync(lab.Id);
                 Assert.That(result!.Title, Is.EqualTo("After"));
                 Assert.That(result.Id, Is.EqualTo(lab.Id));
+                Assert.That(result.CourseId, Is.EqualTo(lab.CourseId));
                 Assert.That(result.CreatedBy, Is.EqualTo(lab.CreatedBy));
             }
         }

@@ -1,4 +1,4 @@
-import { useNavigate, Routes, Route } from 'react-router-dom'
+import { useLocation, useNavigate, Routes, Route } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { apiRequest } from './api/http'
@@ -13,9 +13,15 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import DraftsPage from './pages/DraftsPage'
+import AuthoringSection from './components/authoring/AuthoringSection'
+import LabVisibilitySection from './labs/LabVisibilitySection'
+import CompetenciesPage from './pages/CompetenciesPage'
+import SessionsPage from './pages/SessionsPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { refreshUser } = useAuth()
   const [error, setError] = useState('')
 
@@ -23,7 +29,10 @@ function LoginRoute() {
     <LoginPage onSuccess={() => {
       setError('')
       void refreshUser()
-        .then(() => navigate('/access-demo'))
+        .then(() => {
+          const from: unknown = location.state?.from
+          navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/access-demo')
+        })
         .catch(() => setError('Login succeeded, but the session could not be verified. Please try again.'))
       return true
     }} />
@@ -64,8 +73,8 @@ function RevisionsSection() {
         ? <RevisionListPage
             key="pending"
             title="Revizije na čekanju"
-            description="Revizije koje čekaju vaše odobrenje. Sopstvene revizije se ovde ne prikazuju kada politika zahteva drugog odobravaoca."
-            emptyText="Nema revizija koje čekaju vaše odobrenje."
+            description="Revizije predate na pregled u kursevima u kojima imate pravo pregleda. Sopstvenu reviziju ne možete sami da odobrite kada politika kursa zahteva drugog odobravaoca."
+            emptyText="Nema revizija koje čekaju pregled."
             load={getPendingReviews}
             onOpen={id => setView({ tab: 'pending', revisionId: id })}
           />
@@ -87,14 +96,24 @@ export default function App() {
         <Route index element={<>
           <LandingPage />
           <HealthStatus />
-          {/* Komponente drugih timova sa main grane (ACC-04/ADM-08 i LAB-07) */}
+          
           <CourseworkKt1 />
           <LabsSection />
           <CoursesPage />
+          <LabVisibilitySection />
+          
+          <AuthoringSection />
         </>} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
+          <Route path="laboratories/:laboratoryId/competencies" element={<CompetenciesPage />} />
+          <Route path="account/sessions" element={<SessionsPage />} />
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          {/*
+            AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).
+            Ruta postoji samo u razvojnom režimu, ne i u produkcionom buildu.
+          */}
+          {import.meta.env.DEV && <Route path="drafts" element={<DraftsPage />} />}
         </Route>
       </Route>
     </Routes>

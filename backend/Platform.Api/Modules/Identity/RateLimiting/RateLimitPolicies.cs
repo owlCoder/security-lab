@@ -10,4 +10,7 @@ public static class RateLimitPolicies
 {
     public const string Login = "identity-login";
     public const string PasswordReset = "identity-password-reset";
+
+    /// <summary>IDN-03 / SEC-04: <c>PUT /api/admin/accounts/{id}/status</c>.</summary>
+    public const string AccountStatusChange = "identity-account-status-change";
 }

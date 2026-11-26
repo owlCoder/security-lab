@@ -38,7 +38,36 @@ internal static class AuditDraftExamples
             new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
             AnonymousContext);
 
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodesGenerated,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodeRedeemed,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodeRejected,
+                AuditOutcome.Denied),
+            AnonymousContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaBackupCodesRevoked,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
         yield return (StatusChange(), UserContext);
+
+        yield return (Unlock(), UserContext);
 
         foreach (var eventType in new[] { AuditEventTypes.RevisionSubmitted, AuditEventTypes.RevisionApproved,
                      AuditEventTypes.RevisionReturned })
@@ -94,6 +123,15 @@ internal static class AuditDraftExamples
             outcome,
             Resource: TargetAccount,
             Details: details ?? Details(("oldStatus", "active"), ("newStatus", "blocked")));
+
+    public static AuditEventDraft Unlock(
+        AuditOutcome outcome = AuditOutcome.Success,
+        IReadOnlyDictionary<string, string>? details = null) =>
+        new(
+            AuditEventTypes.AccountUnlocked,
+            outcome,
+            Resource: TargetAccount,
+            Details: details ?? Details(("lockoutEnd", "2026-11-23T10:15:00Z")));
 
     public static IReadOnlyDictionary<string, string> Details(params (string Key, string Value)[] entries) =>
         entries.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);

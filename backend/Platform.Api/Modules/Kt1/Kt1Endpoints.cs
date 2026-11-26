@@ -3,12 +3,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Platform.Access.Contracts;
 using Platform.Access.AspNet;
-using Platform.Access.Application.Options;
-using Platform.Access.Application.Services;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.Infrastructure.Catalog;
-using Platform.Access.Infrastructure.Policies;
 using Platform.Api.Modules.Access;
 using Platform.Api.Modules.Administration;
 
@@ -32,7 +28,7 @@ public static class Kt1Endpoints
     };
     public static IServiceCollection AddCourseworkKt1(this IServiceCollection services)
     {
-        services.AddAuthentication(Scheme).AddCookie(Scheme, options =>
+        services.AddAuthentication().AddCookie(Scheme, options =>
         {
             options.Cookie.Name = "SecurityLab.CourseworkKt1";
             options.Cookie.HttpOnly = true;
@@ -51,30 +47,10 @@ public static class Kt1Endpoints
         services.AddSingleton<AttemptPolicy>();
         services.AddSingleton<AdministrationPolicy>();
         services.AddSingleton(TimeProvider.System);
-        // KT1 uses its own strictly scoped policy engine. Do not replace or override
-        // ACC-05 policies for the real API when the development simulator is enabled.
-        services.AddSingleton<Kt1PolicyDecision>(sp =>
-        {
-            var catalog = new InMemoryActionCatalog();
-            var policies = new InMemoryAccessPolicyRegistry();
-            foreach (var action in new[] { AttemptPolicy.Read, AttemptPolicy.Update })
-            {
-                if (!catalog.Contains(action))
-                    catalog.Register(new ActionDefinition(action, ActionScope.Course, "attempt", false));
-                policies.Register(action, sp.GetRequiredService<AttemptPolicy>());
-            }
-            foreach (var action in new[] {
-                AdministrationPolicy.Read, AdministrationPolicy.Rename,
-                AdministrationPolicy.Delegate, AdministrationPolicy.Revoke })
-            {
-                if (!catalog.Contains(action))
-                    catalog.Register(new ActionDefinition(action, ActionScope.Course, "course", true));
-                policies.Register(action, sp.GetRequiredService<AdministrationPolicy>());
-            }
-            return new Kt1PolicyDecision(new DefaultDenyAccessDecision(
-                catalog, policies, sp.GetRequiredService<IAccessAuditWriter>(),
-                sp.GetRequiredService<AccessDecisionOptions>()));
-        });
+        // Register before AddAccessControl freezes the shared catalog. Synthetic actions
+        // have their own namespace and never replace real API/ACC-08 policies.
+        services.AddKt1AccessActions();
+        services.AddSingleton<Kt1PolicyDecision>();
         services.AddScoped<AttemptService>(sp => new AttemptService(
             sp.GetRequiredService<IAccountReader>(), sp.GetRequiredService<IAttemptStore>(),
             sp.GetRequiredService<Kt1PolicyDecision>(), sp.GetRequiredService<ISecurityAudit>(),
@@ -89,52 +65,46 @@ public static class Kt1Endpoints
     {
         public ValueTask<AccessDecision> DecideAsync(
             AccessRequest request, CancellationToken cancellationToken = default)
-            => inner.DecideAsync(request, cancellationToken);
+            => inner.DecideAsync(request with { Action = Kt1AccessActions.Central(request.Action) }, cancellationToken);
     }
 
     public static void MapCourseworkKt1(this WebApplication app)
     {
-        // Development-only simulator performs its own cookie and isolated-policy checks.
-        // Allow the request to reach those checks rather than blanket-denying every KT1 route.
-        var g = app.MapGroup("/api/kt1").AllowPublic();
-        g.AddEndpointFilter(async (context, next) =>
-        {
-            var http = context.HttpContext;
-            http.Response.Headers.CacheControl = "no-store";
-            http.Response.Headers["X-Correlation-ID"] = http.TraceIdentifier;
-            // No CORS is enabled. Non-simple header + Strict cookie protects every demo mutation.
-            if (!HttpMethods.IsGet(http.Request.Method) && http.Request.Headers["X-Kt1-Demo"] != "1")
-                return Results.BadRequest(new { code = "INVALID_REQUEST" });
-            return await next(context);
-        });
+        var g = app.MapGroup("/api/kt1").WithMetadata(new Kt1EndpointMetadata());
         g.MapGet("/info", () => new
         {
             mode = "Synthetic Development-only KT1 simulator. No real credentials or student data.",
             requirements = new[] { "ACC-04", "ADM-08" }, personas = Personas.Keys,
             attempts = new[] { DemoStore.AnaAttempt, DemoStore.MarkoAttempt, DemoStore.DraftAttempt, DemoStore.CompletedAttempt, DemoStore.MissingAttempt },
             courses = new[] { DemoStore.Course, DemoStore.OtherCourse }
-        });
+        }).RequireAccess(Kt1AccessActions.Info);
         g.MapPost("/session/{persona}", async (string persona, HttpContext http) =>
         {
             if (!Personas.TryGetValue(persona, out var id)) return Results.BadRequest(new { code = "INVALID_PERSONA" });
             await http.SignInAsync(Scheme, new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, id.ToString()) }, Scheme)));
             return Results.Ok(new { persona });
-        });
-        g.MapPost("/logout", async (HttpContext http) => { await http.SignOutAsync(Scheme); return Results.NoContent(); });
+        }).RequireAccess(Kt1AccessActions.Session);
+        g.MapPost("/logout", async (HttpContext http) => { await http.SignOutAsync(Scheme); return Results.NoContent(); }).RequireAccess(Kt1AccessActions.Logout);
         g.MapGet("/attempts/{id}", async (string id, HttpContext http, AttemptService service, CancellationToken ct) =>
-            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, null, http.TraceIdentifier, ct)));
+            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, null, http.TraceIdentifier, ct)))
+            .RequireAccess(Kt1AccessActions.Central(AttemptPolicy.Read), "attempt", "id");
         g.MapPut("/attempts/{id}/answer", async (string id, UpdateDraftRequest input, HttpContext http, AttemptService service, CancellationToken ct) =>
-            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, input, http.TraceIdentifier, ct)));
+            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, input, http.TraceIdentifier, ct)))
+            .RequireAccess(Kt1AccessActions.Central(AttemptPolicy.Update), "attempt", "id");
         g.MapGet("/courses/{id}/administration", async (string id, HttpContext http, AdministrationService service, CancellationToken ct) =>
-            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Read, http.TraceIdentifier, ct: ct)));
+            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Read, http.TraceIdentifier, ct: ct)))
+            .RequireAccess(Kt1AccessActions.Central(AdministrationPolicy.Read), "course", "id");
         g.MapPut("/courses/{id}/settings", async (string id, RenameCourseRequest input, HttpContext http, AdministrationService service, CancellationToken ct) =>
-            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Rename, http.TraceIdentifier, rename: input, ct: ct)));
+            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Rename, http.TraceIdentifier, rename: input, ct: ct)))
+            .RequireAccess(Kt1AccessActions.Central(AdministrationPolicy.Rename), "course", "id");
         g.MapPost("/courses/{id}/delegations", async (string id, DelegateRequest input, HttpContext http, AdministrationService service, CancellationToken ct) =>
-            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Delegate, http.TraceIdentifier, delegation: input, ct: ct)));
+            !ValidId(id, out var parsed) ? BadId() : Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Delegate, http.TraceIdentifier, delegation: input, ct: ct)))
+            .RequireAccess(Kt1AccessActions.Central(AdministrationPolicy.Delegate), "course", "id");
         g.MapPost("/courses/{id}/delegations/{grantId}/revoke", async (string id, string grantId, RevokeRequest input, HttpContext http, AdministrationService service, CancellationToken ct) =>
             !ValidId(id, out var parsed) || !ValidId(grantId, out var grant) ? BadId() :
-                Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Revoke, http.TraceIdentifier, grantId: grant, revoke: input, ct: ct)));
+                Public(await service.Execute(Actor(http), parsed, AdministrationPolicy.Revoke, http.TraceIdentifier, grantId: grant, revoke: input, ct: ct)))
+            .RequireAccess(Kt1AccessActions.Central(AdministrationPolicy.Revoke), "course", "id");
     }
     private static Guid? Actor(HttpContext http) => http.User.Identity?.IsAuthenticated == true &&
         Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;

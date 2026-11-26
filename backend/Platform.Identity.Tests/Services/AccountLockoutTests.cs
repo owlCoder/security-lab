@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
@@ -305,9 +306,7 @@ public sealed class AccountLockoutTests
     {
         var (id, email) = await CreateAccountAsync();
 
-        _hasher.AbandonNext(MaxAttempts);
-        for (var i = 0; i < MaxAttempts; i++)
-            await Assert.CatchAsync<OperationCanceledException>(() => VerifyAsync(email, WrongPassword));
+        await AbandonAsync(email, MaxAttempts);
 
         Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(MaxAttempts));
 
@@ -316,6 +315,109 @@ public sealed class AccountLockoutTests
 
         _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes));
         Assert.That((await VerifyAsync(email, Password)).IsValid, Is.True);
+    }
+
+    // An administrator unlock can commit after a login charged its attempt and before it reads the account.
+    // The row lock of the unlock does not hold that login back: its UPDATE filters out the locked row without
+    // waiting, so it charges nothing. The read then shows the account unlocked; using the password result there
+    // would make every login in flight during an unlock a free guess (rule: only a charged attempt counts).
+    [TestCase(Password)]
+    [TestCase(WrongPassword)]
+    public async Task Login_in_flight_during_an_admin_unlock_is_refused_whatever_the_password(string password)
+    {
+        var (id, email) = await CreateAccountAsync();
+        await FailAsync(email, MaxAttempts);
+
+        var result = await VerifyWithUnlockAfterChargeAsync(id, email, password);
+
+        Assert.That(result, Is.EqualTo(CredentialResult.LockedOut(id)), "the outcome must not depend on the password");
+        var account = await FindAsync(id);
+        Assert.That(account.LockoutEnd, Is.Null, "the unlock itself stands");
+        Assert.That(account.FailedLoginCount, Is.EqualTo(0), "the refused attempt is not counted");
+
+        // The next attempt is charged as usual, so it may use the password.
+        Assert.That((await VerifyAsync(email, Password)).IsValid, Is.True);
+    }
+
+    // Same window, but the account is not locked when the attempt starts: interrupted requests left the counter at
+    // the limit, so the attempt sets the lockout itself. It updated the row, yet it was not charged, and the unlock
+    // that commits before the read hides the lockout it set. Its password result must not be used either.
+    [TestCase(Password)]
+    [TestCase(WrongPassword)]
+    public async Task Login_that_sets_the_lockout_itself_is_refused_when_an_admin_unlock_lands_before_the_read(string password)
+    {
+        var (id, email) = await CreateAccountAsync();
+        await AbandonAsync(email, MaxAttempts);
+        var before = await FindAsync(id);
+        Assert.That(before.FailedLoginCount, Is.EqualTo(MaxAttempts), "the counter is at the limit");
+        Assert.That(before.LockoutEnd, Is.Null, "the account is not locked yet");
+
+        // The unlock asserts that it had a running lockout to clear: the one this attempt set.
+        var result = await VerifyWithUnlockAfterChargeAsync(id, email, password);
+
+        Assert.That(result, Is.EqualTo(CredentialResult.LockedOut(id)), "the outcome must not depend on the password");
+        var account = await FindAsync(id);
+        Assert.That(account.LockoutEnd, Is.Null, "the unlock itself stands");
+        Assert.That(account.FailedLoginCount, Is.EqualTo(0), "the refused attempt is not counted");
+
+        // The next attempt is charged as usual, so it may use the password.
+        Assert.That((await VerifyAsync(email, Password)).IsValid, Is.True);
+    }
+
+    [Test]
+    public async Task Attempt_that_only_sets_the_lockout_is_not_reported_as_charged()
+    {
+        var (id, email) = await CreateAccountAsync();
+
+        for (var i = 1; i <= MaxAttempts; i++)
+        {
+            Assert.That(await ReserveAsync(email), Is.True, "an attempt up to the limit is charged");
+            Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(i));
+        }
+
+        Assert.That(await ReserveAsync(email), Is.False, "at the limit the attempt sets the lockout and is not charged");
+        var locked = await FindAsync(id);
+        Assert.That(locked.LockoutEnd, Is.EqualTo(_clock.GetUtcNow().AddMinutes(LockoutMinutes)));
+        Assert.That(locked.FailedLoginCount, Is.EqualTo(0));
+
+        Assert.That(await ReserveAsync(email), Is.False, "a locked account charges nothing");
+        Assert.That(await ReserveAsync(NewEmail()), Is.False, "an unknown e-mail charges nothing");
+
+        _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes));
+        Assert.That(await ReserveAsync(email), Is.True, "after the lockout ends the next attempt is charged");
+        Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(1));
+    }
+
+    private async Task<bool> ReserveAsync(string email)
+    {
+        using var scope = _provider.CreateScope();
+        var now = _clock.GetUtcNow();
+        return await scope.ServiceProvider.GetRequiredService<ICredentialStore>()
+            .ReserveAttemptAsync(email, MaxAttempts, now, now.AddMinutes(LockoutMinutes));
+    }
+
+    private async Task<CredentialResult> VerifyWithUnlockAfterChargeAsync(Guid id, string email, string password)
+    {
+        using var scope = _provider.CreateScope();
+        var store = new UnlockAfterCharge(
+            new EfCredentialStore(scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>()),
+            () => UnlockAsync(id));
+        var verifier = new CredentialVerifier(
+            store, _hasher, scope.ServiceProvider.GetRequiredService<IOptions<IdentityLockoutOptions>>(), _clock);
+
+        return await verifier.VerifyAsync(email, password);
+    }
+
+    // The real administrator unlock (IDN-05), committed in its own scope, connection and transaction.
+    private async Task UnlockAsync(Guid id)
+    {
+        using var scope = _provider.CreateScope();
+        var statusStore = new Platform.Api.Services.Identity.EfAccountStatusStore(
+            scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>());
+        await using var work = await statusStore.BeginAsync();
+        var account = await work.FindForUpdateAsync(id);
+        Assert.That(await work.ClearLockoutAsync(account!, _clock.GetUtcNow()), Is.Not.Null, "the account was locked");
+        await work.CommitAsync();
     }
 
     private HashGate HoldHashChecks(int count)
@@ -347,6 +449,14 @@ public sealed class AccountLockoutTests
             last = await VerifyAsync(email, WrongPassword);
 
         return last;
+    }
+
+    // Requests interrupted during the hash: each attempt stays charged, and none of them reaches the lockout check.
+    private async Task AbandonAsync(string email, int attempts)
+    {
+        _hasher.AbandonNext(attempts);
+        for (var i = 0; i < attempts; i++)
+            await Assert.CatchAsync<OperationCanceledException>(() => VerifyAsync(email, WrongPassword));
     }
 
     private async Task<CredentialResult> VerifyAsync(string email, string password)
@@ -398,6 +508,29 @@ public sealed class AccountLockoutTests
             Open();
             onDispose();
         }
+    }
+
+    // Commits an administrator unlock right after the attempt is charged and before the account is read:
+    // the window a login in flight hits during a real unlock, made deterministic.
+    private sealed class UnlockAfterCharge(ICredentialStore inner, Func<Task> unlock) : ICredentialStore
+    {
+        public Task<CredentialRecord?> FindByEmailAsync(string normalizedEmail, CancellationToken ct = default) =>
+            inner.FindByEmailAsync(normalizedEmail, ct);
+
+        public async Task<bool> ReserveAttemptAsync(
+            string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default)
+        {
+            var charged = await inner.ReserveAttemptAsync(normalizedEmail, maxAttempts, now, lockoutEnd, ct);
+            await unlock();
+            return charged;
+        }
+
+        public Task<DateTimeOffset?> LockIfLimitReachedAsync(
+            string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default) =>
+            inner.LockIfLimitReachedAsync(normalizedEmail, maxAttempts, now, lockoutEnd, ct);
+
+        public Task<bool> TryClearFailuresAsync(Guid accountId, DateTimeOffset now, CancellationToken ct = default) =>
+            inner.TryClearFailuresAsync(accountId, now, ct);
     }
 
     // Counts checks, so the hash work on every path is proven without measuring time.

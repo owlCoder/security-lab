@@ -1,20 +1,10 @@
+using Platform.Access.Domain.ValueObjects;
+
 namespace Platform.Access.AspNet;
 
 internal static class AccessMetadataRules
 {
-    private const int MaxResourceTypeLength = 32;
-
-    public static bool IsValidResourceType(string? value)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length > MaxResourceTypeLength) return false;
-        if (!char.IsAsciiLetterLower(value[0])) return false;
-
-        foreach (var c in value)
-        {
-            if (!char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c)) return false;
-        }
-        return true;
-    }
+    public static bool IsValidResourceType(string? value) => ResourceType.IsValid(value);
 
     public static bool TryNormalizeResourceId(string? raw, out string normalized)
     {

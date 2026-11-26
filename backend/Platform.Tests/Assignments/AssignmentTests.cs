@@ -33,7 +33,8 @@ public sealed class AssignmentTests
                 "revision-1",
                 Start,
                 Due,
-                0),
+                0,
+                scope: AssignmentScope.Course),
             Throws.TypeOf<ArgumentOutOfRangeException>());
     }
 
@@ -47,7 +48,8 @@ public sealed class AssignmentTests
                 "revision-1",
                 Due.AddMinutes(1),
                 Due,
-                2),
+                2,
+                scope: AssignmentScope.Course),
             Throws.TypeOf<ArgumentException>());
     }
 
@@ -71,11 +73,96 @@ public sealed class AssignmentTests
             Start,
             Due,
             2,
-            allowStartAfterDeadline: true);
+            allowStartAfterDeadline: true,
+            scope: AssignmentScope.Course);
 
         var availability = assignment.GetAvailability(Due.AddSeconds(1));
 
         Assert.That(availability, Is.EqualTo(AssignmentAvailability.Available));
+    }
+
+    [Test]
+    public void Create_WithGroupScope_PreservesScopeAndGroupId()
+    {
+        var assignment = new Assignment(
+            Guid.NewGuid(),
+            "course-oib",
+            "revision-1",
+            Start,
+            Due,
+            maxAttempts: 2,
+            scope: AssignmentScope.Group,
+            groupId: "group-a");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(assignment.Scope, Is.EqualTo(AssignmentScope.Group));
+            Assert.That(assignment.GroupId, Is.EqualTo("group-a"));
+        });
+    }
+
+    [Test]
+    public void Create_WithCourseScope_HasNoGroup()
+    {
+        var assignment = CreateAssignment();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(assignment.Scope, Is.EqualTo(AssignmentScope.Course));
+            Assert.That(assignment.GroupId, Is.Null);
+        });
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("   ")]
+    public void Create_WithGroupScopeAndMissingGroupId_Throws(string? groupId)
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new Assignment(
+            Guid.NewGuid(),
+            "course-oib",
+            "revision-1",
+            Start,
+            Due,
+            maxAttempts: 2,
+            scope: AssignmentScope.Group,
+            groupId: groupId));
+
+        Assert.That(exception!.ParamName, Is.EqualTo("groupId"));
+    }
+
+    [TestCase("group-a")]
+    [TestCase("")]
+    [TestCase("   ")]
+    public void Create_WithCourseScopeAndNonNullGroupId_Throws(string groupId)
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new Assignment(
+            Guid.NewGuid(),
+            "course-oib",
+            "revision-1",
+            Start,
+            Due,
+            maxAttempts: 2,
+            scope: AssignmentScope.Course,
+            groupId: groupId));
+
+        Assert.That(exception!.ParamName, Is.EqualTo("groupId"));
+    }
+
+    [TestCase(AssignmentScope.Unspecified)]
+    [TestCase((AssignmentScope)99)]
+    public void Create_WithInvalidScope_Throws(AssignmentScope scope)
+    {
+        var exception = Assert.Throws<ArgumentException>(() => new Assignment(
+            Guid.NewGuid(),
+            "course-oib",
+            "revision-1",
+            Start,
+            Due,
+            maxAttempts: 2,
+            scope: scope));
+
+        Assert.That(exception!.ParamName, Is.EqualTo("scope"));
     }
 
     private static Assignment CreateAssignment() => new(
@@ -84,5 +171,6 @@ public sealed class AssignmentTests
         "revision-1",
         Start,
         Due,
-        maxAttempts: 2);
+        maxAttempts: 2,
+        scope: AssignmentScope.Course);
 }

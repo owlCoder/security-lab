@@ -4,6 +4,7 @@ namespace Platform.LaboratoryPersistence.Infrastructure.Persistence.Entities;
 public sealed class LaboratoryRecord
 {
     public Guid Id { get; set; }
+    public Guid? CourseId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Status { get; set; } = "Draft";
     public Guid CreatedBy { get; set; }

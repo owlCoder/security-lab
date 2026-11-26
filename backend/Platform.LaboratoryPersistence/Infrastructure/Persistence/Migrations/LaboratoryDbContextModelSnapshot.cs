@@ -69,6 +69,9 @@ namespace Platform.LaboratoryPersistence.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CourseId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -103,7 +106,12 @@ namespace Platform.LaboratoryPersistence.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("laboratories", "authoring");
+                    b.HasIndex("CourseId");
+
+                    b.ToTable("laboratories", "authoring", t =>
+                        {
+                            t.HasCheckConstraint("CK_laboratories_CourseId", "\"CourseId\" IS NULL OR \"CourseId\" <> '00000000-0000-0000-0000-000000000000'::uuid");
+                        });
                 });
 
             modelBuilder.Entity("Platform.LaboratoryPersistence.Infrastructure.Persistence.Entities.LabPrerequisiteRecord", b =>
