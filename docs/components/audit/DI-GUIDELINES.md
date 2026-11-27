@@ -34,13 +34,17 @@ Forbidden:
   `NullAccessAuditWriter`. `IAccessDecision` and `IAccessAuditWriter` must then become
   scoped together, otherwise the host will not start under validation. This change belongs
   to the Access integration and needs review by the Access team.
-- `Platform.Api` now also registers the Identity services. Identity has its own `IAuditWriter`
-  (a singleton `LoggerAuditWriter`) and its own `IAccessDecision`, both in the
-  `Platform.Api.Services.Identity` namespace. They are separate from the Access contracts and
-  from the future Audit contract. Which audit contract the Identity code should use is an open
-  question for the Audit and Identity owners.
-- `AddAudit()` registers nothing yet. It is the only entry point `Platform.Api` calls for the
-  Audit module.
+- `Platform.Api` now also registers the Identity services. Identity has its own `IAccessDecision`
+  in the `Platform.Api.Services.Identity` namespace, separate from the Access contracts.
+  *Update (IDN-06, PR #196):* Identity no longer has its own `IAuditWriter`; the singleton
+  `LoggerAuditWriter` is removed. Login, logout and MFA write through the scoped
+  `ITrustedAuditWriter` (via `IdentityAuditProducer`, itself scoped), and status change, unlock,
+  MFA enabled and MFA verified through the singleton `ITransactionalAuditWriter` in the caller's
+  transaction.
+- *Update:* `AddAudit()` registers the correlation context and the AUD-06 read policy;
+  `AddAudit(configuration)` adds the PostgreSQL store and the scoped `AuditWriter` behind
+  `IAuditWriter` and `ITrustedAuditWriter`, plus the singleton `ITransactionalAuditWriter`.
+  It is the only entry point `Platform.Api` calls for the Audit module.
 
 ## Proposed registration order
 

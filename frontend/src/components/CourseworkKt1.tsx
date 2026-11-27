@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { csrfFetch } from '../auth/csrf'
 const id = (group: number, number: number) => `${group}0000000-0000-0000-0000-${String(number).padStart(12, '0')}`
 type Attempt = { id: string; answer: string; version: number }
 type Course = { courseId: string; displayName: string; version: number; capabilities: string[] }
@@ -24,7 +25,7 @@ export default function CourseworkKt1() {
   async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T | null> {
     setBusy(true)
     try {
-      const response = await fetch(`/api/kt1${path}`, {
+      const response = await csrfFetch(`/api/kt1${path}`, {
         method, credentials: 'same-origin', cache: 'no-store',
         headers: method === 'GET' ? {} : { 'X-Kt1-Demo': '1', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
         body: body === undefined ? undefined : JSON.stringify(body),

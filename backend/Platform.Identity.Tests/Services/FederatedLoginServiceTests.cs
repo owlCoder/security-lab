@@ -51,13 +51,13 @@ public class FederatedLoginServiceTests
         GivenSession(new IssuedSession(Token, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(8)));
 
         _login = new FederatedLoginService(
-            _linker.Object,
-            _sessions.Object,
-            _sessionManager.Object,
-            new IdentityAuditProducer(_audit.Object, NullLogger<IdentityAuditProducer>.Instance),
-            new Mock<IMfaPolicy>().Object);
-    }
-
+        _linker.Object,
+        _sessions.Object,
+        _sessionManager.Object,
+        new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance),
+        new Mock<IMfaPolicy>().Object);
+        }
+        
     // ---------- Success ----------
 
     [TestCase(FederatedLoginOutcome.Linked)]

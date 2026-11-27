@@ -148,6 +148,52 @@ public class SessionManagerTests
     }
 
     [Test]
+    [Category("IDN-06")]
+    public async Task ListForUser_LeavesOutMfaPendingSessions()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        // Signed in with both factors: the user has access from this session.
+        var active = new Session(
+            Guid.NewGuid(),
+            userId,
+            TokenHash(),
+            Guid.NewGuid(),
+            Platform.Identity.Enums.AuthLevel.Active,
+            now.AddHours(-1),
+            now.AddHours(7));
+
+        // Password accepted, TOTP code not yet: no access from this session.
+        var mfaPending = new Session(
+            Guid.NewGuid(),
+            userId,
+            TokenHash(),
+            Guid.NewGuid(),
+            Platform.Identity.Enums.AuthLevel.MfaPending,
+            now.AddMinutes(-5),
+            now.AddHours(8));
+
+        var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using var db = new PlatformIdentityDbContext(options);
+
+        db.Sessions.AddRange(active, mfaPending);
+        await db.SaveChangesAsync();
+
+        var manager = new SessionManager(db);
+
+        // Act
+        var result = await manager.ListForUser(userId);
+
+        // Assert
+        Assert.That(result.Select(session => session.Handle), Is.EqualTo(new[] { active.SessionHandle }));
+    }
+
+    [Test]
     public async Task ListForUser_ReturnsEmptyListWhenUserHasNoSessions()
     {
         // Arrange

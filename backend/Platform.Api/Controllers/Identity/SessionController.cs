@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using System.Text.RegularExpressions;
 using Platform.Access.AspNet;
+using Platform.Audit.Contracts;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Services.Identity;
@@ -11,10 +13,16 @@ namespace Platform.Api.Controllers.Identity;
 // ever list or revoke their own sessions; the handlers repeat the 401 check as a second line of defence.
 [ApiController]
 [Route("api/auth/sessions")]
-public class SessionController(IIdentityContext identity, ISessionManager sessionManager) : ControllerBase
+public partial class SessionController(
+    IIdentityContext identity,
+    ISessionManager sessionManager,
+    IdentityAuditProducer audit,
+    ICorrelationContext correlation) : ControllerBase
 {
     private readonly IIdentityContext _identity = identity;
     private readonly ISessionManager _sessionManager = sessionManager;
+    private readonly IdentityAuditProducer _audit = audit;
+    private readonly ICorrelationContext _correlation = correlation;
 
     [RequireAccess(IdentityAccessActions.SessionList)]
     [HttpGet]
@@ -45,9 +53,25 @@ public class SessionController(IIdentityContext identity, ISessionManager sessio
 
         Response.Headers.CacheControl = "no-store";
 
+        var correlationId = ResolveCorrelationId();
         if (!revoked)
+        {
+            await _audit.SessionRevokeFailedAsync(
+                caller.UserId.Value, "not_found", correlationId, CancellationToken.None);
             return NotFound(new { code = "session_not_found" });
+        }
+
+        await _audit.SessionRevokedAsync(
+            caller.UserId.Value, handle, "user_request", correlationId, CancellationToken.None);
 
         return NoContent();
     }
+
+    private string ResolveCorrelationId() =>
+        _correlation.CorrelationId is { } id && CorrelationIdPattern().IsMatch(id)
+            ? id
+            : Guid.NewGuid().ToString("N");
+
+    [GeneratedRegex("^[A-Za-z0-9._-]{1,64}$", RegexOptions.CultureInvariant)]
+    private static partial Regex CorrelationIdPattern();
 }

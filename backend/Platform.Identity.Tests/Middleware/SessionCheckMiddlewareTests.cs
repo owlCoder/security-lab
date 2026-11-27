@@ -2,10 +2,12 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Platform.Access.AspNet;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
+using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Services.Identity;
 using Moq;
 
@@ -208,6 +210,19 @@ public class SessionCheckMiddlewareTests
     public async Task OtherRouteInDevelopment_NoCookie_Returns401(string path)
     {
         var context = ProtectedRequest(path, Environments.Development);
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(_nextCalled, Is.False);
+        Assert.That(context.Response.StatusCode, Is.EqualTo(401));
+    }
+
+    [Test]
+    public async Task LabLocalizationRouteInDevelopment_NoCookie_Returns401()
+    {
+        var context = ProtectedRequest($"/api/laboratories/{Guid.NewGuid()}/content", Environments.Development);
+        context.SetEndpoint(new Endpoint(null,
+            new EndpointMetadataCollection(new RequireAccessAttribute(LabLocalizationActions.Entry)), "lab-content"));
 
         await _middleware.Invoke(context, _sessions.Object);
 

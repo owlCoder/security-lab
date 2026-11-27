@@ -1,12 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NUnit.Framework;
 using Platform.Access.AspNet;
@@ -27,6 +30,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Persistence;
 using Platform.Identity.Services;
+using Platform.Identity.Testing;
 
 namespace Platform.Coursework.Tests;
 
@@ -115,7 +119,7 @@ public sealed partial class AdministrationHttpTests
 
     private HttpClient Client(string? cookie = null)
     {
-        var client = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false, AllowAutoRedirect = false });
+        var client = factory.CreateCsrfClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false, AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Add("X-Coursework-Request", "1");
         if (cookie is not null) client.DefaultRequestHeaders.Add("Cookie", cookie);
         clients.Add(client);
@@ -312,6 +316,44 @@ public sealed partial class AdministrationHttpTests
         Assert.That(await Sql("SELECT version FROM coursework_admin.course_settings WHERE course_id = @id", ("id", DemoStore.Course)), Is.EqualTo(1));
     }
 
+    // US-15 / SEC-03 with ADM-08: the CSRF check runs before the ADM-08 16 KiB body limit, so without X-CSRF-TOKEN
+    // it must refuse the request without reading the body. A valid token placed in the form body must not count.
+    [Test]
+    public async Task WriteWithValidSessionButWithoutCsrfHeaderIsRefusedWithoutReadingTheBody()
+    {
+        var (_, cookie) = await Login(DemoStore.Admin);
+        var sessionToken = cookie[(SessionCookie.Name.Length + 1)..];
+        using var raw = factory.CreateClient(new() { BaseAddress = new Uri("https://localhost"), HandleCookies = false, AllowAutoRedirect = false });
+        var pair = await CsrfPair.FetchAsync(raw, sessionToken);
+        var fieldName = factory.Services.GetRequiredService<IOptions<AntiforgeryOptions>>().Value.FormFieldName;
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, Path() + "/settings")
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                [fieldName] = pair.Token,
+                ["administrativeLabel"] = "changed by a forged form",
+                ["expectedVersion"] = "1"
+            })
+        };
+        request.Headers.Add("X-Coursework-Request", "1");
+        request.Headers.Add("Cookie", $"{cookie}; {pair.Cookie}");
+
+        factory.BodyRead = false;
+        factory.ObserveBody = true;
+        using var response = await raw.SendAsync(request);
+        factory.ObserveBody = false;
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(response.Headers.CacheControl?.NoStore, Is.True);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.That(body.RootElement.GetProperty("code").GetString(), Is.EqualTo(CsrfToken.InvalidCode));
+        Assert.That(factory.BodyRead, Is.False, "The CSRF check read the request body.");
+        Assert.That(await Sql("SELECT version FROM coursework_admin.course_settings WHERE course_id = @id", ("id", DemoStore.Course)), Is.EqualTo(1));
+        Assert.That(await Sql("SELECT administrative_label FROM coursework_admin.course_settings WHERE course_id = @id", ("id", DemoStore.Course)),
+            Is.EqualTo("Administrative label A"));
+    }
+
     [Test]
     public async Task OwnAuditFailureRollsBackAnHttpMutation()
     {
@@ -393,6 +435,9 @@ public sealed partial class AdministrationHttpTests
         public Func<AccessRequest, Task>? AfterAllow { get; set; }
         public AttemptProviderDouble Attempts { get; } = new();
         public MembershipProviderDouble Members { get; } = new();
+        /// <summary>While set, every request body is wrapped first in the pipeline, and <see cref="BodyRead"/> records a read.</summary>
+        public volatile bool ObserveBody;
+        public volatile bool BodyRead;
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment(environment);
@@ -420,7 +465,41 @@ public sealed partial class AdministrationHttpTests
                 services.AddSingleton<IAccessDecision>(sp => new ObservedDecision(
                     (IAccessDecision)(descriptor.ImplementationInstance ?? descriptor.ImplementationFactory?.Invoke(sp) ??
                         ActivatorUtilities.CreateInstance(sp, descriptor.ImplementationType!)), this));
+                services.AddSingleton<IStartupFilter>(new BodyProbeStartupFilter(this));
             });
+        }
+        // Runs before every middleware of Program.cs, so it sees any read of the body, including antiforgery's form read.
+        private sealed class BodyProbeStartupFilter(AdministrationFactory owner) : IStartupFilter
+        {
+            public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+            {
+                app.Use(async (http, inner) =>
+                {
+                    if (owner.ObserveBody) http.Request.Body = new ReadProbeStream(http.Request.Body, () => owner.BodyRead = true);
+                    await inner(http);
+                });
+                next(app);
+            };
+        }
+        private sealed class ReadProbeStream(Stream inner, Action onRead) : Stream
+        {
+            public override bool CanRead => inner.CanRead;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override int Read(byte[] buffer, int offset, int count) { onRead(); return inner.Read(buffer, offset, count); }
+            public override int Read(Span<byte> buffer) { onRead(); return inner.Read(buffer); }
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            { onRead(); return inner.ReadAsync(buffer, offset, count, cancellationToken); }
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            { onRead(); return inner.ReadAsync(buffer, cancellationToken); }
+            public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken)
+            { onRead(); return inner.CopyToAsync(destination, bufferSize, cancellationToken); }
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
         private sealed class ObservedDecision(IAccessDecision inner, AdministrationFactory owner) : IAccessDecision
         {

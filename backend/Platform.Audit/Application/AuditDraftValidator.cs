@@ -48,6 +48,11 @@ internal sealed partial class AuditDraftValidator
                 draft.Details is null || !draft.Details.ContainsKey(key)))
             return AuditRejectionCode.InvalidDetailValue;
 
+        if (schema.Details.Any(entry =>
+                entry.Value.RequiredForOutcomes?.Contains(draft.Outcome) == true
+                && (draft.Details is null || !draft.Details.ContainsKey(entry.Key))))
+            return AuditRejectionCode.InvalidDetailValue;
+
         return CheckDetails(schema, draft.Outcome, draft.Details);
     }
 
@@ -114,6 +119,11 @@ internal sealed partial class AuditDraftValidator
                 return AuditRejectionCode.UnknownDetailKey;
 
             if (!AuditDetailFormats.IsValid(field.Format, value))
+                return AuditRejectionCode.InvalidDetailValue;
+
+            if (field.AllowedValuesByOutcome is not null
+                && (!field.AllowedValuesByOutcome.TryGetValue(outcome, out var allowedValues)
+                    || !allowedValues.Contains(value)))
                 return AuditRejectionCode.InvalidDetailValue;
         }
 

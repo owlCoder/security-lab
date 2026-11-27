@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { csrfFetch } from '../../auth/csrf'
 
 interface TaskData {
   id: string
@@ -63,7 +64,7 @@ export function EditTaskForm({ taskId }: EditTaskFormProps) {
 
     setSaving(true)
     try {
-      const response = await fetch(`/api/authoring/tasks/${encodeURIComponent(taskId)}`, {
+      const response = await csrfFetch(`/api/authoring/tasks/${encodeURIComponent(taskId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
