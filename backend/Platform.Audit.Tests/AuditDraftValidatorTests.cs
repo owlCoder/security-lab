@@ -395,6 +395,8 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
     }
 
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted, false)]
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted, true)]
     [TestCase(AuditEventTypes.AuthMfaEnabled, false)]
     [TestCase(AuditEventTypes.AuthMfaEnabled, true)]
     [TestCase(AuditEventTypes.AuthMfaVerified, false)]
@@ -427,6 +429,7 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
     }
 
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted)]
     [TestCase(AuditEventTypes.AuthMfaEnabled)]
     [TestCase(AuditEventTypes.AuthMfaVerified)]
     public void Validate_WhenMfaSuccessHasNoReasonCode_AcceptsIt(string eventType)
@@ -449,6 +452,7 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.UnknownDetailKey));
     }
 
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted, AuditOutcome.Failure)]
     [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure)]
     [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Failure)]
     [TestCase(AuditEventTypes.AuthMfaVerified, AuditOutcome.Denied)]
@@ -475,6 +479,8 @@ public sealed class AuditDraftValidatorTests
     [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "already_enabled")]
     [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "invalid_enrollment")]
     [TestCase(AuditEventTypes.AuthMfaEnabled, AuditOutcome.Failure, "session_inactive")]
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted, AuditOutcome.Failure, "invalid_password")]
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted, AuditOutcome.Failure, "account_locked")]
     public void Validate_WhenMfaReasonCodeIsInOutcomeList_AcceptsIt(
         string eventType,
         AuditOutcome outcome,
@@ -556,8 +562,9 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.None));
     }
 
+    // IDN-06 (#252): enrollment refusals have their own list; a reason of the confirm step is not on it.
     [Test]
-    public void Validate_WhenMfaEnrollmentStartedHasFailureAndReasonCode_RejectsOutcome()
+    public void Validate_WhenMfaEnrollmentStartedFailureUsesConfirmReason_RejectsValue()
     {
         var draft = new AuditEventDraft(
             AuditEventTypes.AuthMfaEnrollmentStarted,
@@ -565,7 +572,20 @@ public sealed class AuditDraftValidatorTests
             Resource: TargetAccount,
             Details: Details(("reasonCode", "invalid_code")));
 
-        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.OutcomeNotAllowed));
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
+    }
+
+    // The session proves who asked, so an enrollment refusal is never anonymous.
+    [Test]
+    public void Validate_WhenMfaEnrollmentStartedFailureHasAnonymousActor_RejectsIt()
+    {
+        var draft = new AuditEventDraft(
+            AuditEventTypes.AuthMfaEnrollmentStarted,
+            AuditOutcome.Failure,
+            Resource: TargetAccount,
+            Details: Details(("reasonCode", "invalid_password")));
+
+        Assert.That(_validator.Validate(draft, AnonymousContext), Is.EqualTo(AuditRejectionCode.InvalidContext));
     }
 
     [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted)]
@@ -612,6 +632,7 @@ public sealed class AuditDraftValidatorTests
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(expected));
     }
 
+    [TestCase(AuditEventTypes.AuthMfaEnrollmentStarted)]
     [TestCase(AuditEventTypes.AuthMfaEnabled)]
     [TestCase(AuditEventTypes.AuthMfaVerified)]
     [TestCase(AuditEventTypes.AuthSessionRevoked)]
