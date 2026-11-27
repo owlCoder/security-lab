@@ -38,6 +38,7 @@ export default function LabCatalog({ load = getCatalog }: Props) {
   const labs = state.status === 'ready' ? state.labs : []
   const tags = useMemo(() => allTags(labs), [labs])
   const visible = useMemo(() => filterLabs(labs, filters), [labs, filters])
+  const accessUnavailable = labs.some(lab => lab.access.unavailable)
 
   const update = (patch: Partial<CatalogFilters>) => setFilters(prev => ({ ...prev, ...patch }))
 
@@ -49,6 +50,12 @@ export default function LabCatalog({ load = getCatalog }: Props) {
       {state.status === 'error' && <p className="catalog-error" role="alert">{state.message}</p>}
 
       {state.status === 'ready' && <>
+        {accessUnavailable && (
+          <p className="catalog-warning" role="status">
+            Stanje pristupa za neke laboratorije trenutno nije moguće učitati.
+          </p>
+        )}
+
         <div className="catalog-filters">
           <label htmlFor="catalog-search">Pretraga</label>
           <input

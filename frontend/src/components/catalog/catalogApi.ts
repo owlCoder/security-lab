@@ -33,8 +33,8 @@ function messageFor(status: number): string {
   return 'Katalog trenutno nije moguće učitati.'
 }
 
-function lockedAccess(): LabAccess {
-  return { isUnlocked: false, missingPrerequisites: [] }
+function unavailableAccess(): LabAccess {
+  return { isUnlocked: false, missingPrerequisites: [], unavailable: true }
 }
 
 function parseEnum<T extends string>(value: unknown, allowed: readonly T[]): T | null {
@@ -52,12 +52,13 @@ function parseMissing(raw: unknown): MissingPrerequisite | null {
 }
 
 function parseAccess(raw: unknown): LabAccess {
-  if (!raw || typeof raw !== 'object') return lockedAccess()
+  if (!raw || typeof raw !== 'object') return unavailableAccess()
   const a = raw as Record<string, unknown>
+  if (typeof a.isUnlocked !== 'boolean') return unavailableAccess()
   const missing = Array.isArray(a.missingPrerequisites)
     ? a.missingPrerequisites.map(parseMissing).filter((m): m is MissingPrerequisite => m !== null)
     : []
-  return { isUnlocked: a.isUnlocked === true, missingPrerequisites: missing }
+  return { isUnlocked: a.isUnlocked, missingPrerequisites: missing, unavailable: false }
 }
 
 function parseLab(raw: unknown): CatalogLab | null {
@@ -92,7 +93,7 @@ export function parseCatalog(data: unknown): CatalogLab[] | null {
 
 async function loadAccess(labId: string): Promise<LabAccess> {
   const result = await apiRequest<unknown>('GET', accessPath(labId))
-  return result.ok ? parseAccess(result.data) : lockedAccess()
+  return result.ok ? parseAccess(result.data) : unavailableAccess()
 }
 
 export async function fetchCatalogFromServer(): Promise<CatalogOutcome> {

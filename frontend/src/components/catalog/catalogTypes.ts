@@ -38,6 +38,7 @@ export interface MissingPrerequisite {
 export interface LabAccess {
   isUnlocked: boolean
   missingPrerequisites: MissingPrerequisite[]
+  unavailable: boolean
 }
 
 export interface CatalogLab {

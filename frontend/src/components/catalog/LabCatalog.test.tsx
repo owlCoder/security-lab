@@ -24,7 +24,7 @@ const OPEN: CatalogLab = {
   type: 'AccessControl',
   difficulty: 'Easy',
   tags: ['rbac', 'idor'],
-  access: { isUnlocked: true, missingPrerequisites: [] },
+  access: { isUnlocked: true, missingPrerequisites: [], unavailable: false },
 }
 
 const LOCKED: CatalogLab = {
@@ -34,7 +34,17 @@ const LOCKED: CatalogLab = {
   type: 'IncidentResponse',
   difficulty: 'Hard',
   tags: ['incident'],
-  access: { isUnlocked: false, missingPrerequisites: [{ id: 'lab-open', title: 'Kontrola pristupa' }] },
+  access: { isUnlocked: false, missingPrerequisites: [{ id: 'lab-open', title: 'Kontrola pristupa' }], unavailable: false },
+}
+
+const UNKNOWN: CatalogLab = {
+  id: 'lab-unknown',
+  title: 'Analiza dnevnika',
+  objective: 'Izdvojiti povezane događaje.',
+  type: 'LogAnalysis',
+  difficulty: 'Medium',
+  tags: [],
+  access: { isUnlocked: false, missingPrerequisites: [], unavailable: true },
 }
 
 const loadBoth = () => Promise.resolve({ ok: true as const, labs: [OPEN, LOCKED] })
@@ -66,6 +76,14 @@ describe('LabCard', () => {
     expect(screen.getByText('Za otključavanje je potrebno završiti:')).toBeTruthy()
     expect(screen.getByText('Kontrola pristupa', { selector: 'li' })).toBeTruthy()
   })
+
+  it('nepoznato stanje pristupa se ne prikazuje kao zaključano ni kao otključano', () => {
+    render(<LabCard lab={UNKNOWN} />)
+    expect(screen.getByText('Stanje nepoznato')).toBeTruthy()
+    expect(screen.getByText(/Stanje pristupa trenutno nije moguće učitati/)).toBeTruthy()
+    expect(screen.queryByText('Zaključano')).toBeNull()
+    expect(screen.queryByText('Otključano')).toBeNull()
+  })
 })
 
 describe('LabCatalog', () => {
@@ -85,10 +103,16 @@ describe('LabCatalog', () => {
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(screen.queryByRole('heading', { level: 3 })).toBeNull()
   })
+
+  it('kada stanje pristupa nije učitano, katalog prikazuje upozorenje', async () => {
+    render(<LabCatalog load={() => Promise.resolve({ ok: true as const, labs: [OPEN, UNKNOWN] })} />)
+    expect(await screen.findByRole('status')).toBeTruthy()
+    expect(screen.getByText('Stanje pristupa za neke laboratorije trenutno nije moguće učitati.')).toBeTruthy()
+  })
 })
 
 describe('parseCatalog', () => {
-  it('laboratorija bez odluke servera se tretira kao zaključana, a neispravne stavke se izostavljaju', () => {
+  it('laboratorija bez odluke servera ima nepoznato stanje i nije otključana, a neispravne stavke se izostavljaju', () => {
     const labs = parseCatalog([
       { id: 'a', title: 'A', objective: 'Cilj', type: 0, difficulty: 2, tags: ['x'] },
       { id: 'b', title: 'B', objective: 'Cilj', type: 'NepostojeciTip', difficulty: 'Easy', tags: [] },
@@ -97,6 +121,7 @@ describe('parseCatalog', () => {
     expect(labs![0].type).toBe('AccessControl')
     expect(labs![0].difficulty).toBe('Hard')
     expect(labs![0].access.isUnlocked).toBe(false)
+    expect(labs![0].access.unavailable).toBe(true)
   })
 
   it('odgovor koji nije lista se odbija', () => {
@@ -153,7 +178,7 @@ describe('izbor režima', () => {
 })
 
 describe('fetchCatalogFromServer', () => {
-  it('za svaku laboratoriju pita server za stanje, a neuspešan odgovor ostavlja laboratoriju zaključanom', async () => {
+  it('otključana, zaključana i neuspešno učitana laboratorija dobijaju odgovarajuće stanje', async () => {
     setFetcher(async input => {
       if (input === '/api/catalog') return json(200, SERVER_LIST)
       if (input === '/api/laboratories/a/access') return json(200, { isUnlocked: true, missingPrerequisites: [] })
@@ -166,9 +191,35 @@ describe('fetchCatalogFromServer', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     const [a, b, c] = result.labs
-    expect(a.access.isUnlocked).toBe(true)
-    expect(b.access).toEqual({ isUnlocked: false, missingPrerequisites: [{ id: 'a', title: 'Prva' }] })
-    expect(c.access.isUnlocked).toBe(false)
+    expect(a.access).toEqual({ isUnlocked: true, missingPrerequisites: [], unavailable: false })
+    expect(b.access).toEqual({ isUnlocked: false, missingPrerequisites: [{ id: 'a', title: 'Prva' }], unavailable: false })
+    expect(c.access).toEqual({ isUnlocked: false, missingPrerequisites: [], unavailable: true })
+  })
+
+  it('neautorizovan poziv za stanje daje nepoznato stanje, ne otključano', async () => {
+    setFetcher(async input => {
+      if (input === '/api/catalog') return json(200, SERVER_LIST)
+      return json(401, {})
+    })
+
+    const result = await fetchCatalogFromServer()
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.labs.every(lab => lab.access.unavailable && !lab.access.isUnlocked)).toBe(true)
+  })
+
+  it('neispravan odgovor za stanje daje nepoznato stanje', async () => {
+    setFetcher(async input => {
+      if (input === '/api/catalog') return json(200, SERVER_LIST)
+      return json(200, { nesto: 'drugo' })
+    })
+
+    const result = await fetchCatalogFromServer()
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.labs[0].access).toEqual({ isUnlocked: false, missingPrerequisites: [], unavailable: true })
   })
 
   it('neprijavljen korisnik dobija poruku umesto kataloga', async () => {

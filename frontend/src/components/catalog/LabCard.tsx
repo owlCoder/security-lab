@@ -1,5 +1,13 @@
 import { DIFFICULTY_LABELS, TYPE_LABELS, type CatalogLab, type MissingPrerequisite } from './catalogTypes'
 
+type AccessStatus = 'open' | 'locked' | 'unknown'
+
+const BADGE_LABELS: Record<AccessStatus, string> = {
+  open: 'Otključano',
+  locked: 'Zaključano',
+  unknown: 'Stanje nepoznato',
+}
+
 function UnlockCondition({ missing }: { missing: MissingPrerequisite[] }) {
   if (missing.length === 0) {
     return <p className="catalog-lock" role="note">Laboratorija trenutno nije dostupna.</p>
@@ -15,15 +23,13 @@ function UnlockCondition({ missing }: { missing: MissingPrerequisite[] }) {
 }
 
 export default function LabCard({ lab }: { lab: CatalogLab }) {
-  const locked = !lab.access.isUnlocked
+  const status: AccessStatus = lab.access.unavailable ? 'unknown' : lab.access.isUnlocked ? 'open' : 'locked'
 
   return (
-    <article className={locked ? 'catalog-card locked' : 'catalog-card'}>
+    <article className={status === 'open' ? 'catalog-card' : `catalog-card ${status}`}>
       <header className="catalog-card-head">
         <h3>{lab.title}</h3>
-        <span className={locked ? 'catalog-badge locked' : 'catalog-badge open'}>
-          {locked ? 'Zaključano' : 'Otključano'}
-        </span>
+        <span className={`catalog-badge ${status}`}>{BADGE_LABELS[status]}</span>
       </header>
 
       <p className="catalog-objective">{lab.objective}</p>
@@ -39,7 +45,12 @@ export default function LabCard({ lab }: { lab: CatalogLab }) {
         </ul>
       )}
 
-      {locked && <UnlockCondition missing={lab.access.missingPrerequisites} />}
+      {status === 'locked' && <UnlockCondition missing={lab.access.missingPrerequisites} />}
+      {status === 'unknown' && (
+        <p className="catalog-lock" role="note">
+          Stanje pristupa trenutno nije moguće učitati. Laboratorija nije dostupna dok server ne potvrdi pristup.
+        </p>
+      )}
     </article>
   )
 }
