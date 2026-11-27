@@ -18,12 +18,12 @@ The ACC-01 backend exposes four ASP.NET Core Minimal API endpoints:
 
 The component is part of the Security Lab modular monolith and follows the `Core / Infrastructure / Api` separation:
 
-- **Core:** `Course`, `CourseStatus`, DTOs, `ICourseService`, `ICourseAuthorization` and shared contracts.
+- **Core:** `Course`, `CourseStatus`, DTOs, `ICourseService`, `ICourseAuthorization`, the published `ICourseEnrollmentPolicy` and shared contracts.
 - **Infrastructure:** `CourseService`, authorization implementations, `CoursesDbContext`, EF Core mappings and PostgreSQL persistence.
 - **Api:** endpoint routing, Development identity adapter, dependency injection and `Result`-to-HTTP mapping.
 - **Platform.Api:** shared host that registers the Team 21 module.
 
-**Scope:** This component handles course creation, reading and archiving. Login/session management, enrollment, materials, group visibility, frontend features and persistent audit storage belong to other components or integration work.
+**Scope:** This component handles course creation, reading and archiving, and publishes `ICourseEnrollmentPolicy` so enrollment can ask whether a course still accepts new members. Login/session management, enrollment, materials, group visibility, frontend features and persistent audit storage belong to other components or integration work.
 
 **Current limitations:** Development uses `X-Test-User` and a fake course authorization policy. Outside Development, the currently registered identity adapter is anonymous and course authorization denies access. These are not production-ready identity/permission integrations.
 
@@ -213,6 +213,26 @@ flowchart TB
 
 The identical `404` response for missing and forbidden individual resources reduces resource-existence disclosure (BOLA/IDOR risk). The list operation filters visibility per course. Production identity and permission integration are still pending; Development test headers and test permissions must not be treated as production controls.
 
+### Threats, controls, tests and evidence
+
+Spec 7.1 asks every module to keep a threat–control–test–evidence table. Tests are in `backend/Team21.Acc.Tests`. **Http** means `Api/CourseEndpointsHttpTests.cs` (real HTTP requests through the ACC-05 access middleware); **Service** means `Courses/CourseServiceTests.cs` or `Courses/CourseServiceAuthorizationTests.cs`.
+
+| #   | Threat | Control | Test | Evidence |
+| --- | ------ | ------- | ---- | -------- |
+| T1 | Anonymous caller creates, archives or lists courses | Route requires an ACC-05 action; service returns `401` when `ICurrentActor` is anonymous | Http `Create_Anonymous_Returns401`, `Archive_Anonymous_Returns401`, `List_Anonymous_Returns401WithoutData` | `dotnet test`, 2026-11-27 |
+| T2 | Student or other non-owner creates a course | `ICourseAuthorization.CanCreateAsync` checked in the service; the denial is audited | Http `Create_Student_Returns403AndIsAudited`; Service create-without-permission tests | `dotnet test`, 2026-11-27 |
+| T3 | IDOR: archiving a course by guessing its id | `CanArchiveAsync` per course; forbidden and missing answer the same `404` and message; denial audited | Http `Archive_Student_Returns404SameAsMissingCourse`; Service `Archive_UserWithoutPermission_ReturnsNotFound` | `dotnet test`, 2026-11-27 |
+| T4 | Course existence disclosed through reads | `CanViewAsync` per course; a forbidden read is `404`, the list leaves hidden courses out | Service `GetCourse_UserWithoutPermission_ReturnsNotFound`, `GetCourses_OnlyReturnsAuthorizedCourses` | `dotnet test`, 2026-11-27 |
+| T5 | Blocked account keeps acting | ACC-05 `ActiveAccountPolicy` refuses non-active subjects before the endpoint runs | Http `Create_BlockedAccount_IsRefusedBeforeTheService` | `dotnet test`, 2026-11-27 |
+| T6 | New route or method shipped without a policy | ACC-05 middleware fails closed for endpoints without access metadata | Http `UndeclaredMethod_IsDeniedByDefault` | `dotnet test`, 2026-11-27 |
+| T7 | Enrolling into an archived course | `ICourseEnrollmentPolicy` reads the persisted status on every call | `CourseEnrollmentPolicyTests` (7 tests); Http `Archive_ThenEnrollmentPolicy_RefusesNewEnrollment` | `dotnet test`, 2026-11-27 |
+| T8 | History lost by archiving or deleting | Archive is a status change, no `Remove()`; soft delete filter; DB check constraint on archive metadata | `Check_ArchivedCourse_KeepsHistory`; Http `Archive_Teacher_Returns204AndCourseStaysReadable`; `CoursePersistenceTests` | `dotnet test`, 2026-11-27 |
+| T9 | Duplicate course code through concurrent creates | Service pre-check plus filtered unique index `IX_Courses_Code`, mapped to `409` | Http `Create_DuplicateCode_Returns409`; PostgreSQL race test (skipped without a test database) | `dotnet test`, 2026-11-27 |
+| T10 | Lost update when two archives race | `Status` is a concurrency token; a conflict is mapped to `409` | `CoursePersistenceTests` (second concurrent save throws `DbUpdateConcurrencyException`) | `dotnet test`, 2026-11-27 |
+| T11 | Malicious input (script, oversized or blank fields) | Trim and length checks in service and entity, DB check constraints, JSON-only responses | Http `Create_MissingName_Returns422`, `Create_ScriptInName_IsStoredAsPlainText`; `CourseTests` | `dotnet test`, 2026-11-27 |
+| T12 | Malformed route id reaches the service | `{id:guid}` route constraint | Http `Archive_MalformedId_DoesNotReachTheService` | `dotnet test`, 2026-11-27 |
+| T13 | Development test identity used in production | `HeaderCurrentActor` and `DevelopmentCourseAuthorization` only in Development; elsewhere anonymous actor and deny-all | `HeaderCurrentActorTests` | `dotnet test`, 2026-11-27 |
+
 ### Input validation and data integrity
 
 - `Code` and `Name` are mandatory; values are trimmed and the code is uppercased.
@@ -220,7 +240,7 @@ The identical `404` response for missing and forbidden individual resources redu
 - Duplicate course codes are rejected (`409 Conflict`); the PostgreSQL unique index also protects concurrent inserts.
 - The database applies constraints, a unique index on non-soft-deleted course codes, and an EF Core soft-delete query filter.
 - API responses use `CourseDto`, not the complete EF entity; archive actor and other internal fields are not exposed by this DTO.
-- `CourseStatus.Archived` is a lifecycle state, not deletion. `Course.CanEnroll` becomes false for archived or soft-deleted courses; enrollment enforcement is the responsibility of the enrollment integration.
+- `CourseStatus.Archived` is a lifecycle state, not deletion. `ICourseEnrollmentPolicy.CheckAsync(courseId)` answers `Open`, `Archived` or `NotFound` from the persisted row on every call, so an archive is seen by the next enrollment attempt. Enrollment (ACC-02) calls it before adding a member instead of reading the `courses` schema; existing memberships and results are untouched.
 - The service uses asynchronous EF Core operations and receives `CancellationToken` values from HTTP endpoints.
 
 ## 5. Evidence of work
@@ -235,10 +255,14 @@ The identical `404` response for missing and forbidden individual resources redu
 - `backend/Team21.Acc.Api/Courses/CoursesModule.cs`
 - `backend/Team21.Acc.Core/Courses/ICourseService.cs`
 - `backend/Team21.Acc.Core/Courses/ICourseAuthorization.cs`
+- `backend/Team21.Acc.Core/Courses/ICourseEnrollmentPolicy.cs`
+- `backend/Team21.Acc.Infrastructure/Courses/Services/CourseEnrollmentPolicy.cs`
 - `backend/Team21.Acc.Infrastructure/Courses/Services/CourseService.cs`
 - `backend/Team21.Acc.Infrastructure/Courses/Authorization/DevelopmentCourseAuthorization.cs`
 - `backend/Team21.Acc.Infrastructure/Courses/Authorization/DenyAllCourseAuthorization.cs`
 - `backend/Team21.Acc.Tests/Courses/CourseServiceTests.cs`
+- `backend/Team21.Acc.Tests/Courses/CourseEnrollmentPolicyTests.cs`
+- `backend/Team21.Acc.Tests/Api/CourseEndpointsHttpTests.cs`
 - `docs/team-21/README.md`
 
 **Local verification (2026-11-06):**
@@ -252,12 +276,19 @@ The identical `404` response for missing and forbidden individual resources redu
 - HTTP `GET /api/courses/{id}` for a nonexistent GUID — `404 Not Found`.
 - Service tests also cover denied reads, visibility filtering, sorting and archived history. The denied-read `404` has not been separately demonstrated through an HTTP request.
 
+**Local verification (2026-11-27):**
+
+- `dotnet build backend/Team21.Acc.slnx` — succeeded, 0 errors.
+- `dotnet test backend/Team21.Acc.Tests` — **117 passed, 1 skipped, 0 failed**. The skipped test still requires a dedicated PostgreSQL test database.
+- The denied-archive `404`, the `403` on create, default deny and the enrollment refusal after archiving are now demonstrated through HTTP requests in `CourseEndpointsHttpTests`.
+
 **Development test identity:** `00000000-0000-0000-0000-000000000001` via `X-Test-User` header.
 
 ## 6. Remaining integration work
 
 - Replace Development-only identity and course authorization with real authentication and resource-based permissions from the responsible teams.
+- Enrollment (ACC-02) and the Administration adapter should call `ICourseEnrollmentPolicy` instead of reading `ICoursesDbContext` directly (member 9, integration).
 - Integrate audit persistence through the AUD module; do not treat the current code as full audit integration.
-- Consider database-side permission filtering and pagination for large course catalogs; the current list reads candidate courses then checks permissions in memory.
+- Move permission filtering into the query and add pagination once the ACC-03 role adapter exists; `ICourseAuthorization` answers per course, so the list checks each course in memory today.
 - Add PostgreSQL-backed integration tests for the database-specific race-condition behavior and run the currently skipped dedicated PostgreSQL test.
 - Re-run CI and request review when the current changes are committed and submitted to `feature/acc01-courses`.
