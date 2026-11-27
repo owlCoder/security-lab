@@ -15,7 +15,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
     [Test]
     public async Task Enroll_WithoutToken_IsUnauthorized_AndWritesNoAudit()
     {
-        var result = await _service.EnrollAsync(null, "corr-1", CancellationToken.None);
+        var result = await _service.EnrollAsync(null, Password, "corr-1", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unauthorized));
         Assert.That(result.Uri, Is.Null);
@@ -27,7 +27,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
     {
         SetupSession(AuthLevel.MfaPending);
 
-        var result = await _service.EnrollAsync(Token, "corr-2", CancellationToken.None);
+        var result = await _service.EnrollAsync(Token, Password, "corr-2", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unauthorized));
         _credentials.Verify(store => store.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -46,7 +46,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
         _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(credentials);
 
-        var result = await _service.EnrollAsync(Token, "corr-3", CancellationToken.None);
+        var result = await _service.EnrollAsync(Token, Password, "corr-3", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.AlreadyEnabled));
         Assert.That(result.Uri, Is.Null);
@@ -63,7 +63,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
         _credentials.Setup(store => store.GetEmailAsync(UserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync("student@example.test");
 
-        var result = await _service.EnrollAsync(Token, "corr-success", CancellationToken.None);
+        var result = await _service.EnrollAsync(Token, Password, "corr-success", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Success));
         Assert.That(result.Uri, Does.StartWith("otpauth://totp/"));
@@ -97,7 +97,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
                 It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
-        var result = await _service.EnrollAsync(Token, "corr-4", CancellationToken.None);
+        var result = await _service.EnrollAsync(Token, Password, "corr-4", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.EnrollmentPending));
         Assert.That(result.Uri, Is.Null);
@@ -118,7 +118,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AuthLevel>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
-        var result = await _service.EnrollAsync(Token, "corr-enroll-blocked", CancellationToken.None);
+        var result = await _service.EnrollAsync(Token, Password, "corr-enroll-blocked", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unauthorized));
         Assert.That(result.Uri, Is.Null);
@@ -141,7 +141,7 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
                 It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Microsoft.EntityFrameworkCore.DbUpdateException("storage failed"));
 
-        var result = await _service.EnrollAsync(Token, "corr-db-down", CancellationToken.None);
+        var result = await _service.EnrollAsync(Token, Password, "corr-db-down", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unavailable));
         Assert.That(result.Uri, Is.Null);

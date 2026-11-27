@@ -42,6 +42,7 @@ public sealed class MfaService(
 
     public async Task<(MfaOutcome Outcome, string? Uri)> EnrollAsync(
         string? rawToken,
+        string? password,
         string correlationId,
         CancellationToken ct)
     {

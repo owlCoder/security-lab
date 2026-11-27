@@ -18,6 +18,7 @@ public abstract class MfaServiceTestBase
 {
     protected const string Token = "session-token";
     protected const string NewToken = "token-of-the-new-active-session";
+    protected const string Password = "Current-Password-1!";
     protected static readonly Guid UserId = Guid.NewGuid();
     protected readonly DateTimeOffset _now = new(2026, 11, 14, 17, 0, 0, TimeSpan.Zero);
     protected Mock<ISessionStore> _sessions = null!;
