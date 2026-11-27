@@ -9,6 +9,7 @@ using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
+using Platform.Identity.Models;
 using Platform.Identity.Services;
 
 namespace Platform.Identity.Tests.Services.Mfa;
@@ -19,6 +20,7 @@ public abstract class MfaServiceTestBase
     protected const string Token = "session-token";
     protected const string NewToken = "token-of-the-new-active-session";
     protected const string Password = "Current-Password-1!";
+    protected const string Email = "student@example.test";
     protected static readonly Guid UserId = Guid.NewGuid();
     protected readonly DateTimeOffset _now = new(2026, 11, 14, 17, 0, 0, TimeSpan.Zero);
     protected Mock<ISessionStore> _sessions = null!;
@@ -31,6 +33,7 @@ public abstract class MfaServiceTestBase
     protected DbTransaction _transaction = null!;
     protected Session _newActiveSession = null!;
     protected ITotpSecretProtector _protector = null!;
+    protected Mock<ICredentialVerifier> _verifier = null!;
     protected MfaService _service = null!;
 
     protected sealed record AuditWrite(AuditEventDraft Draft, AuditContext Context, DbTransaction? Transaction);
@@ -69,6 +72,10 @@ public abstract class MfaServiceTestBase
         _work.Setup(work => work.CommitAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         _work.Setup(work => work.DisposeAsync()).Returns(ValueTask.CompletedTask);
         _credentials.Setup(store => store.BeginAsync(It.IsAny<CancellationToken>())).ReturnsAsync(_work.Object);
+        _credentials.Setup(store => store.GetEmailAsync(UserId, It.IsAny<CancellationToken>())).ReturnsAsync(Email);
+        // IDN-06 (#252): by default the step-up password is correct for the session's account.
+        _verifier = new Mock<ICredentialVerifier>(MockBehavior.Strict);
+        SetupPasswordCheck(new CredentialResult(true, UserId, AccountStatus.Active));
         _auditWrites = [];
         _trustedAudit = new Mock<ITrustedAuditWriter>(MockBehavior.Strict);
         _transactionalAudit = new Mock<ITransactionalAuditWriter>(MockBehavior.Strict);
@@ -81,7 +88,15 @@ public abstract class MfaServiceTestBase
         new(_credentials.Object, _sessions.Object,
             new IdentityAuditProducer(
                 _trustedAudit.Object, _transactionalAudit.Object, NullLogger<IdentityAuditProducer>.Instance),
-            _clock.Object, _protector, Options.Create(lockout), NullLogger<MfaService>.Instance);
+            _clock.Object, _protector, Options.Create(lockout), _verifier.Object, NullLogger<MfaService>.Instance);
+
+    protected void SetupPasswordCheck(CredentialResult result) =>
+        _verifier.Setup(verifier => verifier.VerifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+
+    protected void VerifyPasswordChecked(Times times) =>
+        _verifier.Verify(verifier => verifier.VerifyAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), times);
 
     /// <summary>Both Audit writers record every write in <see cref="_auditWrites"/> and return these results.</summary>
     protected void SetupAuditResults(AuditWriteResult? trusted = null, AuditWriteResult? transactional = null)
