@@ -4,10 +4,7 @@ namespace Platform.Api.Contracts.Identity;
 
 public sealed record MfaVerifyRequest(string Code)
 {
-    // US-22: MVC logs action arguments with ToString() at Trace level, and a record prints every member.
-    private bool PrintMembers(StringBuilder builder)
-    {
-        builder.Append("Code = ***");
-        return true;
-    }
+    // At Trace level MVC logs action arguments with ToString(), and the generated record ToString() prints every
+    // property. Keep the TOTP or backup code out of the log (US-17, US-18, AUD-03), as LoginRequest does.
+    public override string ToString() => "MfaVerifyRequest { *** }";
 }
