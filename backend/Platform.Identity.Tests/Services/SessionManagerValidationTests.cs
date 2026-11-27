@@ -1,11 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
 using Platform.Identity.Services;
+using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -14,13 +17,14 @@ namespace Platform.Identity.Tests.Services;
 [Category("IDN-07")]
 public class SessionManagerValidationTests
 {
-    private static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
+    private TimeSpan _lifetime = TimeSpan.FromHours(8);
 
     private DbContextOptions<PlatformIdentityDbContext> _options = null!;
     private MovableClock _clock = null!;
     private PlatformIdentityDbContext _db = null!;
     private SessionManager _manager = null!;
 
+    private IOptions<SessionOptions> _optionsTime = null!;
     [SetUp]
     public void SetUp()
     {
@@ -28,9 +32,11 @@ public class SessionManagerValidationTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
 
+        _optionsTime = SessionOptionsTestDefaults.Create();
         _clock = new MovableClock();
         _db = new PlatformIdentityDbContext(_options);
-        _manager = new SessionManager(_db, _clock);
+        _manager = new SessionManager(_db, _optionsTime, _clock);
+        _lifetime = TimeSpan.FromMinutes(_optionsTime.Value.AbsoluteLifetimeMinutes);
     }
 
     [TearDown]
@@ -83,15 +89,19 @@ public class SessionManagerValidationTests
         await RevokeAsync(token);
 
         using var nextRequestDb = new PlatformIdentityDbContext(_options);
-        Assert.That(await new SessionManager(nextRequestDb, _clock).ValidateAsync(token), Is.Null);
+        Assert.That(await new SessionManager(nextRequestDb, _optionsTime ,_clock).ValidateAsync(token), Is.Null);
     }
 
     [Test]
     public async Task ExpiredSession_IsRejected_AtTheExactExpiryTime()
     {
         var (token, _) = await CreateSessionAsync(Guid.NewGuid());
-        _clock.Advance(Lifetime);
-
+        for (var elapsed = 0; elapsed + 44 < 480; elapsed += 44)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(44));
+            Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+        }
+        _clock.Advance(TimeSpan.FromMinutes(44));
         Assert.That(await _manager.ValidateAsync(token), Is.Null);
     }
 
@@ -99,7 +109,12 @@ public class SessionManagerValidationTests
     public async Task SessionJustBeforeExpiry_IsStillValid()
     {
         var (token, _) = await CreateSessionAsync(Guid.NewGuid());
-        _clock.Advance(Lifetime - TimeSpan.FromSeconds(1));
+        for (var i = 0; i < 10; i++)
+        {
+            _clock.Advance(TimeSpan.FromMinutes(44));
+            Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+        }
+        _clock.Advance(_lifetime - TimeSpan.FromMinutes(440) - TimeSpan.FromSeconds(1));
 
         Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
     }
@@ -109,13 +124,20 @@ public class SessionManagerValidationTests
     {
         var userId = Guid.NewGuid();
         var (_, session) = await CreateSessionAsync(userId);
+        var optionsWithoutEarlierInactivityExpiry = Options.Create(new SessionOptions
+        {
+            AbsoluteLifetimeMinutes = _optionsTime.Value.AbsoluteLifetimeMinutes,
+            ActivityTimeoutMinutes = (int)_lifetime.TotalMinutes + 1,
+            MfaPendingTimeoutMinutes = _optionsTime.Value.MfaPendingTimeoutMinutes
+        });
+        var manager = new SessionManager(_db, optionsWithoutEarlierInactivityExpiry, _clock);
 
-        _clock.Advance(Lifetime - TimeSpan.FromSeconds(1));
-        Assert.That((await _manager.ListForUser(userId)).Select(info => info.Handle),
+        _clock.Advance(_lifetime - TimeSpan.FromSeconds(1));
+        Assert.That((await manager.ListForUser(userId)).Select(info => info.Handle),
             Is.EqualTo(new[] { session.SessionHandle }));
 
         _clock.Advance(TimeSpan.FromSeconds(1));
-        Assert.That(await _manager.ListForUser(userId), Is.Empty);
+        Assert.That(await manager.ListForUser(userId), Is.Empty);
     }
 
     [Test]
@@ -179,6 +201,49 @@ public class SessionManagerValidationTests
         Assert.That(await _manager.ValidateAsync(token[..^1]), Is.Null);
     }
 
+    [Test]
+    public async Task MfaPendingSession_ExceedingItsTimeout_IsRejected()
+    {
+        var (token, _) = await CreateSessionAsync(Guid.NewGuid(), AuthLevel.MfaPending);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.MfaPendingTimeoutMinutes + 1));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Null);
+    }
+    [Test]
+    public async Task MfaPendingSession_Timeout_Accepted()
+    {
+        var (token, _) = await CreateSessionAsync(Guid.NewGuid(), AuthLevel.MfaPending);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.MfaPendingTimeoutMinutes - 1));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+    }
+
+    [Test]
+    public async Task MfaPendingSession_Timeout_Rejected_Border()
+    {
+        var (token, _) = await CreateSessionAsync(Guid.NewGuid(), AuthLevel.MfaPending);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.MfaPendingTimeoutMinutes));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Null);
+    }
+
+    [Test]
+    public async Task ActiveSession_ExceedingItsInactivityTimeout_IsRejected()
+    {
+        var (token, session) = await CreateSessionAsync(Guid.NewGuid());
+
+        _clock.Advance(TimeSpan.FromMinutes(1));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.ActivityTimeoutMinutes));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Null);
+        Assert.That(ReadSaved(session.Id).RevokedAt, Is.EqualTo(_clock.GetUtcNow()));
+    }
     // Sessions are created and revoked through their own contexts, like separate requests would do.
     private async Task<(string Token, Session Session)> CreateSessionAsync(Guid userId, AuthLevel level = AuthLevel.Active)
     {
@@ -192,7 +257,7 @@ public class SessionManagerValidationTests
             await db.SaveChangesAsync();
         }
 
-        return await new SessionStore(db, _clock).CreateAsync(userId, level, Lifetime, CancellationToken.None);
+        return await new SessionStore(db, _clock).CreateAsync(userId, level, _lifetime, CancellationToken.None);
     }
 
     private async Task RevokeAsync(string token)

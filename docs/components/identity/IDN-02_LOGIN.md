@@ -25,7 +25,7 @@ curl -i -X POST https://localhost:5080/api/auth/login -H "Content-Type: applicat
 1. `LoginService` (`Platform.Api/Services/Identity`) validates the input and calls `ICredentialVerifier` (`Platform.Identity/Interfaces`, implemented by `CredentialVerifier` in `Platform.Identity/Services`).
 2. The verifier trims and lower-cases the e-mail, reads `identity.accounts` and checks the password with BCrypt (`IPasswordHasher`, work factor 12, SHA-384 pre-hash so long passwords are not cut at 72 bytes). The hash check also runs for unknown e-mails (dummy hash), so timing does not show which e-mails exist.
 3. Only an `Active` account gets a session. Blocked and archived accounts get the same `401` as a wrong password; the real reason is only in the audit event.
-4. `ISessionCreator.CreateAsync(userId, AuthenticationLevel.Active)` creates a new session every time (session fixation protection). `StoreSessionCreator` saves it through `ISessionStore` in `identity.sessions`, with a lifetime of 8 hours until US-14 moves it into configuration.
+4. `ISessionCreator.CreateAsync(userId, AuthenticationLevel.Active)` creates a new session every time (session fixation protection). `StoreSessionCreator` saves it through `ISessionStore` in `identity.sessions`, with a lifetime from the configuration (by default 8 hours).
 5. An audit event `auth.login` is written (`success`, `failure` or `denied`) with the correlation id `HttpContext.TraceIdentifier`. It never contains the e-mail, password, hash or token.
 
 ## Database

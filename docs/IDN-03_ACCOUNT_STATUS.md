@@ -89,7 +89,7 @@ The CSRF check comes first of all, before the session check and Access (see [`ID
 ## Security requirements
 
 * Server-side access checks: `IAccessDecision` runs inside the use-case, not only in the controller (ACC-05, SEC-01).
-* Session check on every request (SEC-03): `SessionManager.ValidateAsync` refuses a revoked or expired session and also a session whose account is not `ACTIVE`. This is defense in depth only: it is not enough alone, because a session stored behind the revocation would work again after reactivation.
+* Session check on every request (SEC-03): `SessionManager.ValidateAsync` refuses a revoked, expired, or inactive session and also a session whose account is not `ACTIVE`. Inactivity uses the configured 45-minute activity timeout or 5-minute MFA-pending timeout. A concurrent revocation is treated as invalidation, so the request still receives `401 session_invalid` rather than a concurrency exception becoming `500`. This is defense in depth only: it is not enough alone, because a session stored behind the revocation would work again after reactivation.
 * Session issuing (SEC-03): `ISessionStore.CreateForActiveAccountAsync` locks the account row with `SELECT ... FOR SHARE` in the same transaction that stores the session. A login that passed its status check before a block either waits for the block and stores nothing (`AccountNotActiveException`, login answers like any refused login), or commits first and is then revoked by the block. No token can outlive a block, so reactivation never revives one.
 * The status is accepted only by name (`ACTIVE`, `BLOCKED`, `ARCHIVED`, any letter case). Numbers such as `1` or `99` are rejected.
 * Audit record (AUD-01, AUD-03): actor, event type, resource, time, outcome and correlation ID, details only `oldStatus`/`newStatus` or a `reasonCode`. No free text, tokens, cookies or session ids. The `reason` field of the request body is accepted for compatibility but **not stored**, because the Audit contract allows no free text.
@@ -107,6 +107,7 @@ The CSRF check comes first of all, before the session check and Access (see [`ID
 |Administrator blocks themselves|409, audited|`Admin_CannotChangeOwnStatus`|
 |Same status again|409, sessions stay|`SameStatus_IsInvalidTransition_SessionsStay`|
 |Blocked account keeps a session|sessions revoked in the same transaction|`Block_RevokesActiveSession_RefusesNextRequestAndLogin_AndRecordsAudit`, `Archive_RevokesAllSessionsOfTheAccount`|
+| Inactive session races with account blocking|concurrent revocation is treated as invalid; next request returns `401 session_invalid`|`BlockingDuringInactiveSessionValidation_Returns401SessionInvalid`|
 |Blocked account signs in|login reads `identity.accounts`|same integration test (login returns 401)|
 |Session created behind the revocation|refused at issue (row lock), and status checked on every request|`LoginThatStartedBeforeTheBlock_IsRefusedAtIssue_SoReactivationCannotRevive_ItsToken`, `LoginsRacingWithABlock_NeverLeaveATokenThatWorksAfterReactivation`, `SessionOfAccountBlockedBehindTheRevocation_IsStillRefused`, `AccountBlockedAfterTheStatusCheck_IsRefused_LikeAnyBlockedLogin_AndNoSuccessIsAudited`|
 |Audit unavailable|whole change rolled back, 503|`AuditNotRecorded_RollsBackStatusAndSessions`, `AuditFailure_RollsBackStatusSessionRevocationAndAuditRow`|
@@ -138,6 +139,7 @@ The CSRF check comes first of all, before the session check and Access (see [`ID
 
 * Deployment must create the `audit` schema in the identity database (`AuditPersistenceExtensions.MigrateAuditDatabaseAsync`); the web host migrates it only in Development. If the database user used by the identity module cannot write to `audit`, every status change returns `503`.
 * `identity` and `audit` must stay in one database. Moving Audit to a separate database requires an outbox or a different integration.
+* Atomic status-and-session rollback depends on `EfAccountStatusStore` and `SessionManager` being resolved in the same DI scope and sharing the same scoped `PlatformIdentityDbContext`; the production registrations are both scoped.
 * The `reason` text is not stored (see above). If a reason is required, ask Team 12 for an allowed structured field.
 * Any status can change to any other different status, including `ARCHIVED` back to `ACTIVE`. This is a conscious simplification.
 * Rate limiting (SEC-04) is per client IP: `identity-account-status-change`, default 20 requests per 60 s (`RateLimiting__AccountStatusChange__*`, see `Modules/Identity/RateLimiting/README.md`). It runs after the Access middleware, so only requests of an authorized administrator are counted; a refused request gets `429` with `Retry-After` and reaches neither the handler nor Audit.

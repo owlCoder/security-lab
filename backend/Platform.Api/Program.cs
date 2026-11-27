@@ -32,6 +32,7 @@ using Platform.Api.Endpoints.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.Api.Modules.RevisionReviews;
@@ -120,6 +121,7 @@ if (!string.IsNullOrWhiteSpace(competenciesConnectionString))
 builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
+builder.Services.AddSessionExpiry(builder.Configuration);
 builder.Services.AddControllers();
 // US-15 / SEC-03: antiforgery makes and checks the CSRF token pair. AuthController writes the cookie itself with
 // Secure always on (CsrfToken.Options), so SameAsRequest only keeps antiforgery from refusing plain HTTP in dev and tests.

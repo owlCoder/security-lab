@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Platform.Api.Interfaces.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Application;
 using Platform.Audit.Composition;
@@ -361,8 +362,8 @@ public class AccountUnlockIntegrationTests : IntegrationTestBase
     private static async Task RevokeSessionsAsync(Guid userId)
     {
         using var scope = Factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        Assert.That(await new SessionManager(db).RevokeAllForUser(userId, "test"), Is.EqualTo(1));
+        var sessionManager = scope.ServiceProvider.GetRequiredService<ISessionManager>();
+        Assert.That(await sessionManager.RevokeAllForUser(userId, "test"), Is.EqualTo(1));
     }
 
     private static string UnlockUrl(Guid accountId) => $"/api/admin/accounts/{accountId}/unlock";

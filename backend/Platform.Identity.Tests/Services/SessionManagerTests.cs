@@ -1,13 +1,16 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Api.Modules.Identity.SessionExpiry;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
+using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -16,6 +19,9 @@ namespace Platform.Identity.Tests.Services;
 [Category("IDN-07")]
 public class SessionManagerTests
 {
+    private static IOptions<SessionOptions> DefaultSessionOptions() =>
+        SessionOptionsTestDefaults.Create();
+
     [Test]
     public async Task RevokeSession_RevokesOnlyOwnedSession_RejectsItsToken()
     {
@@ -48,7 +54,7 @@ public class SessionManagerTests
                 AuthLevel.Active, now, now.AddHours(8)));
         await db.SaveChangesAsync();
 
-        var manager = new SessionManager(db);
+        var manager = new SessionManager(db, DefaultSessionOptions());
 
         Assert.That(await manager.RevokeSession(ownerUserId, revokedHandle), Is.True);
         Assert.That(await manager.RevokeSession(ownerUserId, foreignHandle), Is.False);
@@ -73,7 +79,7 @@ public class SessionManagerTests
             TokenHash(),
             Guid.NewGuid(),
             Platform.Identity.Enums.AuthLevel.Active,
-            now.AddHours(-2),
+            now.AddMinutes(-10),
             now.AddHours(6));
 
         // Revoked session for the requested user.
@@ -122,7 +128,7 @@ public class SessionManagerTests
 
         await db.SaveChangesAsync();
 
-        var manager = new SessionManager(db);
+        var manager = new SessionManager(db, DefaultSessionOptions());
 
         // Act
         var result = await manager.ListForUser(requestedUserId);
@@ -145,6 +151,45 @@ public class SessionManagerTests
         Assert.That(
             result[0].ExpiresAt,
             Is.EqualTo(requestedActive.ExpiresAt));
+    }
+
+    [Test]
+    public async Task ListForUser_ExcludesSessionsPastTheirActivityTimeout()
+    {
+        var requestedUserId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var inactiveSession = new Session(
+            Guid.NewGuid(), requestedUserId, TokenHash(), Guid.NewGuid(),
+            AuthLevel.Active, now.AddMinutes(-46), now.AddHours(1));
+        var inactiveMfaPendingSession = new Session(
+            Guid.NewGuid(), requestedUserId, TokenHash(), Guid.NewGuid(),
+            AuthLevel.MfaPending, now.AddMinutes(-6), now.AddHours(1));
+        var activeSession = new Session(
+            Guid.NewGuid(), requestedUserId, TokenHash(), Guid.NewGuid(),
+            AuthLevel.Active, now.AddMinutes(-10), now.AddHours(1));
+        var activeMfaPendingSession = new Session(
+            Guid.NewGuid(), requestedUserId, TokenHash(), Guid.NewGuid(),
+            AuthLevel.MfaPending, now.AddMinutes(-2), now.AddHours(1));
+
+        var options = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using var db = new PlatformIdentityDbContext(options);
+        db.Sessions.AddRange(
+            inactiveSession,
+            inactiveMfaPendingSession,
+            activeSession,
+            activeMfaPendingSession);
+        await db.SaveChangesAsync();
+
+        var manager = new SessionManager(db, DefaultSessionOptions());
+
+        var result = await manager.ListForUser(requestedUserId);
+
+        Assert.That(
+            result.Select(session => session.Handle),
+            Is.EquivalentTo(new[] { activeSession.SessionHandle, activeMfaPendingSession.SessionHandle }));
     }
 
     [Test]
@@ -173,7 +218,7 @@ public class SessionManagerTests
         db.Sessions.Add(otherUserSession);
         await db.SaveChangesAsync();
 
-        var manager = new SessionManager(db);
+        var manager = new SessionManager(db, DefaultSessionOptions());
 
         // Act
         var result = await manager.ListForUser(requestedUserId);
@@ -192,7 +237,7 @@ public class SessionManagerTests
 
         await using var db = new PlatformIdentityDbContext(options);
 
-        var manager = new SessionManager(db);
+        var manager = new SessionManager(db, DefaultSessionOptions());
 
         // Act & Assert
         Assert.That(

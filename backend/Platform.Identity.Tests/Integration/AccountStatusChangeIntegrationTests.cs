@@ -214,7 +214,9 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         var student = await UserTestData.AddAsync(Factory, "racer@example.com", Password);
 
         using var statusScope = Factory.Services.CreateScope();
-        var statusStore = new EfAccountStatusStore(statusScope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>());
+        var statusStore = new EfAccountStatusStore(
+            statusScope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>(),
+            statusScope.ServiceProvider.GetRequiredService<ISessionManager>());
         await using var unitOfWork = await statusStore.BeginAsync();
         var account = await unitOfWork.FindForUpdateAsync(student.Id);
         await unitOfWork.ApplyAsync(account!, AccountStatus.Blocked);

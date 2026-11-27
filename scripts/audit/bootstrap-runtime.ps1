@@ -39,8 +39,12 @@ try {
     if ($generatePassword) {
         $newSetting = "AUDIT_RUNTIME_PASSWORD=$password"
         if ($passwordLines.Count -eq 1) {
-            $envContent = $envContent.Remove($passwordLines[0].Index, $passwordLines[0].Length)
-                .Insert($passwordLines[0].Index, $newSetting)
+            $envContent = $envContent.Remove(
+            $passwordLines[0].Index,
+            $passwordLines[0].Length)
+            $envContent = $envContent.Insert(
+            $passwordLines[0].Index,
+            $newSetting)
         } else {
             $envContent = $envContent.TrimEnd() + [Environment]::NewLine + $newSetting + [Environment]::NewLine
         }

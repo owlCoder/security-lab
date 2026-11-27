@@ -25,11 +25,11 @@ Validates a presented session token for the request pipeline, revokes sessions, 
 
 | Method | Implemented behavior |
 |-|-|
-| `Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)` | Returns `null` for a blank, unknown, revoked, or expired token. Otherwise hashes the token with SHA-256 to find the stored session, updates `LastActivityAt`, persists it, and returns its handle, user id, and level. The raw token is not stored. |
-| `Task<ValidateSession?> PeekAsync(string token, CancellationToken ct = default)` | US-15. The same answer as `ValidateAsync`, but it does not update `LastActivityAt`. The CSRF check calls it before it refuses a request, so a refused request does not extend the session (US-14). It is a default interface method that calls `ValidateAsync`, for implementations that record no activity (test doubles); `SessionManager` overrides it. |
+| `Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)` | Returns `null` for a blank, unknown, revoked, expired, or inactive token. An inactive session is lazily revoked and persisted. Otherwise, hashes the token with SHA-256 to find the stored session, updates `LastActivityAt`, persists it, and returns its handle, user id, and level. The raw token is not stored. |
+| `Task<ValidateSession?> PeekAsync(string token, CancellationToken ct = default)` | US-15. Performs the same validity and inactivity checks as `ValidateAsync`, including lazy revocation of an inactive session, but does not update `LastActivityAt`. A refused request does not extend the session, but an already inactive session is revoked. The CSRF check calls it before refusing a request (US-14). It is a default interface method that calls `ValidateAsync`, for implementations that record no activity (test doubles); `SessionManager` overrides it. |
 | `Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)` | Revokes every session for the user whose `RevokedAt` is null and returns the number changed; returns `0` if none match. It validates that `userId` is non-empty. The current `SessionManager` does not use or audit `reason`; callers are responsible for any associated audit event. |
 | `Task<bool> RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default)` | Finds a session by both handle and owner and revokes it. Returns `false` for an unknown handle or a handle belonging to another user, and `true` when the owned session exists (including if it was already revoked). Both ids must be non-empty. |
-| `Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default)` | Returns sessions for the user that are not revoked and have not expired. It validates that `userId` is non-empty. |
+| `Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default)` | Returns only sessions for the user that are not revoked, have not expired, and are within the same auth-level-specific inactivity timeout used by `ValidateAsync`. Listing filters inactive sessions but does not revoke them. It validates that `userId` is non-empty. |
 
 The `reason` parameter is retained for the IDN-03 integration but is currently unused by the session manager. Normal missing-session outcomes are represented by `null`, `false`, or `0`; invalid empty identifiers throw `ArgumentException`. Database failures are not converted to successful outcomes.
 
@@ -44,7 +44,7 @@ The contract is for trusted server-side callers and does not authorize them. Cal
 - `SessionManager` is the database-backed implementation of validation, revocation, and listing.
 - `Program.cs` registers only `SessionManager` as `ISessionManager`. The older `StoreSessionManager` stub has been deleted.
 - `ValidateAsync` also refuses a session whose account is not `Active` (IDN-03, SEC-03).
-- `RevokeAllForUser` is awaited by `EfAccountStatusStore` inside the status-change transaction (IDN-03); it must not be called without `await`.
+- `RevokeAllForUser` is awaited by `EfAccountStatusStore` inside the status-change transaction (IDN-03); atomicity relies on the scoped store and `ISessionManager` being resolved from the same DI scope and sharing one `PlatformIdentityDbContext`.
 - Session creation is a separate `ISessionCreator` contract implemented by `StoreSessionCreator`.
 
 ## Consumers
