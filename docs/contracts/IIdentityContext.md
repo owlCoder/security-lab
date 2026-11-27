@@ -47,7 +47,7 @@ The identity does not contain a password or hash, session token or token hash, T
 ## Implementations
 
 - `SessionIdentityContext` is registered by `Program.cs` and is the implementation used by the API.
-- `StubIdentityContext` and `AnonymousIdentityContext` exist as development/test alternatives; they are not the registered API identity context.
+- `StubIdentityContext` and `AnonymousIdentityContext` were removed (#261 step 1): neither was registered.
 
 ## Change history
 
