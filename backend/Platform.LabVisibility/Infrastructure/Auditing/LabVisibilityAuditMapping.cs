@@ -10,7 +10,8 @@ namespace Platform.LabVisibility.Infrastructure.Auditing;
 public static partial class LabVisibilityAuditMapping
 {
     // Pravilo AUD modula za correlation ID: 1–64 znaka, slova, cifre, '-', '_', '.'.
-    [GeneratedRegex("^[A-Za-z0-9._-]{1,64}$")]
+    // \z, ne $: sa $ bi vrednost sa završnim \n prošla, a AuditDraftValidator bi je odbio.
+    [GeneratedRegex(@"^[A-Za-z0-9._-]{1,64}\z")]
     private static partial Regex ValidCorrelationId();
 
     // Samo četiri radnje modula idu u AUD. Nepoznata radnja se ne upisuje, ni kao tekst (AUD-03).
@@ -44,7 +45,14 @@ public static partial class LabVisibilityAuditMapping
 
     public static bool IsKnownAction(string? action) => action is not null && KnownActions.Contains(action);
 
-    public static AuditEventDraft ToDraft(LabVisibilityAuditEvent auditEvent)
+    // Uspešan studentski prikaz ne ide u trajni audit, samo u aplikacioni log (obim, D6).
+    public static bool IsSuccessfulStudentView(LabVisibilityAuditEvent auditEvent) =>
+        auditEvent.Action == LabVisibilityActions.StudentView
+        && MapOutcome(auditEvent.Outcome).Outcome == AuditOutcome.Success;
+
+    // courseId dolazi samo iz pouzdanog izvora (LabPublicContent.CourseId), nikad iz zahteva;
+    // null kad laboratorija nije poznata.
+    public static AuditEventDraft ToDraft(LabVisibilityAuditEvent auditEvent, Guid? courseId = null)
     {
         ArgumentNullException.ThrowIfNull(auditEvent);
 
@@ -70,6 +78,7 @@ public static partial class LabVisibilityAuditMapping
         return new AuditEventDraft(
             AuditEventTypes.LabVisibilityAccessed,
             outcome,
+            CourseId: courseId,
             Details: details);
     }
 

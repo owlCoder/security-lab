@@ -326,15 +326,143 @@ public class LabVisibilityDurableAuditTests
         });
     }
 
+    // Negativni test (tim 12, tačka 1): AUD koji visi ne sme da zaustavi odluku.
+    // Posle sopstvenog roka adapter diže alarm Timeout, a odluka je ista (ključ za nastavnika, null za studenta).
+    [TestCase(false, TestName = "HangingAudit_RespectingToken_TimesOut_KeepsDecisionAndRaisesAlarm")]
+    [TestCase(true, TestName = "HangingAudit_IgnoringToken_TimesOut_KeepsDecisionAndRaisesAlarm")]
+    public async Task HangingAudit_TimesOut_KeepsDecisionAndRaisesAlarm(bool ignoresToken)
+    {
+        store.Hang = ignoresToken
+            ? CapturingTrustedAuditWriter.HangMode.IgnoresToken
+            : CapturingTrustedAuditWriter.HangMode.RespectsToken;
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
+        // Gornja granica testa: bez roka u adapteru test pada, a ne visi u CI-ju.
+        var limit = TimeSpan.FromSeconds(10);
+        var teacherKey = await ReadKeyAs(Active(TeacherId)).AsTask().WaitAsync(limit);
+        var studentKey = await ReadKeyAs(Active(StudentId)).AsTask().WaitAsync(limit);
+
+        started.Stop();
+        var alarms = logs.Entries.Where(entry => entry.EventId == AuditWriterLabVisibilityAudit.AuditLost.Id).ToList();
+        Assert.Multiple(() =>
+        {
+            Assert.That(teacherKey, Is.Not.Null);
+            Assert.That(studentKey, Is.Null);
+            Assert.That(started.Elapsed, Is.LessThan(AuditWriterLabVisibilityAudit.WriteTimeout * 2 + TimeSpan.FromSeconds(2)));
+            Assert.That(alarms, Has.Count.EqualTo(2));
+            Assert.That(alarms.Select(entry => entry.Message), Has.All.Contains("Timeout"));
+            Assert.That(logs.Entries.Select(entry => entry.Message), Has.None.Contains(SecretAnswer));
+        });
+    }
+
+    // Rok je sopstveni: već otkazan token klijenta ne gubi zapis.
+    [Test]
+    public async Task CancelledClient_StillRecords()
+    {
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await provider.GetRequiredService<ILabVisibilityAudit>().WriteAsync(
+            new LabVisibilityAuditEvent(LabVisibilityActions.KeyRead, LabId, TeacherId.ToString(), "Allow", "corr-1"),
+            cancelled.Token);
+
+        Assert.That(store.Records, Has.Count.EqualTo(1));
+    }
+
+    // Tim 12, tačka 2: završni \n ne prolazi normalizaciju (\z, ne $), pa validator ne odbija zapis.
+    [TestCase("corr-1\n")]
+    [TestCase("corr-1\r\n")]
+    [TestCase("corr-1 ")]
+    public void CorrelationIdWithTrailingNewline_IsReplaced(string correlationId)
+    {
+        var context = LabVisibilityAuditMapping.ToContext(
+            new LabVisibilityAuditEvent(LabVisibilityActions.KeyRead, LabId, TeacherId.ToString(), "Allow", correlationId));
+
+        Assert.That(context.CorrelationId, Does.Match(@"^[A-Za-z0-9._-]{1,64}\z"));
+    }
+
+    // Tim 12, predlog 4: kurs iz pouzdanog izvora (LabPublicContent.CourseId), nikad iz zahteva.
+    [Test]
+    public async Task KnownLab_IsRecordedWithItsCourse()
+    {
+        await ReadKeyAs(Active(TeacherId));
+        await ReadKeyAs(Active(StudentId));
+
+        Assert.That(store.Records.Select(record => record.Draft.CourseId), Has.All.EqualTo(CourseId));
+    }
+
+    [Test]
+    public async Task UnknownLab_IsRecordedWithoutCourse()
+    {
+        await provider.GetRequiredService<EvaluatorKeyReader>()
+            .ReadAsync(null, Guid.NewGuid(), "corr-unknown");
+
+        var (draft, _) = store.Records.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(draft.Outcome, Is.EqualTo(AuditOutcome.Denied));
+            Assert.That(draft.CourseId, Is.Null);
+        });
+    }
+
+    // Tim 12, predlog 5: uspešan studentski prikaz ide samo u aplikacioni log; odbijanje ide u AUD.
+    [Test]
+    public async Task SuccessfulStudentView_GoesOnlyToApplicationLog()
+    {
+        var audit = provider.GetRequiredService<ILabVisibilityAudit>();
+
+        await audit.WriteAsync(new LabVisibilityAuditEvent(
+            LabVisibilityActions.StudentView, LabId, StudentId.ToString(), "allowed", "corr-ok"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(store.Records, Is.Empty);
+            Assert.That(
+                logs.Entries.Count(entry => entry.EventId == AuditWriterLabVisibilityAudit.StudentViewServed.Id),
+                Is.EqualTo(1));
+        });
+    }
+
+    [TestCase("denied", AuditOutcome.Denied)]
+    [TestCase("not_found", AuditOutcome.Failure)]
+    public async Task RefusedStudentView_IsRecorded(string outcome, AuditOutcome expected)
+    {
+        var audit = provider.GetRequiredService<ILabVisibilityAudit>();
+
+        await audit.WriteAsync(new LabVisibilityAuditEvent(
+            LabVisibilityActions.StudentView, LabId, StudentId.ToString(), outcome, "corr-no"));
+
+        var (draft, _) = store.Records.Single();
+        Assert.That(draft.Outcome, Is.EqualTo(expected));
+    }
+
     private sealed class CapturingTrustedAuditWriter(CapturingTrustedAuditWriter.Store store) : ITrustedAuditWriter
     {
-        public ValueTask<AuditWriteResult> WriteAsync(
+        public async ValueTask<AuditWriteResult> WriteAsync(
             AuditEventDraft draft,
             AuditContext context,
             CancellationToken cancellationToken = default)
         {
             store.Records.Enqueue((draft, context));
-            return ValueTask.FromResult(store.Result);
+
+            switch (store.Hang)
+            {
+                case HangMode.RespectsToken:
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                    break;
+                case HangMode.IgnoresToken:
+                    await new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+                    break;
+            }
+
+            return store.Result;
+        }
+
+        public enum HangMode
+        {
+            None,
+            RespectsToken,
+            IgnoresToken
         }
 
         public sealed class Store
@@ -342,6 +470,8 @@ public class LabVisibilityDurableAuditTests
             public ConcurrentQueue<(AuditEventDraft Draft, AuditContext Context)> Records { get; } = new();
 
             public AuditWriteResult Result { get; set; } = AuditWriteResult.Recorded(Guid.NewGuid());
+
+            public HangMode Hang { get; set; }
         }
     }
 

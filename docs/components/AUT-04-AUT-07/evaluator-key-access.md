@@ -96,9 +96,11 @@ Ključ nikada ne prelazi granicu server–klijent. Nijedan kontroler ne prima `I
 
 ### Ograničenja
 
-- Kad AUD ne sačuva zapis (`Unavailable` ili `Rejected`), odluka se ne menja: odbijanje ostaje odbijanje, a dozvoljeno čitanje ključa se ne prekida. Diže se alarm `LabVisibilityAuditLost` u logu, bez sadržaja. Fail-closed za upis ključa (`lab.key.write`, privilegovana promena) je deo kartice 5.
+- Kad AUD ne sačuva zapis (`Unavailable`, `Rejected`, izuzetak ili istekao rok), odluka se ne menja: odbijanje ostaje odbijanje, a dozvoljeno čitanje ključa se ne prekida. Diže se alarm `LabVisibilityAuditLost` u logu, bez sadržaja. Fail-closed za upis ključa (`lab.key.write`, privilegovana promena) je deo kartice 5.
 - Bez AUD modula u kontejneru (testovi, alati) audit ide u log kroz `LoggerLabVisibilityAudit`.
-- Zapisi nemaju `CourseId`, pa ih AUD-06 (pregled za nastavnika po kursu) još ne prikazuje.
+- Upis ima sopstveni rok od 1 s (`AuditWriterLabVisibilityAudit.WriteTimeout`), nezavisan od klijenta, kao `RevisionAuditForwarding` (S11-04, tačka 5). Rok važi i za writer koji ignoriše token. Kad istekne: alarm `LabVisibilityAuditLost` (status `Timeout`) i ista odluka. Spor AUD zato ne zaustavlja prikaz laboratorije ni čitanje ključa.
+- `CourseId` u zapisu dolazi iz pouzdanog izvora, `LabPublicContent.CourseId` (isti kurs po kom se proverava članstvo), nikad iz zahteva. Kad laboratorija nije poznata (npr. anonimno odbijanje za nepostojeći ID), kurs ostaje prazan. Tako AUD-06 prikazuje nastavniku zapise za njegove laboratorije.
+- Obim trajnog zapisa: čitanje i upis ključa (`lab.key.read`, `lab.key.write`), nastavnički `lab.preview` i sva odbijanja i greške idu u AUD. Uspešan `lab.student.view` ide samo u aplikacioni log (`LabVisibilityStudentViewServed`), jer je najčešći, normalan zahtev bez bezbednosne vrednosti, a zauzimao bi Audit pool koji deli i login.
 - Članstvo na kursu je razvojni stub dok ACC timovi ne objave ugovor.
 
 ## Negativni scenariji i testovi
@@ -127,11 +129,16 @@ Fajl: `backend/Platform.Tests/LabVisibility/LabVisibilityDurableAuditTests.cs` (
 - svaki ishod modula (`Allow`, `Deny`, `NotFound`, `Saved`, `Published`, `Invalid`…) daje zapis koji AUD katalog prihvata;
 - kad AUD nije dostupan, odluka ostaje ista, a alarm u logu ne sadrži odgovor.
 - poznati ishodi daju fiksni `reasonCode`; neočekivan ishod (i onaj koji liči na kod, npr. `secret_answer_42`) daje `unknown_outcome` i nikad se ne kopira;
-- nepoznata radnja se ne upisuje u AUD, a alarm ne sadrži njen tekst.
+- nepoznata radnja se ne upisuje u AUD, a alarm ne sadrži njen tekst;
+- AUD koji visi (i kad poštuje token i kad ga ignoriše) ne zaustavlja odluku: posle roka alarm `Timeout`, odluka ista;
+- otkazan zahtev klijenta ne gubi zapis;
+- correlation ID sa završnim `\n` ili razmakom se zamenjuje (`\z`, ne `$`), pa ga validator AUD-a ne odbija;
+- zapis ima `CourseId` laboratorije; nepoznata laboratorija je bez kursa;
+- uspešan studentski prikaz ide samo u log, a odbijen i nepostojeći prikaz u AUD.
 
 Fajl: `backend/Platform.Audit.Tests/LabVisibilityAuditPostgresTests.cs` (PostgreSQL, deo `scripts/audit/test-postgres.ps1` u CI-ju)
 
-- stvarni tok `EvaluatorKeyReader` → `AuditWriterLabVisibilityAudit` → registrovani `ITrustedAuditWriter` → PostgreSQL kroz pravi `Platform.Api` host: zapis pročitan iz novog `AuditDbContext`-a ima tačnog aktera (nastavnik `User`, student `User`/`Denied`, evaluator `Service`), radnju `lab.key.read` i correlation ID, a nema sadržaj ključa;
+- stvarni tok `EvaluatorKeyReader` → `AuditWriterLabVisibilityAudit` → registrovani `ITrustedAuditWriter` → PostgreSQL kroz pravi `Platform.Api` host: zapis pročitan iz novog `AuditDbContext`-a ima tačnog aktera (nastavnik `User`, student `User`/`Denied`, evaluator `Service`), radnju `lab.key.read`, kurs laboratorije i correlation ID, a nema sadržaj ključa;
 - nepoznata radnja ne stiže u bazu.
 
 Primer u `backend/Platform.Audit.Tests/AuditDraftExamples.cs` prolazi validator AUD modula i upis u PostgreSQL (`PostgresAuditEventStoreTests`).

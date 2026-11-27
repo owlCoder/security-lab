@@ -20,7 +20,7 @@ namespace Platform.Audit.Tests;
 
 // AUT-04 / AUD-01 / AUD-03 (#226): stvarni tok LabVisibility → AuditWriterLabVisibilityAudit →
 // registrovani ITrustedAuditWriter → PostgreSQL, kroz pravi Platform.Api host. Zapis se čita
-// iz novog AuditDbContext-a: akter, radnja i correlation ID su tačni, a sadržaja ključa nema.
+// iz novog AuditDbContext-a: akter, radnja, kurs i correlation ID su tačni, a sadržaja ključa nema.
 [TestFixture]
 [Category("AuditRuntime")]
 [Property("RequirementId", "AUT-04")]
@@ -118,6 +118,7 @@ public sealed class LabVisibilityAuditPostgresTests
 
             foreach (var row in rows)
             {
+                Assert.That(row.CourseId, Is.EqualTo(courseId), "course comes from LabPublicContent, not from the request");
                 Assert.That(row.EventType, Is.EqualTo(AuditEventTypes.LabVisibilityAccessed));
                 Assert.That(DetailOf(row, "action"), Is.EqualTo(LabVisibilityActions.KeyRead));
                 Assert.That(DetailOf(row, "laboratoryId"), Is.EqualTo(labId.ToString()));
