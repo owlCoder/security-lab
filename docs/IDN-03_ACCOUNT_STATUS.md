@@ -82,8 +82,9 @@ flowchart LR
   P4 -->|"200 / 404 / 409 / 503"| A
 ```
 
-Order of checks: authenticated, then administrator, then status value valid, then not self-change, then account exists, then not the same status.
+Order of checks: CSRF token (US-15, only for a valid session), then authenticated, then administrator, then status value valid, then not self-change, then account exists, then not the same status.
 Authorization comes before the account lookup on purpose, so a non-administrator cannot learn which accounts exist.
+The CSRF check comes first of all, before the session check and Access (see [`IDN-02_CSRF.md`](components/identity/IDN-02_CSRF.md)). A request with a valid session but without a valid `X-CSRF-TOKEN` gets `403` with the body `{ "code": "csrf_invalid" }`, not Access's `403` `ProblemDetails`, for every account id, so it reveals nothing about accounts either. A request with a revoked, expired or unknown session is not refused by the CSRF check and still gets `401`. A refused CSRF request is written to the application log with its correlation ID, not to Audit.
 
 ## Security requirements
 
@@ -97,6 +98,8 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 
 |Misuse|Control|Test|
 |-|-|-|
+|Forged request (no valid CSRF token) with an administrator's session|`403 csrf_invalid` before every other check, nothing changes, the session is not extended|`AdminStatusChange_WithoutToken_IsRefused_AndChangesNoStatusOrSession`, `RefusedRequest_DoesNotExtendTheSession` (`CsrfProtectionIntegrationTests`)|
+|Forged request with a non-administrator's session|`403 csrf_invalid`, the same answer for an existing and an unknown account|`NonAdminStatusChange_WithoutToken_GetsTheSameAnswerForAnExistingAndAnUnknownAccount`|
 |Student or non-admin blocks an account|403, nothing changes, denial audited|`Student_IsForbidden_NothingChanges_DenialIsAudited`, `Student_CannotChangeStatus_NothingChanges_DenialIsAudited` (integration)|
 |Request without a caller|401, nothing changes|`Anonymous_IsUnauthenticated_NothingChanges_DenialIsAuditedWithoutActor`|
 |Invalid or numeric status|strict parsing, 400|`InvalidStatusValue_IsRejected_NothingChanges` (7 cases)|
@@ -106,8 +109,9 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 |Blocked account keeps a session|sessions revoked in the same transaction|`Block_RevokesActiveSession_RefusesNextRequestAndLogin_AndRecordsAudit`, `Archive_RevokesAllSessionsOfTheAccount`|
 |Blocked account signs in|login reads `identity.accounts`|same integration test (login returns 401)|
 |Session created behind the revocation|refused at issue (row lock), and status checked on every request|`LoginThatStartedBeforeTheBlock_IsRefusedAtIssue_SoReactivationCannotRevive_ItsToken`, `LoginsRacingWithABlock_NeverLeaveATokenThatWorksAfterReactivation`, `SessionOfAccountBlockedBehindTheRevocation_IsStillRefused`, `AccountBlockedAfterTheStatusCheck_IsRefused_LikeAnyBlockedLogin_AndNoSuccessIsAudited`|
-|Audit unavailable|whole change rolled back, 503|`AuditNotRecorded_RollsBackStatusAndSessions`, `AuditUnavailable_RollsBackStatusAndSessionRevocation`|
+|Audit unavailable|whole change rolled back, 503|`AuditNotRecorded_RollsBackStatusAndSessions`, `AuditFailure_RollsBackStatusSessionRevocationAndAuditRow`|
 |Database failure|nothing stored, 503|`DatabaseFailure_ReturnsUnavailable_AndStoresNothing`|
+|Excessive requests (SEC-04)|controlled 429 with `Retry-After`, nothing changes|`ExcessiveStatusChanges_AreRefusedWith429_AndChangeNothing`|
 |Secrets or session ids in the Audit record|details limited to status names|`AuditRecord_HasNoFreeTextOrIdentifiersOfSessions`|
 |Reactivation wrongly revokes sessions|revoke only for Blocked and Archived|`Admin_ActivatesBlockedAccount_DoesNotTouchSessions`|
 
@@ -115,8 +119,9 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 
 * Branch: `fix/idn-03-persistent-status-change`.
 * Changed: `Services/Identity/ChangeAccountStatus.cs`, `EfAccountStatusStore.cs`, `SessionManager.cs`; `Interfaces/Identity/IAccountStatusStore.cs`; `Controllers/Identity/AdminAccountsController.cs`; `Program.cs`. Removed: `IAccountRepository`, `InMemoryAccountRepository`, the duplicate `ISessionManager` registration.
-* Tests: `Platform.Identity.Tests/Services/ChangeAccountStatusTests.cs` (unit, 23 cases) and `Platform.Identity.Tests/Integration/AccountStatusChangeIntegrationTests.cs` (real PostgreSQL, 6 cases).
+* Tests: `Platform.Identity.Tests/Services/ChangeAccountStatusTests.cs` (unit, 25 cases) and `Platform.Identity.Tests/Integration/AccountStatusChangeIntegrationTests.cs` (real PostgreSQL, 12 cases).
 * Run (PowerShell, repository root): `dotnet test backend\Platform.Identity.Tests --filter "Category=IDN-03"`.
+* Full run on 2026-11-24, after merging `main` (`dotnet test backend/SecurityLab.slnx -c Release`, .NET SDK 10.0.404, Docker available): 0 failed in every project; `Platform.Identity.Tests` 485 passed, 0 skipped. Skips elsewhere in that run are PostgreSQL fixtures that need an environment variable and are not part of IDN-03: `Platform.Audit.Tests` 36 and `Platform.Competencies.Tests` 8 (`AUDIT_TEST_*` / `PRG04_TEST_ADMIN_CONNECTION_STRING`, set by `scripts/audit/test-postgres.ps1` and `scripts/test-competencies-postgres.ps1`); with those scripts the same fixtures run and pass (Audit 328/328, Competencies 83/83). Frontend: `tsc --noEmit` clean, `vitest run` 195 passed (Node 22).
 
 ## Implementation status
 
@@ -135,5 +140,5 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 * `identity` and `audit` must stay in one database. Moving Audit to a separate database requires an outbox or a different integration.
 * The `reason` text is not stored (see above). If a reason is required, ask Team 12 for an allowed structured field.
 * Any status can change to any other different status, including `ARCHIVED` back to `ACTIVE`. This is a conscious simplification.
-* No rate limiting on the administrative endpoint (SEC-04).
+* Rate limiting (SEC-04) is per client IP: `identity-account-status-change`, default 20 requests per 60 s (`RateLimiting__AccountStatusChange__*`, see `Modules/Identity/RateLimiting/README.md`). It runs after the Access middleware, so only requests of an authorized administrator are counted; a refused request gets `429` with `Retry-After` and reaches neither the handler nor Audit.
 * Selective revocation and listing of own sessions (IDN-07) is the next task; it reuses `SessionManager.RevokeSession` and `ListForUser`.

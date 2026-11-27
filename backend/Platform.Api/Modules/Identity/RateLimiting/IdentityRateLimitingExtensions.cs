@@ -48,6 +48,7 @@ public static class IdentityRateLimitingExtensions
             limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             limiter.AddPolicy(RateLimitPolicies.Login, http => Partition(http, o => o.Login));
             limiter.AddPolicy(RateLimitPolicies.PasswordReset, http => Partition(http, o => o.PasswordReset));
+            limiter.AddPolicy(RateLimitPolicies.AccountStatusChange, http => Partition(http, o => o.AccountStatusChange));
             limiter.OnRejected = OnRejected;
         });
 
@@ -175,7 +176,12 @@ public static class IdentityRateLimitingExtensions
             return Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds));
 
         var options = http.RequestServices.GetRequiredService<IOptions<IdentityRateLimitOptions>>().Value;
-        var window = policy == RateLimitPolicies.PasswordReset ? options.PasswordReset : options.Login;
+        var window = policy switch
+        {
+            RateLimitPolicies.PasswordReset => options.PasswordReset,
+            RateLimitPolicies.AccountStatusChange => options.AccountStatusChange,
+            _ => options.Login
+        };
         return Math.Max(1, window.WindowSeconds);
     }
 }

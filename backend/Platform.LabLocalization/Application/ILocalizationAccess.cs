@@ -2,7 +2,11 @@ namespace Platform.LabLocalization.Application;
 
 public enum LocalizationAction
 {
+    /// <summary>Add a translation to a revision. The resource is the revision.</summary>
     AddTranslation = 1,
+
+    /// <summary>Read a laboratory's content in a language. The resource is the laboratory.</summary>
+    ReadContent = 2,
 }
 
 /// <summary>
@@ -12,5 +16,5 @@ public enum LocalizationAction
 /// </summary>
 public interface ILocalizationAccess
 {
-    bool IsAllowed(Guid actorId, LocalizationAction action, Guid resourceId);
+    Task<bool> IsAllowedAsync(Guid actorId, LocalizationAction action, Guid resourceId, CancellationToken ct = default);
 }

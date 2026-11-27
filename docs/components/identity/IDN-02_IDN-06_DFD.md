@@ -13,10 +13,11 @@
   - Every protected request is checked against the session store by `SessionCheckMiddleware`; logout and revocation take effect on the next request (IDN-02, UC-05, implemented).
   - A user with MFA enabled or required would receive a `MfaPending` session first, promoted to `Active` only after a valid TOTP code, and would enroll an authenticator by QR code (IDN-06, **planned**: no MFA code exists yet, every login is `Active`).
   - In Development only, the API applies the identity migrations and seeds four known accounts (US-09, implemented).
+  - Every state-changing request that carries the session cookie, and every login, must carry a valid CSRF token (US-15, SEC-03, implemented).
 - Contracts with other modules:
   - Provided: `IIdentityContext` (implemented by `SessionIdentityContext`), `ISessionManager` (implemented by `SessionManager`), `IMfaPolicy` (proposed).
   - Used: `IAuditWriter` (`LoggerAuditWriter`), account status from IDN-03, per-account lockout from IDN-05 (inside `CredentialVerifier`).
-- Implementation status: see [Implementation status](#implementation-status). P1, P3, P4 and P6 are implemented. P2 and P5 (MFA) are planned.
+- Implementation status: see [Implementation status](#implementation-status). P1, P3, P4, P6 and P7 are implemented. P2 and P5 (MFA) are planned.
 
 This file covers only the data flow diagram (US-10). The component architecture diagram is a separate story (US-11).
 
@@ -36,6 +37,7 @@ flowchart LR
       P3(("3 Session check"))
       P4(("4 Logout and revoke"))
       P6(("6 Dev migrate and seed - Development only - TB4"))
+      P7(("7 CSRF token and check"))
     end
     OM["E3 Other modules: IDN-03 status change, IDN-01 registration - in-process, via contracts"]
   end
@@ -52,6 +54,9 @@ flowchart LR
   E1 <-->|"F3 enroll request / otpauth URI once, confirm code"| P5
   E1 <-->|"F4 every protected request with cookie / 401 or result"| P3
   E1 <-->|"F5 logout request / 204, cookie cleared"| P4
+  E1 <-->|"F21 token request / two CSRF cookies and token; X-CSRF-TOKEN on every state-changing request"| P7
+  P7 -->|"F22 only requests with a valid token, or exempt"| P1
+  P7 -->|"F22"| P3
   E1 -.-|"F14 QR scan and typed code, out-of-band"| E2
 
   P1 <-->|"F6 reserve attempt atomically, read hash and status, write failed_login_count and lockout_end, reset on success - no password sent, hash stays in P1"| D1
@@ -82,7 +87,7 @@ flowchart LR
   classDef implemented fill:#d4edda,color:#000;
   classDef neighbour fill:#e2e3f3,color:#000;
   class P2,P5 planned;
-  class P1,P3,P4,P6,D1,D2 implemented;
+  class P1,P3,P4,P6,P7,D1,D2 implemented;
   class D3 stub;
   class OM,D5 neighbour;
 ```
@@ -110,6 +115,7 @@ Legend: circle = process, rectangle = external actor or module, cylinder = data 
 | P3 | Session check | `SessionCheckMiddleware` on every non-anonymous endpoint, `GET /api/auth/me` (`AuthController.Me`) | implemented |
 | P4 | Logout and revoke | `POST /api/auth/logout` (`LogoutService`), `ISessionManager.RevokeAllForUser`, `RevokeSession`, `ListForUser` (`SessionManager`) | logout implemented, see [`IDN-02_LOGOUT.md`](./IDN-02_LOGOUT.md). Revoke all, revoke one and list are implemented as methods, no HTTP endpoint for revoke one or list yet (IDN-07) |
 | P6 | Dev migrate and seed | `DevelopmentDatabase.ApplyIdentityMigrationsAsync`, `DevelopmentAccountSeeder.SeedDevelopmentAccountsAsync` at API startup | implemented, Development only, see [`DEVELOPMENT.md`](../../DEVELOPMENT.md) |
+| P7 | CSRF token and check | `GET /api/auth/csrf` (`AuthController.Csrf`), `CsrfProtectionMiddleware` right after routing, before every session check, Access and rate limiting | implemented, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md) |
 
 Process numbers follow the team work plan (P5 is listed after P2 only for layout).
 
@@ -127,11 +133,11 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 
 | Flow | Direction | Data | Endpoint or contract | Store / table | Status |
 |-|-|-|-|-|-|
-| F1 | E1 <-> P1 | E-mail and password in. Session cookie `SecurityLab.Session` (`HttpOnly`, `Secure`, `SameSite=Strict`) and `{ userId }`, or one generic `401 invalid_credentials`. `400 invalid_request`, `503 login_unavailable`. The token is never in the body. `Cache-Control: no-store` | `POST /api/auth/login` | none | implemented |
+| F1 | E1 <-> P1 | E-mail and password in, with `X-CSRF-TOKEN` (US-15, `403 csrf_invalid` without it). Session cookie `SecurityLab.Session` (`HttpOnly`, `Secure`, `SameSite=Strict`) and `{ userId }`, or one generic `401 invalid_credentials`. `400 invalid_request`, `503 login_unavailable`. The token is never in the body. `Cache-Control: no-store` | `POST /api/auth/login` | none | implemented |
 | F2 | E1 <-> P2 | 6-digit TOTP code in, requires a `MfaPending` cookie. Promotion or generic error out | `POST /api/auth/mfa/verify` (proposed) | none | planned |
 | F3 | E1 <-> P5 | Enroll request. `otpauth://` URI shown once. Confirmation code | `POST /api/auth/mfa/enroll`, `.../enroll/confirm` (proposed) | none | planned |
-| F4 | E1 <-> P3 | Cookie on every request. `401` without reason, or the normal response. Endpoints with `[AllowAnonymous]` skip the check. No CSRF token yet (US-15), `SameSite=Strict` is the only layer | any protected endpoint, e.g. `GET /api/auth/me`, `PUT /api/admin/accounts/{id}/status`, `POST /api/admin/accounts` | none | implemented |
-| F5 | E1 <-> P4 | Logout request with the cookie. `204` and the cleared cookie. Always the same answer | `POST /api/auth/logout` (`[AllowAnonymous]`) | none | implemented |
+| F4 | E1 <-> P3 | Cookie on every request. `401` without reason, or the normal response. Endpoints with `[AllowAnonymous]` skip the check. A state-changing request also needs `X-CSRF-TOKEN` (F21, F22), `SameSite=Strict` is a second layer | any protected endpoint, e.g. `GET /api/auth/me`, `PUT /api/admin/accounts/{id}/status`, `POST /api/admin/accounts` | none | implemented |
+| F5 | E1 <-> P4 | Logout request with the cookie. `204` and the cleared cookie. Always the same answer. No CSRF token needed (documented exception, US-15) | `POST /api/auth/logout` (`[AllowAnonymous]`) | none | implemented |
 | F6 | P1 <-> D1 | E-mail normalized. In order: (1) `ReserveAttemptAsync` charges the attempt in one atomic `UPDATE` before the hash check, and an attempt that finds the limit already charged writes `lockout_end` and restarts `failed_login_count`. (2) `FindByEmailAsync` reads id, status, `password_hash`, `failed_login_count` and `lockout_end`. (3) The hash is checked with BCrypt inside P1 (also for unknown e-mails and locked accounts, dummy hash when there is none). (4) A correct password on an unlocked account calls `TryClearFailuresAsync`, one atomic `UPDATE` that resets `failed_login_count`, clears `lockout_end` and refuses the login if the account locked during the hash. (5) Every other attempt calls `LockIfLimitReachedAsync`, which writes `lockout_end` and restarts the counter at the limit, then reads `lockout_end` back. Locked accounts and unknown e-mails change no row. The reset in (4) also runs for blocked and archived accounts, but `LoginService` lets only `Active` continue, so it gives no access (accepted by the IDN-02 owner). No secrets leave: only the normalized e-mail, the account id and the counter and lockout values go to D1, the password never does, and the hash is read but never written, returned or logged. The counter and `lockout_end` are never returned to E1, a locked account gets the same `401` as in F1 | `ICredentialVerifier`, `ICredentialStore` (`EfCredentialStore`: `ReserveAttemptAsync`, `FindByEmailAsync`, `TryClearFailuresAsync`, `LockIfLimitReachedAsync`), `IPasswordHasher` | `identity.accounts` | implemented for password, status and lockout, MFA state planned |
 | F7 | P2 <-> D1 | TOTP secret read, attempt counter and last used step read and updated | MFA service | `identity.accounts` (MFA columns) | planned |
 | F8 | P5 <-> D1 | MFA state read, TOTP secret written after confirmation. Existing secret never overwritten | MFA service | `identity.accounts` (MFA columns) | planned |
@@ -147,12 +153,14 @@ Process numbers follow the team work plan (P5 is listed after P2 only for layout
 | F18 | P6 -> D1 | Pending migrations applied. Four accounts upserted (administrator, student, teacher, blocked student), BCrypt hash set only if missing | `ApplyIdentityMigrationsAsync`, `SeedDevelopmentAccountsAsync` | `identity.accounts`, creates `identity.sessions` | implemented. Throws outside Development |
 | F19 | E3 <-> D1, D2, D3 | IDN-03 locks the account row, writes the new status, revokes all sessions (Blocked, Archived) and writes the `account.status.changed` Audit record in one transaction. Rolled back as a whole if any step fails | `ChangeAccountStatus`, `IAccountStatusStore` (`EfAccountStatusStore`), `ITransactionalAuditWriter` | `identity.accounts`, `identity.sessions`, `audit.audit_events` | implemented. Login and the session check read the same status |
 | F20 | E3 -> D5 | IDN-01 creates an account for the administrator-only endpoint | `POST /api/admin/accounts`, `IAccountRegistration` | `identity.AspNetUsers` | implemented by IDN-01. The new account cannot log in (see [Known deviations](#known-deviations)) |
+| F21 | E1 <-> P7 | Token request. Out: HttpOnly cookie `__Host-SecurityLab.Csrf` (only when missing), readable cookie `__Host-SecurityLab.CsrfToken` and `{ token }`, `no-store`. The request token is bound to the session cookie sent with it (SHA-256 inside the encrypted token); login sets a new readable token for the new session, logout removes both cookies. In, on every state-changing request: header `X-CSRF-TOKEN` and the HttpOnly cookie | `GET /api/auth/csrf`, `IAntiforgery` | none (Data Protection key ring) | implemented |
+| F22 | P7 -> P1, P3 and every other endpoint | A state-changing request with a valid session, or a login, passes only with a valid token for that session. Otherwise `403 csrf_invalid` before any session check, Access decision, rate limit or audit, so nothing changes, not even `last_activity_at`. Whether the session is valid is read without recording activity. `GET`, logout, the OIDC callback and requests without a valid session are not checked; an invalid session still gets `401` from P3 | `CsrfProtectionMiddleware` | none | implemented |
 
 ## Trust boundaries
 
 | ID | Boundary | Crossed by | Rule |
 |-|-|-|-|
-| TB1 | Internet / browser and server | F1 to F5 | Everything from E1 is untrusted and validated on the server. The cookie carries only an opaque random token. Hiding screens in the UI is not a control. |
+| TB1 | Internet / browser and server | F1 to F5, F21 | Everything from E1 is untrusted and validated on the server. The cookie carries only an opaque random token. Hiding screens in the UI is not a control. |
 | TB2 | Server and database / memory / log | F6 to F13, F18 to F20 | Only the Identity module touches `identity.accounts` and `identity.sessions`. Other modules go through contracts (F15, F16). Secrets come from the local `.env`, user-secrets or environment, never from code. |
 | TB3 | Identity module and other modules (logical, in-process) | F15, F16 | Contracts only. `IIdentityContext` never exposes passwords, tokens or session identifiers. `ISessionManager` does not decide who may call it, the caller checks permission first. |
 | TB4 | Development and every other environment | F17, F18 | Migrations and seeding run only when `IsDevelopment()`, `RequireDevelopment` throws otherwise. The seed password is never in the repository. Without a connection string or password the seed is skipped. |
@@ -178,7 +186,7 @@ The phone (E2) is outside all boundaries. The TOTP secret would leave the server
 | `MfaPending` cookie sent to a protected endpoint (UI bypassed) | F4 | Planned: `IsAuthenticated` is false until `Active` (IDN-06 criterion) |
 | Wrong or replayed TOTP code | F2 | Planned: session stays `MfaPending`, limited attempts, replay rejected |
 | Enrollment when MFA is already enabled | F3 | Planned: rejected, existing secret not overwritten |
-| State-changing request without a valid CSRF token | F4 | Planned (US-15). Today only `SameSite=Strict` helps |
+| State-changing request without a valid CSRF token (missing, forged, from another browser, issued for another session, without its cookie), also on login | F1, F4, F22 | `403 csrf_invalid` before any other check, nothing changes, the session is not extended (US-15) |
 
 ## Sensitive data
 
@@ -191,7 +199,7 @@ The phone (E2) is outside all boundaries. The TOTP secret would leave the server
 | `failed_login_count`, `lockout_end` | D1, F6 | Not secret, but they reveal account state. Never returned to E1 and never put in an audit event, which carries only the account id and the detail `account locked` |
 | TOTP secret | F3 once, D1 | Planned: shown once at enrollment, stored protected (US-22), never logged or returned again |
 | TOTP code | F2, F3 | Planned: never logged. Replay and guessing limited |
-| CSRF token | F4 | Planned (US-15) |
+| CSRF token pair | F21, F22 | Made and checked by ASP.NET Core antiforgery (Data Protection), no custom cryptography. Bound to the session by the SHA-256 of the session cookie, inside the encrypted token. Cookies `__Host-`, `Secure`, `SameSite=Strict`; the cookie token is `HttpOnly`. Never logged |
 
 ## Security requirements
 
@@ -207,7 +215,7 @@ These are the places where the code and the intended single data model differ. T
 - **Administrator check is a stub.** `ConfigAdminDirectory` reads `Stub:AdminIds` from configuration. The `role` column in D1 is not used for authorization yet.
 - **`POST /api/admin/accounts` resolves the caller from `Identity:DevSubjectId`** (`DevelopmentSubjectResolver`), not from the session. Outside Development the caller is always unauthenticated.
 - **Login and logout audit goes to the application log** (D3), not to a store owned by AUD. IDN-03 already writes to `audit.audit_events`.
-- **No CSRF token (US-15), no inactivity timeout.** The session lifetime is fixed at 8 hours (US-14).
+- **No inactivity timeout.** The session lifetime is fixed at 8 hours (US-14).
 
 ## Implementation status
 
@@ -222,9 +230,9 @@ Present in the repository now:
 - Session revocation: `SessionManager.RevokeAllForUser`, `RevokeSession` and `ListForUser` work against `identity.sessions`. `ChangeAccountStatus` (IDN-03) calls `RevokeAllForUser` when it blocks or archives an account.
 - US-09 development seed: `DevelopmentDatabase` and `DevelopmentAccountSeeder` (four accounts, Development only), test helper `TestUsers` in `Platform.Identity.Tests`.
 - Frontend: `frontend/src/auth/authApi.ts` calls `/api/auth/me`, `/api/auth/login` and `/api/auth/logout`, `frontend/src/api/accounts.ts` calls `POST /api/admin/accounts`.
-- Not used on the request path: `StubIdentityContext`, `AnonymousIdentityContext` and `StoreSessionManager` (a stub whose revoke and list methods do nothing, no longer registered in `Program.cs`).
+- Not used on the request path: `StubIdentityContext` and `AnonymousIdentityContext`. The old `StoreSessionManager` stub has been deleted.
 
-Planned (this DFD describes them, but the code does not exist yet): P2 MFA verify, P5 MFA enroll, `IMfaPolicy`, MFA columns in D1, CSRF token, endpoints for revoke one and list sessions.
+Planned (this DFD describes them, but the code does not exist yet): P2 MFA verify, P5 MFA enroll, `IMfaPolicy`, MFA columns in D1, endpoints for revoke one and list sessions.
 
 Open decisions that can change this diagram (to confirm with the assistant): which groups have mandatory MFA, physical names of the MFA columns, exact MFA endpoint names, when D5 is merged into D1.
 

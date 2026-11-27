@@ -72,8 +72,9 @@ export function runRevisionAction(
     rowVersion: revision.rowVersion,
     contentHash: revision.contentHash,
   }
+  // Server prihvata komentar samo uz "return"; za submit/approve komentar daje 400 invalid_input.
   const trimmed = comment?.trim()
-  if (trimmed) body.comment = trimmed
+  if (action === 'return' && trimmed) body.comment = trimmed
   return apiRequest('POST', `${base}/${enc(revision.id)}/${action}`, body, { 'Idempotency-Key': idempotencyKey })
 }
 
@@ -108,6 +109,22 @@ export function actionErrorMessage(code: string, fallback: string): string {
       return 'Revizija ne postoji ili nemate pristup.'
     case 'forbidden':
       return 'Nemate dozvolu za ovu radnju.'
+    case 'idempotency_key_reused':
+      return 'Ova radnja je već poslata sa drugačijim podacima. Osvežite prikaz i pokušajte ponovo.'
+    case 'policy_missing':
+      return 'Kurs nema podešenu politiku objave. Obratite se administratoru kursa.'
+    case 'revision_number_exhausted':
+      return 'Za ovu laboratoriju više nije moguće dodeliti broj revizije.'
+    case 'publication_unavailable':
+    case 'laboratory_unavailable':
+    case 'audit_unavailable':
+      return 'Servis trenutno nije dostupan, radnja nije izvršena. Pokušajte ponovo kasnije.'
+    case 'storage_failure':
+      return 'Došlo je do greške pri čuvanju. Radnja nije izvršena.'
+    case 'invalid_input':
+      return 'Zahtev nije ispravan. Osvežite prikaz i pokušajte ponovo.'
+    case 'unauthenticated':
+      return 'Sesija je istekla. Prijavite se ponovo.'
     default:
       return fallback
   }

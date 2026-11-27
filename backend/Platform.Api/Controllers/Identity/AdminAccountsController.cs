@@ -1,7 +1,9 @@
 using Platform.Access.AspNet;
  using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
  using Platform.Api.Enums.Identity;
  using Platform.Api.Models.Identity;
+using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Security.IdentityAccess;
  using Platform.Api.Services.Identity;
 
@@ -12,6 +14,7 @@ using Platform.Api.Security.IdentityAccess;
  public class AdminAccountsController(ChangeAccountStatus changeStatus, UnlockAccount unlockAccount) : ControllerBase
  {
      [RequireAccess(IdentityAccessActions.AccountStatusChange)]
+     [EnableRateLimiting(RateLimitPolicies.AccountStatusChange)] // SEC-04
      [HttpPut("{id:guid}/status")]
      public async Task<IActionResult> ChangeStatus(Guid id, [FromBody] ChangeStatusRequest body, CancellationToken ct)
      {

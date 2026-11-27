@@ -4,9 +4,10 @@
 
 **Zahtjevi:** REV-05 (provjera prava i odvajanje duznosti), ACC-05
 (podrazumijevano odbijanje), AUD-01, AUD-02, AUD-03 i AUD-04. Za IDN-05 ovaj
-dio obezbjedjuje politiku `account.unlock`; ne implementira lockout ili IP limiter.
+dio povezuje audit odgovora 429 i prijave zakljucanog naloga, uz politiku
+`account.unlock`. Lockout algoritam i IP limiter su zavisnosti drugih clanova tima.
 
-Dokument prikazuje implementaciju dostupnu na `main` commitu `f225edb`.
+Dokument prati `main` osnovu `e2c97fe`, pregledanu 23.11.2026.
 Prikazani poslovni i Identity procesi su zavisnosti komponente: njihovo ukljucivanje
 u dijagram ne znaci da pripadaju Lukinom zadatku. Specifikacija i kriterijumi za
 komponentni DFD povezani su preko [platformskog pregleda](../../DATA_FLOW.md).
@@ -29,7 +30,7 @@ flowchart TB
     P1(("P1 Korelacija, sesija i revision.entry"))
     P2(("P2 IAccessDecision i REV-05 politike"))
     P3(("P3 Revision API / ReviewService: poslovni tok"))
-    P4(("P4 RevisionAuditForwarder i ITrustedAuditWriter"))
+    P4(("P4 CentralAccessAuditWriter i ITrustedAuditWriter"))
     P5(("P5 ITransactionalAuditWriter"))
     P6(("P6 Tehnicki alarm bez tajni"))
   end
@@ -40,6 +41,7 @@ flowchart TB
     D3[("D3 laboratories: LabRevisions i CoursePublishPolicies")]
     D4[("D4 laboratories: ReviewOperations i RevisionDecisions")]
     D5[("D5 audit.audit_events: append-only")]
+    D7[("D7 LAB skladiste: laboratorija, autor i stvarni kurs")]
   end
 
   E1 -->|"HTTP ruta, session cookie, ID revizije / kursa, tijelo zahtjeva"| P1
@@ -48,12 +50,14 @@ flowchart TB
   P1 -->|"Potvrdjen subjekt, action=revision.entry, serverska korelacija"| P2
   P2 -->|"Entry Allow: zahtjev i potvrdjeni kontekst"| P3
   P3 -->|"Akcija, konkretan resurs, subjekt i korelacija"| P2
+  P3 -->|"Kreiranje: ID laboratorije kroz javni repository ugovor"| D7
+  D7 -->|"CreatedBy i CourseId; nepoznat ili drugi kurs se odbija"| P3
   P2 -->|"ID revizije: zahtjev za autora, kurs i politiku"| D3
   D3 -->|"AuthorId, CourseId, RequiresIndependentApproval"| P2
   P2 -->|"UserId, CourseId, Action, trenutno vrijeme"| D2
   D2 -->|"Eksplicitno pravo, IsActive i ExpiresAt"| P2
   P2 -->|"Allow / Deny za trazenu operaciju i citanje"| P3
-  P2 -->|"Deny poznate akcije, reason code, policy ID / verzija, korelacija"| P4
+  P2 -->|"Deny, validni action / policy podaci, razlog i korelacija"| P4
   P4 -->|"Validiran access.denied; potvrdjeni ili Anonymous akter"| D5
   P4 -->|"Upis nije potvrdjen: status i korelacija"| P6
   P3 -->|"U transakciji: stanje, verzija, hash i politika kursa"| D3
@@ -93,7 +97,7 @@ konekciju. D2 se u trenutnoj registraciji povezuje preko Laboratories konekcije.
 
 | Akcija | Serverski izvor i provjera |
 |---|---|
-| `revision.create` | Resurs je kurs; potrebno je eksplicitno create pravo. Poslovni tok posebno provjerava vlasnistvo laboratorije i postojanje politike kursa. |
+| `revision.create` | Kurs je ucitan iz LAB skladista. Provjeravaju se autor laboratorije, poznata i podudarna pripadnost kursu, eksplicitno create pravo i politika kursa. |
 | `revision.read` | Kurs se ucitava iz revizije; potrebno je read pravo. |
 | `revision.mine` | Korisnik mora biti autor i imati mine pravo. |
 | `revision.pending.reviews` | Provjera prava za kurs svake vracene revizije. |
@@ -111,8 +115,8 @@ odobriti svoju reviziju; i dalje vaze sve poslovne provjere.
 |---|---|
 | Nema sesije, sesija je opozvana / istekla, nalog nije aktivan | P1/P2 odbijaju entry prije handlera; P4 pokusava trajni upis `access.denied`. Za nepotvrdjen identitet akter je Anonymous bez korisnickog ID-ja. |
 | Nema prava, drugi kurs ili zabranjeno samoodobravanje | P2 vraca Deny; nema poslovne mutacije. P4 upisuje poznatu odbijenu akciju. HTTP status zavisi od rute: mutacije vracaju 403, pojedinacno citanje skriva resurs sa 404. |
-| Politika odbije / provjera politike baci gresku | Audit razlikuje `policy_denied` i `policy_error`. Nepoznate akcije ostaju odbijene, ali ih REV-05 audit filter ne prosljedjuje kao poznate REV-05 akcije. |
-| Audit odbijenog pristupa nije dostupan | Pristup ostaje odbijen; P6 podize tehnicki alarm. Trajni zapis se ne predstavlja kao uspjesan. P4 koristi zaseban timeout od jedne sekunde i cuva postojeci Access audit tok. |
+| Politika odbije / provjera politike baci gresku | Audit razlikuje `policy_denied` i `policy_error`. Centralni mapper izostavlja nevalidne action/policy vrijednosti. Nepoznate akcije ostaju odbijene i centralni tok obradjuje odbijanje. |
+| Audit odbijenog pristupa nije dostupan | Pristup ostaje odbijen; P6 podize tehnicki alarm. Engine i middleware ogranicavaju pokusaj zasebnim AuditTimeout rokom, bez vezivanja za prekid klijenta. To nije garantovana isporuka pri kvaru. |
 | Audit uspjesne mutacije nije potvrdjen | P3 ne izvrsava commit: stanje, odluka i potvrda operacije se ponistavaju; odgovor je `503 audit_unavailable`. |
 | Ponovljen isti idempotentni zahtjev | Dozvole se ponovo provjeravaju; vraca se sacuvana potvrda bez druge objave i drugog poslovnog audit dogadjaja. |
 
@@ -149,11 +153,32 @@ flowchart LR
 
 `account.unlock` je sistemska akcija, bez revizije ili kursa kao resursa.
 Implementirani su registracija i politika koja koristi `IAdminDirectory`.
-Odbijanje ove poznate akcije je obuhvaceno audit fabrikom i forwarder-om iz P4
+Odbijanje ove poznate akcije je obuhvaceno centralnim Access audit tokom iz P4
 kada potrosac pozove zajednicki Access tok. Ovdje nije prikazana izvrsena HTTP
 operacija otkljucavanja: trenutno nije povezana takva ruta sa ovom politikom.
 Postojanje ciljnog naloga, promjena lockout brojaca i audit uspjesnog otkljucavanja
 ostaju odgovornost Identity potrosaca. Ovo nije tvrdnja da je cijeli IDN-05 zavrsen.
+
+## IDN-05: audit postojece prijave i IP ogranicenja
+
+```mermaid
+flowchart LR
+  C["Klijent: email i lozinka"] --> R(("IP limiter"))
+  R -->|"Dozvoljen zahtjev"| L(("Login i credential provjera"))
+  L <-->|"Brojac i LockoutEnd"| I[("Identity baza")]
+  R -->|"429; Anonymous i serverska korelacija"| A(("IdentityAuditProducer"))
+  L -->|"401 account_locked; nalog kao cilj"| A
+  A -->|"Javni ITrustedAuditWriter ugovor"| D[("Audit baza")]
+  R -->|"429 + Retry-After"| C
+  L -->|"Genericki 401; bez sesije"| C
+```
+
+IP odbijanje zapisuje auth.login.throttled/Denied bez resursa naloga ili detalja
+zahtjeva. Pokusaj upisa ima sopstveni scope i rok nezavisan od prekida klijenta.
+Prijava zakljucanog naloga zapisuje auth.login/Failure sa razlogom account_locked;
+akter je Anonymous. Promjena lockout stanja i ovaj audit nisu atomska transakcija.
+Trenutni ugovor ne razlikuje nastanak blokade od ponovljenog pokusaja. Zavisnosti
+za otkljucavanje i pouzdan zapis prelaza su u [KT2-STATUS](KT2-STATUS.md).
 
 ## Veza sa kodom i dokazima
 
@@ -162,7 +187,7 @@ ostaju odgovornost Identity potrosaca. Ovo nije tvrdnja da je cijeli IDN-05 zavr
 - [Registracija politika](../../../backend/Platform.Api/Security/RevisionAuthorization/RevisionAuthorizationRegistration.cs),
   [dozvole](../../../backend/Platform.Api/Security/RevisionAuthorization/RevisionPermissions.cs)
   i [serverski citac resursa](../../../backend/Platform.Api/Security/RevisionAuthorization/RevisionResourceReader.cs).
-- [Odbijeni zahtjevi i tehnicki alarm](../../../backend/Platform.Api/Security/RevisionAuthorization/RevisionAuditForwarding.cs),
+- [Odbijeni zahtjevi i tehnicki alarm](../../../backend/Platform.Api/Security/AccessAudit/CentralAccessAuditWriter.cs),
   [audit sadrzaj](../../../backend/Platform.Api/Security/RevisionAuthorization/RevisionAuditEventFactory.cs)
   i [transakcijski poslovni tok](../../../backend/Platform.Api/Modules/RevisionReviews/ReviewService.cs).
 - [Postojeci HTTP/PostgreSQL testovi](../../../backend/Platform.Laboratories.IntegrationTests/RevisionHttpWorkflowTests.cs):
@@ -174,5 +199,6 @@ ostaju odgovornost Identity potrosaca. Ovo nije tvrdnja da je cijeli IDN-05 zavr
 - [Politike, ukljucujuci account.unlock](../../../backend/Platform.Tests/RevisionAuthorization/RevisionActionPolicyTests.cs),
   [odluke](ADR-001.md) i [postojeci dokazi testiranja](TEST-EVIDENCE.md).
 
-Ovaj dodatak mijenja samo dokumentaciju. Navedeni testovi su veza sa dokazima
-implementacije; nisu izvjestaj o novom izvrsavanju testova za ovaj dokument.
+Produkcioni Program ne registruje stari RevisionAuditForwarder uz centralni writer.
+To bi moglo duplirati denial zapise. Poslovni audit i dalje koristi zaseban javni
+transakcijski ugovor. Aktuelno izvrsavanje testova navodi [KT2-DEMO](KT2-DEMO.md).

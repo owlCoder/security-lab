@@ -1,15 +1,35 @@
 flowchart TD
-  CLIENT["Browser or API client"] -->|"HTTPS; real session cookie; DTO"| API["ADM-08 endpoints: explicit central Access metadata"]
-  API --> ACCESS["Shared Access middleware and decision engine"]
-  ACCESS --> SUBJECT["AdministrationSubjectProvider: validated Identity session"]
-  SUBJECT --> IDENTITY["ISessionManager and IAccountStatusReader"]
-  ACCESS --> POLICY["PersistentAdministrationPolicy: current scoped grant"]
-  API --> SERVICE["PersistentAdministrationService and domain validation"]
-  POLICY --> SESSION["PostgresAdministrationSession: fresh reads and serialized writes"]
-  SERVICE --> SESSION
-  SESSION -->|"Current active account"| IDENTITY
-  IDENTITY --> IDDB[("Identity database: accounts and sessions")]
-  SESSION --> DB[("coursework_admin: settings, grants, producer outbox")]
-  SERVICE -->|"Revalidate real session before commit"| SUBJECT
-  OPERATOR["Explicit operator migration tool"] -->|"Schema owner; no HTTP root provisioning"| DB
-  DB -.-> PENDING["Central delivery of administrative outbox: pending"]
+  subgraph CLIENT["Trust boundary: untrusted client"]
+    client["Browser / PowerShell"]
+  end
+  subgraph SERVER["Trusted consumer API / explicit operator"]
+    api["ADM-08 HTTP API; 4 explicit Access requirements"]
+    access["Shared Platform.Access; current per-course policy"]
+    service["PersistentAdministrationService; validation + final provider checks"]
+    operator["Explicit operator CLI; no HTTP root provisioning"]
+    bootstrap["Bootstrap first root; active providers + per-course lock"]
+    relay["Explicit relay batch; stable IDs + acknowledged receipts"]
+  end
+  subgraph PROVIDERS["Provider and storage boundary"]
+    identity["Identity provider; real accounts and sessions"]
+    catalog["ACC-01 read-only adapter; current catalog status"]
+    db["Own PostgreSQL schema; settings, grants, outbox, receipts"]
+    audit["Central ITrustedAuditWriter; delegation / denied schemas"]
+    central["Central Audit PostgreSQL; append-only records"]
+    pending["Settings / bootstrap / read success; retained pending catalog mapping"]
+  end
+  client -->|"HTTPS + real session"| api
+  api -->|"authorize"| access
+  access -->|"current subject/account"| identity
+  access -->|"course existence/status"| catalog
+  access -->|"current grant"| db
+  api -->|"allowed operation"| service
+  service -->|"atomic change + producer event"| db
+  operator -->|"confirmed IDs"| bootstrap
+  bootstrap -->|"settings + root + operator event"| db
+  operator -->|"relay-once"| relay
+  db -->|"immutable producer events"| relay
+  relay -->|"existing accepted types"| audit
+  audit -->|"append / idempotent retry"| central
+  relay -->|"acknowledgement only after success"| db
+  db -->|"no false delivery receipt"| pending

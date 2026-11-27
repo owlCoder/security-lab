@@ -8,12 +8,16 @@ rezultati i scenariji u [TEST-EVIDENCE](TEST-EVIDENCE.md).
 Dijagram tokova podataka, granice povjerenja i negativni tokovi prikazani su u
 [DATA-FLOW](DATA-FLOW.md).
 
+Aktuelni obim i zavisnosti su u [KT2-STATUS](KT2-STATUS.md), a ponovljiva
+demonstracija u [KT2-DEMO](KT2-DEMO.md). TEST-EVIDENCE i ACCESS-ALIGNMENT su
+istorijski izvjestaji za datume i commit-e koje navode.
+
 ## Akcije i provjere
 
 | Akcija | Resurs za IAccessDecision | Dodatni uslov |
 |---|---|---|
 | revision.entry | null (ulazna provjera) | Potvrdjen aktivni korisnik; ne zamjenjuje prava nad konkretnom revizijom |
-| revision.create | course sa GUID-om kursa | Eksplicitno pravo create; poslovni tok provjerava laboratoriju i politiku kursa |
+| revision.create | course sa GUID-om kursa ucitanog iz laboratorije | Eksplicitno create pravo; autor laboratorije, poznat i podudaran kurs, postojeca politika kursa |
 | revision.read | revision sa GUID-om revizije | Eksplicitno read pravo za kurs ucitan iz revizije |
 | revision.mine | revision | Korisnik je autor i ima mine pravo |
 | revision.pending.reviews | revision | Eksplicitno pravo za kurs te revizije |
@@ -70,14 +74,17 @@ API host registruje stvarni PostgreSQL Audit writer pozivom
 koristi `ConnectionStrings:Audit`, dok `ITransactionalAuditWriter` za REV promjene
 koristi PostgreSQL transakciju koju mu preda pozivalac. Ne treba vracati staru
 API registraciju `AddAuditPersistence` sa Laboratories konekcijom.
-RevisionAuditForwarder cuva postojeci Access audit tok i prosljedjuje odbijene
-revizijske akcije kroz ITrustedAuditWriter. Kratkotrajni scope izbjegava hvatanje scoped writera u singleton
+Od ACC-05 integracije u PR-u #197, Program koristi `AddCentralAccessAudit()` i
+`CentralAccessAuditWriter` za odbijene Access odluke, ukljucujuci REV akcije.
+`RevisionAuditForwarder` je stari adapter za izolovane hostove/testove i nije
+registrovan u Program.cs; dodatna registracija uz centralni writer moze duplirati
+zapise. Zaseban scope centralnog writera izbjegava hvatanje scoped writera u singleton
 Access servis. Akter dolazi iz validirane sesije; korelacija iz postojeceg serverskog
 middleware-a. Arbitraran HTTP actor ili correlation header se ne koristi.
 
 Ovo ukljucuje i `revision.entry`: odbijanje na ulaznoj provjeri prije poslovnog
-handlera takodje stize u trajni Audit store. Endpoint metadata i audit filter
-koriste zajednicku RevisionActions.Entry konstantu. Za neautentifikovan zahtjev
+handlera takodje stize u trajni Audit store. Endpoint metadata koristi
+RevisionActions.Entry konstantu, a centralni mapper cuva validnu akciju. Za neautentifikovan zahtjev
 upisuje se jedan `access.denied`, Anonymous akter bez ID-ja, action=revision.entry,
 denialReason=unauthenticated i serverska korelacija. Time se ne dodjeljuju nova
 prava, niti entry postaje kursna akcija ili zamjena za naknadne provjere resursa.
@@ -87,6 +94,12 @@ Poslovni tok upisuje dogadjaje `revision.submitted`, `revision.returned` i
 ID operacije i content hash. Objava dodatno sadrzi ID laboratorije i broj objavljene
 verzije. Komentar, snapshot, referentni odgovor, cookie i token nisu audit detalji.
 Audit validator zahtijeva obavezna polja i provjerava njihove formate.
+
+IDN-05 IP odbijanje koristi `auth.login.throttled`/Denied: Anonymous akter,
+serverska korelacija, bez resursa naloga i bez detalja zahtjeva. Zakljucani nalog
+koristi `auth.login`/Failure sa `reasonCode=account_locked`; poznati nalog je cilj,
+a nepotvrdjeni pozivalac Anonymous. Ovaj razlog ne razlikuje novo zakljucavanje
+od narednog pokusaja nad vec zakljucanim nalogom. Granice su u [KT2 statusu](KT2-STATUS.md).
 
 ReviewService poziva javni ITransactionalAuditWriter iz Audit modula sa svojom
 PostgreSQL transakcijom. Audit modul ostaje vlasnik tabele i validacije; API ne
@@ -141,6 +154,13 @@ Za tipican tok autor dobija create/read/mine/submit, a pregledavac
 read/pending.reviews/approve/return za konkretan kurs. IsActive=false ili ExpiresAt
 ukida pravo pri sljedecoj provjeri. account.unlock se ne dodjeljuje ovom tabelom:
 ono ostaje sistemska Identity dozvola, a stvarna lockout operacija dio vlasnika IDN-05.
+
+Od PR-a #214 `StoredLaboratory` cuva opcioni CourseId. Stari redovi ostaju NULL,
+pa se kreiranje revizije odbija dok LAB vlasnici ne utvrde pripadnost kursu iz
+pouzdanog izvora. Redovna izmjena laboratorije ne moze promijeniti kurs.
+Prije rada sa pravim LAB skladistem primijeniti i `AddLaboratoryCourse` migraciju
+nad njegovom Authoring konekcijom, kroz migracioni postupak LAB/persistence vlasnika.
+Runtime nalog ne dobija DDL prava radi ove pripreme.
 
 ## Provjere i granice
 

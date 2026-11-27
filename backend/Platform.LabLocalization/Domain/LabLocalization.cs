@@ -9,7 +9,7 @@ namespace Platform.LabLocalization.Domain;
 /// </summary>
 public sealed record LabLocalization
 {
-    public const int MaxTitleLength = 120;
+    public const int MaxTitleLength = 200;
     public const int MaxDescriptionLength = 2000;
     public const int MaxInstructionsLength = 20000;
 

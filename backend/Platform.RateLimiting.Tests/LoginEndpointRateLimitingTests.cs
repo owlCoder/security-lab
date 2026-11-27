@@ -20,6 +20,7 @@ using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.Identity.Services;
 using Platform.Audit.Contracts;
+using Platform.Identity.Testing;
 
 namespace Platform.RateLimiting.Tests;
 
@@ -306,12 +307,15 @@ public sealed class LoginEndpointRateLimitingTests
     // ---------------------------------------------------------------- pomocno
 
     /// <summary>Salje zahtev direktno u pipeline (kao RateLimitHost): jedino tako test bira IP adresu klijenta.</summary>
-    private static Task<HttpContext> Login(LoginApiFactory api, string remoteIp, string email, string password,
+    private static async Task<HttpContext> Login(LoginApiFactory api, string remoteIp, string email, string password,
         string? forwardedFor = null, string? correlation = null, string? cookie = null,
         CancellationToken requestAborted = default)
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { email, password }));
-        return api.Server.SendAsync(ctx =>
+        // US-15: login needs a CSRF token, as from the real frontend.
+        using var tokenClient = api.CreateClient();
+        var csrf = await CsrfPair.FetchAsync(tokenClient, cookie);
+        return await api.Server.SendAsync(ctx =>
         {
             ctx.Request.Method = HttpMethods.Post;
             ctx.Request.Path = LoginPath;
@@ -319,6 +323,7 @@ public sealed class LoginEndpointRateLimitingTests
             if (forwardedFor is not null) ctx.Request.Headers["X-Forwarded-For"] = forwardedFor;
             if (correlation is not null) ctx.Request.Headers["X-Correlation-ID"] = correlation;
             if (cookie is not null) ctx.Request.Headers.Cookie = $"{SessionCookie.Name}={cookie}";
+            csrf.ApplyTo(ctx.Request);
             if (requestAborted.CanBeCanceled) ctx.RequestAborted = requestAborted;
             ctx.Request.ContentType = "application/json";
             ctx.Request.ContentLength = bytes.Length;
