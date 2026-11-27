@@ -36,254 +36,241 @@ public class CourseServiceTests
         await _db.DisposeAsync();
         await _connection.DisposeAsync();
     }
-[Test]
-public async Task GetCourse_AllowedUser_ReturnsCourse()
-{
-    // Arrange
-    var course = new Course(
-        "GET-TEST",
-        "Networking Fundamentals",
-        "Introduction to networking",
-        ManagerId);
 
-    _db.Courses.Add(course);
-    await _db.SaveChangesAsync();
-
-    var service = CreateService(ManagerId, true);
-
-    // Act
-    var result = await service.GetCourseAsync(course.Id);
-
-    // Assert
-    Assert.That(result.IsSuccess, Is.True);
-    Assert.That(result.Value, Is.Not.Null);
-
-    Assert.Multiple(() =>
+    [Test]
+    public async Task GetCourse_AllowedUser_ReturnsCourse()
     {
-        Assert.That(result.Value!.Id, Is.EqualTo(course.Id));
-        Assert.That(result.Value.Code, Is.EqualTo("GET-TEST"));
-        Assert.That(result.Value.Name,
-            Is.EqualTo("Networking Fundamentals"));
-        Assert.That(result.Value.Status, Is.EqualTo("Active"));
-    });
-}
+        // Arrange
+        var course = new Course(
+            "GET-TEST",
+            "Networking Fundamentals",
+            "Introduction to networking",
+            ManagerId);
 
+        _db.Courses.Add(course);
+        await _db.SaveChangesAsync();
 
-[Test]
-public async Task GetCourses_ReturnsSortedCoursesIncludingArchived()
-{
-    // Arrange
-    var courseB = new Course(
-        "B-COURSE", "Second Course", null, ManagerId);
+        var service = CreateService(ManagerId, true);
 
-    var courseA = new Course(
-        "A-COURSE", "First Course", null, ManagerId);
+        // Act
+        var result = await service.GetCourseAsync(course.Id);
 
-    courseB.Archive(ManagerId);
+        // Assert
+        Assert.That(result.IsSuccess, Is.True);
+        Assert.That(result.Value, Is.Not.Null);
 
-    _db.Courses.AddRange(courseB, courseA);
-    await _db.SaveChangesAsync();
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Value!.Id, Is.EqualTo(course.Id));
+            Assert.That(result.Value.Code, Is.EqualTo("GET-TEST"));
+            Assert.That(result.Value.Name,
+                Is.EqualTo("Networking Fundamentals"));
+            Assert.That(result.Value.Status, Is.EqualTo("Active"));
+        });
+    }
 
-    var service = CreateService(ManagerId, true);
-
-    // Act
-    var result = await service.GetCoursesAsync();
-
-
-    // Assert
-    Assert.That(result.IsSuccess, Is.True);
-    Assert.That(result.Value, Is.Not.Null);
-
-    var courses = result.Value!;
-
-    Assert.That(courses, Has.Count.EqualTo(2));
-
-    Assert.Multiple(() =>
+    [Test]
+    public async Task GetCourses_ReturnsSortedCoursesIncludingArchived()
     {
-        Assert.That(
-            courses.Select(c => c.Code).ToArray(),
-            Is.EqualTo(new[] { "A-COURSE", "B-COURSE" }));
+        // Arrange
+        var courseB = new Course(
+            "B-COURSE", "Second Course", null, ManagerId);
 
-        Assert.That(
-            courses.Single(c => c.Code == "B-COURSE").Status,
-            Is.EqualTo("Archived"));
-    });
+        var courseA = new Course(
+            "A-COURSE", "First Course", null, ManagerId);
 
-}
+        courseB.Archive(ManagerId);
 
+        _db.Courses.AddRange(courseB, courseA);
+        await _db.SaveChangesAsync();
 
+        var service = CreateService(ManagerId, true);
 
-[Test]
-public async Task GetCourse_AnonymousUser_ReturnsUnauthorized()
-{
-    var course = new Course(
-        "PRIVATE-101", "Private Course", null, ManagerId);
+        // Act
+        var result = await service.GetCoursesAsync();
 
-    _db.Courses.Add(course);
-    await _db.SaveChangesAsync();
+        // Assert
+        Assert.That(result.IsSuccess, Is.True);
+        Assert.That(result.Value, Is.Not.Null);
 
-    var service = CreateService(null, true);
+        var courses = result.Value!;
 
-    var result = await service.GetCourseAsync(course.Id);
+        Assert.That(courses, Has.Count.EqualTo(2));
 
-    Assert.That(result.Error?.Type,
-        Is.EqualTo(ErrorType.Unauthorized));
-}
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                courses.Select(c => c.Code).ToArray(),
+                Is.EqualTo(new[] { "A-COURSE", "B-COURSE" }));
 
+            Assert.That(
+                courses.Single(c => c.Code == "B-COURSE").Status,
+                Is.EqualTo("Archived"));
+        });
+    }
 
-[Test]
-public async Task GetCourses_AnonymousUser_ReturnsUnauthorized()
-{
-    var service = CreateService(null, true);
-
-    var result = await service.GetCoursesAsync();
-
-    Assert.That(result.Error?.Type,
-        Is.EqualTo(ErrorType.Unauthorized));
-}
-
-
-[Test]
-public async Task GetCourse_NonExistingCourse_ReturnsNotFound()
-{
-    var service = CreateService(ManagerId, true);
-
-    var result = await service.GetCourseAsync(Guid.NewGuid());
-
-    Assert.That(result.Error?.Type,
-        Is.EqualTo(ErrorType.NotFound));
-}
-
-
-[Test]
-public async Task GetCourse_UserWithoutPermission_ReturnsNotFound()
-{
-    var course = new Course(
-        "SECRET-101", "Protected Course", null, ManagerId);
-
-    _db.Courses.Add(course);
-    await _db.SaveChangesAsync();
-
-    var service = CreateService(Guid.NewGuid(), false);
-
-    var result = await service.GetCourseAsync(course.Id);
-
-    Assert.That(result.Error?.Type,
-        Is.EqualTo(ErrorType.NotFound));
-}
-
-
-[Test]
-public async Task GetCourses_UserWithoutPermission_ReturnsEmptyList()
-{
-    var course = new Course(
-        "HIDDEN-101", "Hidden Course", null, ManagerId);
-
-    _db.Courses.Add(course);
-    await _db.SaveChangesAsync();
-
-    var service = CreateService(Guid.NewGuid(), false);
-
-    var result = await service.GetCoursesAsync();
-
-    Assert.That(result.IsSuccess, Is.True);
-    Assert.That(result.Value, Is.Not.Null);
-    Assert.That(result.Value, Is.Empty);
-}
-
-
-[Test]
-public async Task GetCourse_ArchivedCourse_IsStillReadable()
-{
-    // Arrange
-    var course = new Course(
-        "ARCHIVED-GET",
-        "Archived Networking Course",
-        null,
-        ManagerId);
-
-    course.Archive(ManagerId);
-
-    _db.Courses.Add(course);
-    await _db.SaveChangesAsync();
-
-    var service = CreateService(ManagerId, true);
-
-    // Act
-    var result = await service.GetCourseAsync(course.Id);
-
-    // Assert
-    Assert.That(result.IsSuccess, Is.True);
-    Assert.That(result.Value, Is.Not.Null);
-
-    var dto = result.Value!;
-
-    Assert.Multiple(() =>
+    [Test]
+    public async Task GetCourse_AnonymousUser_ReturnsUnauthorized()
     {
-        Assert.That(dto.Id, Is.EqualTo(course.Id));
-        Assert.That(dto.Status, Is.EqualTo("Archived"));
-        Assert.That(dto.ArchivedAt, Is.Not.Null);
-    });
-}
+        var course = new Course(
+            "PRIVATE-101", "Private Course", null, ManagerId);
 
+        _db.Courses.Add(course);
+        await _db.SaveChangesAsync();
 
-[Test]
-public async Task GetCourses_OnlyReturnsAuthorizedCourses()
-{
-    // Arrange
-    var allowedCourse = new Course(
-        "ALLOWED-101", "Allowed Course", null, ManagerId);
+        var service = CreateService(null, true);
 
-    var hiddenCourse = new Course(
-        "HIDDEN-102", "Hidden Course", null, ManagerId);
+        var result = await service.GetCourseAsync(course.Id);
 
-    _db.Courses.AddRange(allowedCourse, hiddenCourse);
-    await _db.SaveChangesAsync();
+        Assert.That(result.Error?.Type,
+            Is.EqualTo(ErrorType.Unauthorized));
+    }
 
-    // User may view only allowedCourse.
-    var service = CreateService(
-        ManagerId,
-        true,
-        allowedCourse.Id);
-
-    // Act
-    var listResult = await service.GetCoursesAsync();
-    var allowedResult = await service.GetCourseAsync(allowedCourse.Id);
-    var hiddenResult = await service.GetCourseAsync(hiddenCourse.Id);
-
-    // Assert
-    Assert.That(listResult.IsSuccess, Is.True);
-    Assert.That(listResult.Value, Is.Not.Null);
-
-    var courses = listResult.Value!;
-
-    Assert.Multiple(() =>
+    [Test]
+    public async Task GetCourses_AnonymousUser_ReturnsUnauthorized()
     {
-        Assert.That(courses, Has.Count.EqualTo(1));
-        Assert.That(courses[0].Id, Is.EqualTo(allowedCourse.Id));
+        var service = CreateService(null, true);
 
-        Assert.That(allowedResult.IsSuccess, Is.True);
+        var result = await service.GetCoursesAsync();
 
-        Assert.That(
-            hiddenResult.Error?.Type,
+        Assert.That(result.Error?.Type,
+            Is.EqualTo(ErrorType.Unauthorized));
+    }
+
+    [Test]
+    public async Task GetCourse_NonExistingCourse_ReturnsNotFound()
+    {
+        var service = CreateService(ManagerId, true);
+
+        var result = await service.GetCourseAsync(Guid.NewGuid());
+
+        Assert.That(result.Error?.Type,
             Is.EqualTo(ErrorType.NotFound));
-    });
-}
+    }
 
+    [Test]
+    public async Task GetCourse_UserWithoutPermission_ReturnsNotFound()
+    {
+        var course = new Course(
+            "SECRET-101", "Protected Course", null, ManagerId);
 
+        _db.Courses.Add(course);
+        await _db.SaveChangesAsync();
 
-private CourseService CreateService(
-    Guid? actorId,
-    bool allowed,
-    Guid? visibleCourseId = null)
-{
-    return new CourseService(
-        _db,
-        new TestActor(actorId),
-        new TestAuthorization(allowed, visibleCourseId),
-        new TestAuditTrail());
-}
+        var service = CreateService(Guid.NewGuid(), false);
 
+        var result = await service.GetCourseAsync(course.Id);
+
+        Assert.That(result.Error?.Type,
+            Is.EqualTo(ErrorType.NotFound));
+    }
+
+    [Test]
+    public async Task GetCourses_UserWithoutPermission_ReturnsEmptyList()
+    {
+        var course = new Course(
+            "HIDDEN-101", "Hidden Course", null, ManagerId);
+
+        _db.Courses.Add(course);
+        await _db.SaveChangesAsync();
+
+        var service = CreateService(Guid.NewGuid(), false);
+
+        var result = await service.GetCoursesAsync();
+
+        Assert.That(result.IsSuccess, Is.True);
+        Assert.That(result.Value, Is.Not.Null);
+        Assert.That(result.Value, Is.Empty);
+    }
+
+    [Test]
+    public async Task GetCourse_ArchivedCourse_IsStillReadable()
+    {
+        // Arrange
+        var course = new Course(
+            "ARCHIVED-GET",
+            "Archived Networking Course",
+            null,
+            ManagerId);
+
+        course.Archive(ManagerId);
+
+        _db.Courses.Add(course);
+        await _db.SaveChangesAsync();
+
+        var service = CreateService(ManagerId, true);
+
+        // Act
+        var result = await service.GetCourseAsync(course.Id);
+
+        // Assert
+        Assert.That(result.IsSuccess, Is.True);
+        Assert.That(result.Value, Is.Not.Null);
+
+        var dto = result.Value!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(dto.Id, Is.EqualTo(course.Id));
+            Assert.That(dto.Status, Is.EqualTo("Archived"));
+            Assert.That(dto.ArchivedAt, Is.Not.Null);
+        });
+    }
+
+    [Test]
+    public async Task GetCourses_OnlyReturnsAuthorizedCourses()
+    {
+        // Arrange
+        var allowedCourse = new Course(
+            "ALLOWED-101", "Allowed Course", null, ManagerId);
+
+        var hiddenCourse = new Course(
+            "HIDDEN-102", "Hidden Course", null, ManagerId);
+
+        _db.Courses.AddRange(allowedCourse, hiddenCourse);
+        await _db.SaveChangesAsync();
+
+        // User may view only allowedCourse.
+        var service = CreateService(
+            ManagerId,
+            true,
+            allowedCourse.Id);
+
+        // Act
+        var listResult = await service.GetCoursesAsync();
+        var allowedResult = await service.GetCourseAsync(allowedCourse.Id);
+        var hiddenResult = await service.GetCourseAsync(hiddenCourse.Id);
+
+        // Assert
+        Assert.That(listResult.IsSuccess, Is.True);
+        Assert.That(listResult.Value, Is.Not.Null);
+
+        var courses = listResult.Value!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(courses, Has.Count.EqualTo(1));
+            Assert.That(courses[0].Id, Is.EqualTo(allowedCourse.Id));
+
+            Assert.That(allowedResult.IsSuccess, Is.True);
+
+            Assert.That(
+                hiddenResult.Error?.Type,
+                Is.EqualTo(ErrorType.NotFound));
+        });
+    }
+
+    private CourseService CreateService(
+        Guid? actorId,
+        bool allowed,
+        Guid? visibleCourseId = null)
+    {
+        return new CourseService(
+            _db,
+            new TestActor(actorId),
+            new TestAuthorization(allowed, visibleCourseId),
+            new TestAuditTrail());
+    }
 
     [Test]
     public async Task Create_ValidRequest_CreatesCourse()
@@ -438,9 +425,9 @@ public async Task Archive_UserWithoutPermission_ReturnsNotFound()
     }
 
     private sealed class TestAuthorization(
-    bool allowed,
-    Guid? visibleCourseId = null)
-    : ICourseAuthorization
+        bool allowed,
+        Guid? visibleCourseId = null)
+        : ICourseAuthorization
     {
         public Task<bool> CanCreateAsync(
             Guid userId,
@@ -457,17 +444,15 @@ public async Task Archive_UserWithoutPermission_ReturnsNotFound()
             return Task.FromResult(allowed);
         }
 
-public Task<bool> CanViewAsync(
-    Guid userId,
-    Guid courseId,
-    CancellationToken cancellationToken = default)
-{
-    return Task.FromResult(
-        allowed &&
-        (visibleCourseId is null || visibleCourseId == courseId));
-}
-
-
+        public Task<bool> CanViewAsync(
+            Guid userId,
+            Guid courseId,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(
+                allowed &&
+                (visibleCourseId is null || visibleCourseId == courseId));
+        }
     }
 
     [Test]

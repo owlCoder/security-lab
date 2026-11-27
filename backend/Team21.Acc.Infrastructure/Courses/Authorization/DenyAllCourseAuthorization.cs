@@ -1,10 +1,9 @@
-
 using Team21.Acc.Core.Courses;
 
 namespace Team21.Acc.Infrastructure.Courses.Authorization;
 
 /// <summary>
-/// Denies course operations until real authorization is integrated.
+/// Used outside Development until real roles exist. Nobody may create, archive or read.
 /// </summary>
 public sealed class DenyAllCourseAuthorization : ICourseAuthorization
 {

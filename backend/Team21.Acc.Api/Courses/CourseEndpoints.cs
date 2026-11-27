@@ -5,10 +5,12 @@ using Platform.Access.AspNet;
 using Platform.Access.Domain.Constants;
 using Team21.Acc.Api.Extensions;
 using Team21.Acc.Core.Courses;
+
 namespace Team21.Acc.Api.Courses;
 
 /// <summary>
-/// ACC-01 endpoints. Creating a course without the right answers 403, archiving one answers 404.
+/// ACC-01 endpoints. Creating a course without the right answers 403; archiving or reading one
+/// you may not see answers 404, the same as a missing course.
 /// </summary>
 public static class CourseEndpoints
 {
@@ -18,7 +20,7 @@ public static class CourseEndpoints
         // ACC-05 checks for an active account, the service decides the rest
         var group = app.MapGroup("/api/courses");
 
-         group.MapGet("", GetCourses)
+        group.MapGet("", GetCourses)
             .WithName("GetCourses")
             .RequireAccess(AccessActions.CourseRead.Id);
 
@@ -38,9 +40,9 @@ public static class CourseEndpoints
     }
 
     private static async Task<IResult> CreateCourse(
-    CreateCourseRequest request,
-    ICourseService courseService,
-    CancellationToken cancellationToken)
+        CreateCourseRequest request,
+        ICourseService courseService,
+        CancellationToken cancellationToken)
     {
         var result = await courseService.CreateAsync(
             request,
@@ -63,26 +65,25 @@ public static class CourseEndpoints
     }
 
 
-private static async Task<IResult> GetCourses(
-    ICourseService courseService,
-    CancellationToken cancellationToken)
-{
-    var result = await courseService.GetCoursesAsync(
-        cancellationToken);
+    private static async Task<IResult> GetCourses(
+        ICourseService courseService,
+        CancellationToken cancellationToken)
+    {
+        var result = await courseService.GetCoursesAsync(
+            cancellationToken);
 
-    return result.ToHttpResult();
-}
+        return result.ToHttpResult();
+    }
 
-private static async Task<IResult> GetCourse(
-    Guid id,
-    ICourseService courseService,
-    CancellationToken cancellationToken)
-{
-    var result = await courseService.GetCourseAsync(
-        id,
-        cancellationToken);
+    private static async Task<IResult> GetCourse(
+        Guid id,
+        ICourseService courseService,
+        CancellationToken cancellationToken)
+    {
+        var result = await courseService.GetCourseAsync(
+            id,
+            cancellationToken);
 
-    return result.ToHttpResult();
-}
-
+        return result.ToHttpResult();
+    }
 }

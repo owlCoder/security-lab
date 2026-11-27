@@ -1,8 +1,7 @@
-
 namespace Team21.Acc.Core.Courses;
 
 /// <summary>
-/// Defines permissions for course operations.
+/// Who may create, archive and read courses.
 /// </summary>
 public interface ICourseAuthorization
 {
