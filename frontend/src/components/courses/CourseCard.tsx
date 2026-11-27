@@ -1,4 +1,3 @@
-
 import type { Course } from '../../types/course'
 
 interface Props {
@@ -16,30 +15,55 @@ export default function CourseCard({
 
   return (
     <article className="course-card">
-      <div className="course-card-top">
+      <div className="card-top">
         <div>
           <h3>{course.name}</h3>
-          <span className="course-id">{course.code}</span>
+
+          <p className="course-code">
+            {course.code}
+          </p>
         </div>
 
         <span
           className={`course-status ${
-            isArchived ? 'status-archived' : 'status-active'
+            isArchived
+              ? 'status-archived'
+              : 'status-active'
           }`}
         >
           {isArchived ? 'Arhiviran' : 'Aktivan'}
         </span>
       </div>
 
-      <p className="course-card-description">
+      <p className="course-description">
         {course.description || 'Opis nije unet.'}
       </p>
 
-      <div className="course-card-footer">
-        <span className="course-id">
-          Kreiran:{' '}
-          {new Date(course.createdAt).toLocaleDateString('sr-RS')}
-        </span>
+      {isArchived && (
+        <p className="archived-note">
+          Novi upisi nisu dozvoljeni.
+          Postojeća istorija kursa je sačuvana.
+        </p>
+      )}
+
+      <div className="card-footer">
+        <div className="course-dates">
+          <span className="course-id">
+            Kreiran:{' '}
+            {new Date(
+              course.createdAt,
+            ).toLocaleDateString('sr-RS')}
+          </span>
+
+          {isArchived && course.archivedAt && (
+            <span className="course-id">
+              Arhiviran:{' '}
+              {new Date(
+                course.archivedAt,
+              ).toLocaleDateString('sr-RS')}
+            </span>
+          )}
+        </div>
 
         {!isArchived && (
           <button

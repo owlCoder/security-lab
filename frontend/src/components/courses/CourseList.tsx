@@ -1,4 +1,3 @@
-
 import type { Course } from '../../types/course'
 import CourseCard from './CourseCard'
 
@@ -17,8 +16,10 @@ export default function CourseList({
     return (
       <div className="courses-empty">
         <h3>Nema kurseva za prikaz</h3>
+
         <p>
-          Kreirajte novi kurs ili promenite kriterijume pretrage.
+          Nema dostupnih kurseva koji odgovaraju
+          trenutnim kriterijumima pretrage.
         </p>
       </div>
     )

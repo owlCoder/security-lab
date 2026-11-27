@@ -1,7 +1,8 @@
+import type { CreateCourseRequest } from '../types/course'
 
-import type { Course, CreateCourseRequest } from '../types/course'
-
-export function validateCourse(input: CreateCourseRequest): string | null {
+export function validateCourse(
+  input: CreateCourseRequest,
+): string | null {
   if (!input.code.trim()) {
     return 'Šifra kursa je obavezna.'
   }
@@ -26,22 +27,11 @@ export function validateCourse(input: CreateCourseRequest): string | null {
 }
 
 export function normalizeCourse(
-  input: CreateCourseRequest
+  input: CreateCourseRequest,
 ): CreateCourseRequest {
   return {
     code: input.code.trim().toUpperCase(),
     name: input.name.trim(),
     description: input.description?.trim() || null,
   }
-}
-
-export function markArchived(
-  courses: Course[],
-  courseId: string
-): Course[] {
-  return courses.map((course) =>
-    course.id === courseId
-      ? { ...course, status: 'Archived' }
-      : course
-  )
 }

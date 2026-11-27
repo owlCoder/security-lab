@@ -1,7 +1,7 @@
-
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { CreateCourseRequest } from '../../types/course'
+
 import {
   normalizeCourse,
   validateCourse,
@@ -21,9 +21,13 @@ export default function CourseForm({
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [error, setError] = useState<string | null>(null)
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  const [error, setError] =
+    useState<string | null>(null)
+
+  async function submit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault()
 
     if (busy) return
@@ -42,17 +46,24 @@ export default function CourseForm({
     }
 
     setError(null)
+
     await onSave(value)
   }
 
   return (
-    <form className="course-form" onSubmit={submit} noValidate>
+    <form
+      className="course-form"
+      onSubmit={submit}
+      noValidate
+      aria-busy={busy}
+    >
       <h3>Kreiranje novog kursa</h3>
 
       <div className="form-group">
         <label htmlFor="course-code">
           Šifra kursa *
         </label>
+
         <input
           id="course-code"
           value={code}
@@ -60,17 +71,27 @@ export default function CourseForm({
             setCode(event.target.value)
             setError(null)
           }}
-          maxLength={33}
+          maxLength={32}
           required
           disabled={busy}
           placeholder="Npr. OIB-2026"
+          aria-describedby="course-code-hint"
         />
+
+        <small
+          id="course-code-hint"
+          className="field-hint"
+        >
+          Jedinstvena šifra kursa.
+          {` ${code.length}/32`}
+        </small>
       </div>
 
       <div className="form-group">
         <label htmlFor="course-name">
           Naziv kursa *
         </label>
+
         <input
           id="course-name"
           value={name}
@@ -78,17 +99,26 @@ export default function CourseForm({
             setName(event.target.value)
             setError(null)
           }}
-          maxLength={201}
+          maxLength={200}
           required
           disabled={busy}
           placeholder="Naziv kursa"
+          aria-describedby="course-name-hint"
         />
+
+        <small
+          id="course-name-hint"
+          className="field-hint"
+        >
+          {name.length}/200
+        </small>
       </div>
 
       <div className="form-group">
         <label htmlFor="course-description">
           Opis kursa (opciono)
         </label>
+
         <textarea
           id="course-description"
           value={description}
@@ -96,11 +126,19 @@ export default function CourseForm({
             setDescription(event.target.value)
             setError(null)
           }}
-          maxLength={4001}
+          maxLength={4000}
           rows={4}
           disabled={busy}
           placeholder="Kratak opis kursa"
+          aria-describedby="course-description-hint"
         />
+
+        <small
+          id="course-description-hint"
+          className="field-hint"
+        >
+          {description.length}/4000
+        </small>
       </div>
 
       {error && (
@@ -124,7 +162,7 @@ export default function CourseForm({
           className="primary-button"
           disabled={busy}
         >
-          {busy ? 'Čuvanje…' : 'Sačuvaj kurs'}
+          {busy ? 'Čuvanje...' : 'Sačuvaj kurs'}
         </button>
       </div>
     </form>
