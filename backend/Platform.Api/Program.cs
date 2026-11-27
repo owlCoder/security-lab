@@ -193,7 +193,7 @@ builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, Se
 builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
-builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddLaboratories(builder.Environment, builder.Configuration);
 builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
