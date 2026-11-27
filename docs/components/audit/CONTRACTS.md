@@ -172,6 +172,7 @@ with `EventIdConflict` and never replaces the stored record.
 | Method | Event type | Outcome | Allowed `reasonCode` |
 |-|-|-|-|
 | `MfaEnrollmentStartedAsync` | `auth.mfa.enrollment.started` | Success | none |
+| `MfaEnrollmentRefusedAsync` | `auth.mfa.enrollment.started` | Failure | required: `invalid_password`, `account_locked` (IDN-06 step-up, #252) |
 | `MfaEnabledAsync` | `auth.mfa.enabled` | Success | none |
 | `MfaEnableFailedAsync` | `auth.mfa.enabled` | Failure | required: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive` |
 | `MfaVerifiedAsync` | `auth.mfa.verified` | Success | none |

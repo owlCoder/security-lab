@@ -74,6 +74,24 @@ public sealed class IdentityAuditProducer(
             cancellationToken);
 
     /// <summary>
+    /// IDN-06 (#252): the step-up password check refused an enrollment (<c>invalid_password</c> or
+    /// <c>account_locked</c>). The session proves the actor; the password itself never reaches this method.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaEnrollmentRefusedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnrollmentStarted,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    /// <summary>
     /// IDN-06 (US-17): MFA was enabled. Written in the caller's transaction; the caller commits the change only
     /// when this returns <see cref="AuditWriteResult.IsRecorded"/>.
     /// </summary>
