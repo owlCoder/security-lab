@@ -11,7 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -431,7 +430,7 @@ internal sealed class FakeCredentialVerifier : ICredentialVerifier
 
 internal sealed class FakeSessionCreator : ISessionCreator
 {
-    public Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default) =>
+    public Task<IssuedSession?> CreateAsync(Guid userId, AuthLevel level, CancellationToken ct = default) =>
         Task.FromResult<IssuedSession?>(new IssuedSession(
             Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(1)));
 }

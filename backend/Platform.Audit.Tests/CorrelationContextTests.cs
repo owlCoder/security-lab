@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using Platform.Access.AspNet;
 using Platform.Access.Composition;
-using Platform.Api.Enums.Identity;
+using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -269,7 +269,7 @@ internal sealed class CorrelationTestSessionManager : ISessionManager
         ct.ThrowIfCancellationRequested();
         return Task.FromResult<ValidateSession?>(token == Token
             ? new ValidateSession(Guid.Parse("99999999-9999-4999-8999-999999999999"),
-                AuditDraftExamples.UserId, AuthenticationLevel.Active)
+                AuditDraftExamples.UserId, AuthLevel.Active)
             : null);
     }
 

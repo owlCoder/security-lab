@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.Access;
@@ -40,6 +39,6 @@ public sealed class AdministrationSessions(IServiceScopeFactory scopes)
         if (string.IsNullOrWhiteSpace(token) || token.Length > 512) return null;
         await using var scope = scopes.CreateAsyncScope();
         var session = await scope.ServiceProvider.GetRequiredService<ISessionManager>().ValidateAsync(token, ct);
-        return session is { Level: AuthenticationLevel.Active } && session.UserId != Guid.Empty ? session : null;
+        return session is { Level: AuthLevel.Active } && session.UserId != Guid.Empty ? session : null;
     }
 }

@@ -90,14 +90,7 @@ public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? t
             }
         }
 
-        var level = session.AuthLevel switch
-        {
-            AuthLevel.Active => AuthenticationLevel.Active,
-            AuthLevel.MfaPending => AuthenticationLevel.MfaPending,
-            _ => AuthenticationLevel.None
-        };
-
-        return new ValidateSession(session.SessionHandle, session.UserId, level);
+        return new ValidateSession(session.SessionHandle, session.UserId, session.AuthLevel);
     }
 
     public async Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default)

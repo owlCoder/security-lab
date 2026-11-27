@@ -1,4 +1,4 @@
-using Platform.Api.Enums.Identity;
+using Platform.Identity.Enums;
 using Platform.Api.Models.Identity;
 
 namespace Platform.Api.Interfaces.Identity;
@@ -12,5 +12,5 @@ namespace Platform.Api.Interfaces.Identity;
 /// </summary>
 public interface ISessionCreator
 {
-    Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default);
+    Task<IssuedSession?> CreateAsync(Guid userId, AuthLevel level, CancellationToken ct = default);
 }

@@ -18,7 +18,7 @@ Provides the caller identity established by the server for the current HTTP requ
 | `Current` | `CallerIdentity?` | Identity from the session validated by `SessionCheckMiddleware`. `null` means no session was validated for this request. |
 | `CallerIdentity.IsAuthenticated` | `bool` | `true` only when `Level` is `Active`. |
 | `CallerIdentity.UserId` | `Guid?` | User id associated with the validated session; also populated for `MfaPending`. |
-| `CallerIdentity.Level` | `AuthenticationLevel` | `None`, `MfaPending`, or `Active`. |
+| `CallerIdentity.Level` | `AuthLevel` (`Platform.Identity.Enums`) | `MfaPending` or `Active`. |
 | `CallerIdentity.CurrentSessionHandle` | `Guid?` | Public session handle (not the cookie token); available for the current session. |
 
 The implementation is `SessionIdentityContext`. It reads `ValidateSession` from the current `HttpContext.Items`, populated by `SessionCheckMiddleware` after successful session validation. It does not independently read the cookie or query the store.

@@ -68,7 +68,7 @@ internal sealed class LoginService(
                 actorConfirmed: true);
         }
 
-        var authenticationLevel = mfaEnabled ? AuthenticationLevel.MfaPending : AuthenticationLevel.Active;
+        var authenticationLevel = mfaEnabled ? AuthLevel.MfaPending : AuthLevel.Active;
 
         IssuedSession? session;
         try
@@ -112,7 +112,7 @@ internal sealed class LoginService(
         }
 
         return new LoginResult(
-            LoginOutcome.Success, check.AccountId, session, authenticationLevel == AuthenticationLevel.MfaPending);
+            LoginOutcome.Success, check.AccountId, session, authenticationLevel == AuthLevel.MfaPending);
     }
 
     private static bool IsAcceptable(string? email, string? password) =>

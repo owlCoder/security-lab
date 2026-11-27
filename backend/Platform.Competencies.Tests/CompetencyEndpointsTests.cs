@@ -16,7 +16,7 @@ using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Access.Infrastructure.Policies;
 using Platform.Api.Endpoints;
-using Platform.Api.Enums.Identity;
+using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.Competencies;
@@ -664,7 +664,7 @@ public sealed class CompetencyEndpointsTests
             };
             return Task.FromResult(actor is { } id
                 ? new ValidateSession(token == "empty-handle" ? Guid.Empty : Guid.NewGuid(), id,
-                    token == "pending" ? AuthenticationLevel.MfaPending : AuthenticationLevel.Active)
+                    token == "pending" ? AuthLevel.MfaPending : AuthLevel.Active)
                 : null);
         }
         public Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) => throw new NotSupportedException();

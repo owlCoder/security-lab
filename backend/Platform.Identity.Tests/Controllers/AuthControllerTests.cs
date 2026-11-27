@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Platform.Api.Controllers.Identity;
 using Platform.Api.Contracts.Identity;
 using Platform.Api.Enums.Identity;
+using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -48,7 +49,7 @@ public class AuthControllerTests
     [Test]
     public void MfaPendingCaller_Returns401()
     {
-        CallerIs(new CallerIdentity(false, Guid.NewGuid(), AuthenticationLevel.MfaPending, Guid.NewGuid()));
+        CallerIs(new CallerIdentity(false, Guid.NewGuid(), AuthLevel.MfaPending, Guid.NewGuid()));
 
         var result = _controller.Me();
 
@@ -59,7 +60,7 @@ public class AuthControllerTests
     public void ActiveCaller_ReturnsOnlyUserIdAndLevel()
     {
         var userId = Guid.NewGuid();
-        CallerIs(new CallerIdentity(true, userId, AuthenticationLevel.Active, Guid.NewGuid()));
+        CallerIs(new CallerIdentity(true, userId, AuthLevel.Active, Guid.NewGuid()));
 
         var result = _controller.Me() as OkObjectResult;
 

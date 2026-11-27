@@ -1,7 +1,6 @@
 using Platform.Access.AspNet;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -19,7 +18,7 @@ public static class RevisionRequestIdentity
     public static bool AppliesTo(HttpContext http) => http.Request.Path.StartsWithSegments("/api/revisions");
 
     public static SubjectRef? Subject(ValidateSession? session) =>
-        session is { Level: AuthenticationLevel.Active } && session.UserId != Guid.Empty
+        session is { Level: AuthLevel.Active } && session.UserId != Guid.Empty
             ? new SubjectRef(session.UserId.ToString("D"), AccountState.Active) : null;
 
     /// <summary>Call after all Identity/Access registrations, before building the host.</summary>

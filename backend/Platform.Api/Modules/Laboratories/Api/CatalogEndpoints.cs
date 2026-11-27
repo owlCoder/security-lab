@@ -1,6 +1,5 @@
 ﻿
 using Platform.Access.AspNet;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.Laboratories.Application;
@@ -39,7 +38,7 @@ public static class CatalogEndpoints
         var session = http.Items[SessionCheckMiddleware.SessionItemKey]
             as ValidateSession;
 
-        if (session is not { Level: AuthenticationLevel.Active } ||
+        if (session is not { Level: AuthLevel.Active } ||
             session.UserId == Guid.Empty)
         {
             return Results.Unauthorized();
@@ -91,7 +90,7 @@ public static class CatalogEndpoints
         var session = http.Items[SessionCheckMiddleware.SessionItemKey]
             as ValidateSession;
 
-        if (session is not { Level: AuthenticationLevel.Active } ||
+        if (session is not { Level: AuthLevel.Active } ||
             session.UserId == Guid.Empty)
         {
             return Results.Unauthorized();

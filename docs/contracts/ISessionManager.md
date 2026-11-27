@@ -19,7 +19,7 @@ Validates a presented session token for the request pipeline, revokes sessions, 
 | `SessionInfo` | `Handle`, `CreatedAt`, `LastActivityAt`, `ExpiresAt` | Public session listing data. It has no token or token-hash member. |
 | `ValidateSession` | `Handle`, `UserId`, `Level` | Validated session data passed to the request identity context. |
 
-`Level` is `AuthenticationLevel` (`None`, `MfaPending`, or `Active`). A valid `MfaPending` session is returned by validation; authentication policy is applied separately by consumers.
+`Level` is `AuthLevel` from `Platform.Identity.Enums` (`MfaPending` or `Active`). A valid `MfaPending` session is returned by validation; authentication policy is applied separately by consumers.
 
 ## Methods
 

@@ -1,10 +1,10 @@
-using Platform.Api.Enums.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Api.Models.Identity;
 
 public sealed record CallerIdentity(
     bool IsAuthenticated,
     Guid? UserId,
-    AuthenticationLevel Level,
+    AuthLevel Level,
     Guid? CurrentSessionHandle
     );

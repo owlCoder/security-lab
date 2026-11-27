@@ -70,7 +70,7 @@ public class FederatedLoginServiceTests
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
         Assert.That(result.UserId, Is.EqualTo(AccountId));
         Assert.That(result.Session!.Token, Is.EqualTo(Token));
-        _sessions.Verify(s => s.CreateAsync(AccountId, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once());
+        _sessions.Verify(s => s.CreateAsync(AccountId, AuthLevel.Active, It.IsAny<CancellationToken>()), Times.Once());
 
         var e = _events.Single();
         Assert.Multiple(() =>
@@ -142,7 +142,7 @@ public class FederatedLoginServiceTests
     public async Task BlockedAccount_GetsNoSession_AndTheAuditNamesTheConfirmedAccount()
     {
         _sessions
-            .Setup(s => s.CreateAsync(AccountId, It.IsAny<AuthenticationLevel>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.CreateAsync(AccountId, It.IsAny<AuthLevel>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new AccountNotActiveException(AccountId));
 
         var result = await _login.ExecuteAsync(Principal(), "corr-7");
@@ -203,7 +203,7 @@ public class FederatedLoginServiceTests
 
     private void GivenSession(IssuedSession? session) =>
         _sessions
-            .Setup(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthenticationLevel>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthLevel>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
     private void GivenAudit(AuditWriteResult result) =>
@@ -221,7 +221,7 @@ public class FederatedLoginServiceTests
             Assert.That(result.Session, Is.Null);
         });
         _sessions.Verify(
-            s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthenticationLevel>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthLevel>(), It.IsAny<CancellationToken>()),
             Times.Never());
     }
 

@@ -145,8 +145,8 @@ public class UnlockAccountTests
         }
     }
 
-    private static CallerIdentity Admin => new(true, AdminId, AuthenticationLevel.None, new Guid());
-    private static CallerIdentity Student => new(true, StudentId, AuthenticationLevel.None, new Guid());
+    private static CallerIdentity Admin => new(true, AdminId, AuthLevel.Active, new Guid());
+    private static CallerIdentity Student => new(true, StudentId, AuthLevel.Active, new Guid());
 
     /// <summary>The student is locked until <see cref="StudentLockoutEnd"/>; a test may change that afterwards.</summary>
     private static (UnlockAccount Sut, FakeStore Store, FakeAudit Audit) Build(
@@ -235,7 +235,7 @@ public class UnlockAccountTests
     [Test]
     public async Task SessionWithoutFullAuthentication_IsUnauthenticated()
     {
-        var (sut, store, _) = Build(new CallerIdentity(false, AdminId, AuthenticationLevel.None, new Guid()));
+        var (sut, store, _) = Build(new CallerIdentity(false, AdminId, AuthLevel.Active, new Guid()));
 
         var outcome = await sut.ExecuteAsync(StudentId);
 

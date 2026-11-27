@@ -1,4 +1,3 @@
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
@@ -19,7 +18,7 @@ public sealed class Prg04SessionIdentity(
     public async Task<Guid?> ResolveAsync(HttpContext http, CancellationToken cancellationToken)
     {
         var caller = identity.Current;
-        Guid? id = caller is { IsAuthenticated: true, Level: AuthenticationLevel.Active,
+        Guid? id = caller is { IsAuthenticated: true, Level: AuthLevel.Active,
             UserId: { } currentId, CurrentSessionHandle: { } handle } &&
             currentId != Guid.Empty && handle != Guid.Empty ? currentId : null;
 
@@ -30,7 +29,7 @@ public sealed class Prg04SessionIdentity(
             var token = http.Request.Cookies[SessionCookie.Name];
             if (string.IsNullOrWhiteSpace(token)) return null;
             ValidateSession? session = await sessions.ValidateAsync(token, cancellationToken);
-            if (session is not { Level: AuthenticationLevel.Active } ||
+            if (session is not { Level: AuthLevel.Active } ||
                 session.UserId == Guid.Empty || session.Handle == Guid.Empty)
                 return null;
             http.Items[SessionCheckMiddleware.SessionItemKey] = session;

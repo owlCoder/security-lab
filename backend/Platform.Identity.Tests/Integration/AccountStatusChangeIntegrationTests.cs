@@ -8,7 +8,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -313,7 +312,7 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         // Own scope = own DbContext and connection, like a separate login request.
         using var scope = Factory.Services.CreateScope();
         var creator = scope.ServiceProvider.GetRequiredService<ISessionCreator>();
-        return await creator.CreateAsync(accountId, AuthenticationLevel.Active);
+        return await creator.CreateAsync(accountId, AuthLevel.Active);
     }
 
     private static async Task<int> SessionCountAsync(Guid accountId)

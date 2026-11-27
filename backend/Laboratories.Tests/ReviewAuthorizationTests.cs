@@ -12,7 +12,7 @@ using Platform.Access.Domain.Models;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
-using Platform.Api.Enums.Identity;
+using Platform.Identity.Enums;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
@@ -132,7 +132,7 @@ public sealed class ReviewAuthorizationTests
                 ? new ValidateSession(
                     Guid.NewGuid(),
                     Guid.Parse("11111111-1111-1111-1111-111111111111"),
-                    AuthenticationLevel.Active)
+                    AuthLevel.Active)
                 : null;
 
             return Task.FromResult(session);

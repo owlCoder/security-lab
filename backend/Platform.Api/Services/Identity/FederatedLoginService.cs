@@ -35,7 +35,7 @@ internal sealed class FederatedLoginService(
         IssuedSession? session;
         try
         {
-            session = await sessions.CreateAsync(accountId, AuthenticationLevel.Active, ct);
+            session = await sessions.CreateAsync(accountId, AuthLevel.Active, ct);
         }
         catch (AccountNotActiveException)
         {

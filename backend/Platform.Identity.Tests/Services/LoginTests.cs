@@ -82,14 +82,14 @@ public class LoginTests
             .ReturnsAsync(result);
 
     private void GivenSession(IssuedSession? session) =>
-        _sessions.Setup(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthenticationLevel>(), It.IsAny<CancellationToken>()))
+        _sessions.Setup(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthLevel>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
     private void VerifyNothingChecked() =>
         _verifier.Verify(v => v.VerifyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
 
     private void VerifyNoSessionCreated() =>
-        _sessions.Verify(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthenticationLevel>(), It.IsAny<CancellationToken>()), Times.Never());
+        _sessions.Verify(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<AuthLevel>(), It.IsAny<CancellationToken>()), Times.Never());
 
     [TestCaseSource(nameof(Passwords))]
     public async Task ValidCredentials_ActiveAccount_CreatesActiveSession_AndAuditsSuccess(string password)
@@ -103,7 +103,7 @@ public class LoginTests
         Assert.That(result.UserId, Is.EqualTo(id));
         Assert.That(result.Session!.Token, Is.EqualTo(Token));
         _verifier.Verify(v => v.VerifyAsync(Email, password, It.IsAny<CancellationToken>()), Times.Once());
-        _sessions.Verify(s => s.CreateAsync(id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once());
+        _sessions.Verify(s => s.CreateAsync(id, AuthLevel.Active, It.IsAny<CancellationToken>()), Times.Once());
         _sessionManager.Verify(manager => manager.RevokeSession(
             It.IsAny<Guid>(),
             It.IsAny<Guid>(),
@@ -125,7 +125,7 @@ public class LoginTests
 
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
         _sessions.Verify(store => store.CreateAsync(
-            id, AuthenticationLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
+            id, AuthLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -140,7 +140,7 @@ public class LoginTests
 
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
         _sessions.Verify(store => store.CreateAsync(
-            id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once);
+            id, AuthLevel.Active, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]
@@ -193,7 +193,7 @@ public class LoginTests
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Unavailable));
         Assert.That(result.Session, Is.Null);
         _sessions.Verify(store => store.CreateAsync(
-            It.IsAny<Guid>(), It.IsAny<AuthenticationLevel>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<Guid>(), It.IsAny<AuthLevel>(), It.IsAny<CancellationToken>()), Times.Never);
         var e = _events.Single();
         Assert.That(e.Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
         Assert.That(e.Draft.Details!["reasonCode"], Is.EqualTo("mfa_unavailable"));
@@ -333,7 +333,7 @@ public class LoginTests
         var id = Guid.NewGuid();
         GivenCredentials(new CredentialResult(true, id, AccountStatus.Active));
         _sessions
-            .Setup(s => s.CreateAsync(id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()))
+            .Setup(s => s.CreateAsync(id, AuthLevel.Active, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new AccountNotActiveException(id));
 
         var result = await _login.ExecuteAsync(Email, Password, "corr-raced");

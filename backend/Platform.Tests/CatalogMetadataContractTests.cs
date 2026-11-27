@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.Laboratories.Application;
@@ -169,7 +168,7 @@ public sealed class CatalogMetadataContractTests
                     ? new ValidateSession(
                         Guid.NewGuid(),
                         TeacherId,
-                        AuthenticationLevel.Active)
+                        AuthLevel.Active)
                     : null;
 
             return Task.FromResult<ValidateSession?>(session);

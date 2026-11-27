@@ -136,7 +136,7 @@ VS Code and Visual Studio do not run `git mv` when you move a file in their expl
 | Topic | Decision | State |
 |---|---|---|
 | `IIdentityContext` | The main one is Api's (`CallerIdentity? Current`). It moves to `Interfaces/Sessions/IIdentityContext.cs`. The unused `Platform.Identity/Interfaces/IIdentityContext.cs` (`FindByIdAsync`) is deleted. Do not add another one. | deletion in progress (#265), move through #261 |
-| `AuthLevel` / `AuthenticationLevel` | The main enum is `Platform.Identity.Enums.AuthLevel`. Api `AuthenticationLevel` goes away; `None` becomes `null` / `IsAuthenticated: false`. Use `AuthLevel` in new code. | decided, not done yet |
+| `AuthLevel` | The only session level enum is `Platform.Identity.Enums.AuthLevel` (`MfaPending`, `Active`). `CallerIdentity.Level` and `ValidateSession.Level` use it and are not nullable. The old Api enum with a `None` value is removed; a caller without a session is `IsAuthenticated: false` / no `ValidateSession`. Do not add another level enum. | done (#261 step 1) |
 | `IAccessDecision` (Api, account administration) | Renamed to `IAccountAdministrationDecision`, implementation `AdminOnlyAccountAdministrationDecision`. It collided with `Platform.Access.Contracts.IAccessDecision`. | in progress (#265) |
 | session key in `HttpContext.Items` | `Services/Sessions/SessionHttpContextItems.Session`. Do not read `SessionCheckMiddleware.SessionItemKey` from Identity. | in progress (#265) |
 
