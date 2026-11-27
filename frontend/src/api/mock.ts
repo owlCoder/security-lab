@@ -102,7 +102,9 @@ function command(r: MockRevision, u: MockUser, action: RevisionAction, body: Rec
     return json(400, { code: 'invalid_request', message: 'Nedostaju rowVersion ili contentHash.' })
   const comment = typeof body.comment === 'string' ? body.comment.trim() : ''
   if (comment.length > 1000) return json(400, { code: 'invalid_request', message: 'Komentar je predugačak.' })
-  if (action === 'return' && !comment) return json(400, { code: 'invalid_request', message: 'Komentar je obavezan.' })
+  if (action === 'return' && !comment) return json(400, { code: 'invalid_input' })
+  // Kao pravi API (ReviewCommand.Parse): komentar je dozvoljen samo uz "return".
+  if (action !== 'return' && body.comment !== undefined && body.comment !== null) return json(400, { code: 'invalid_input' })
 
   if (body.rowVersion !== rowVersion(r) || body.contentHash !== r.contentHash)
     return json(409, { code: 'revision_changed', message: 'Revizija je izmenjena.' })

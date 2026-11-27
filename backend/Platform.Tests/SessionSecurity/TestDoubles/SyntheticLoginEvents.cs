@@ -32,5 +32,6 @@ internal static class SyntheticLoginEvents
         new(UserB, Now.AddDays(-5), Succeeded: true, "2001:db8::1"),
     ];
 
+    /// <summary>Events of user A followed by events of user B, for subject isolation tests.</summary>
     public static IReadOnlyList<LoginEvent> ForBothUsers() => [.. ForUserA(), .. ForUserB()];
 }

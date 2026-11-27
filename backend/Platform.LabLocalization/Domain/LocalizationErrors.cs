@@ -16,4 +16,5 @@ public static class LocalizationErrorCodes
     public const string Forbidden = "FORBIDDEN";
     public const string NotFound = "NOT_FOUND";
     public const string Conflict = "CONFLICT";
+    public const string RevisionNotDraft = "REVISION_NOT_DRAFT";
 }

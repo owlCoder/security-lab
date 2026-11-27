@@ -1,7 +1,9 @@
 using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -10,12 +12,14 @@ using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -75,7 +79,45 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
     }
 
     [Test]
-    public async Task AuditUnavailable_RollsBackStatusAndSessionRevocation()
+    public async Task ExcessiveStatusChanges_AreRefusedWith429_AndChangeNothing()
+    {
+        // SEC-04: the limit sits on PUT /api/admin/accounts/{id}/status; a refused request never reaches the handler.
+        var (admin, student) = await ArrangeAdminAndStudentAsync();
+        var adminSession = await SessionTestData.CreateAsync(Factory, admin.Id);
+
+        using var limited = Factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("RateLimiting:AccountStatusChange:PermitLimit", "2");
+            builder.UseSetting("RateLimiting:AccountStatusChange:WindowSeconds", "60");
+        });
+        using var client = limited.CreateCsrfClient();
+
+        async Task<HttpResponseMessage> PutAsync(string status)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(student.Id))
+            {
+                Content = JsonContent.Create(new { status })
+            };
+            request.Headers.Add("Cookie", $"{SessionCookie.Name}={adminSession.RawToken}");
+            return await client.SendAsync(request);
+        }
+
+        Assert.That((await PutAsync("BLOCKED")).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await PutAsync("ACTIVE")).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        var refused = await PutAsync("BLOCKED");
+
+        Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests));
+        Assert.That(refused.Headers.RetryAfter?.Delta, Is.Not.Null);
+        Assert.That(await refused.Content.ReadAsStringAsync(), Does.Contain("rate_limited"));
+        Assert.That((await UserTestData.GetAsync(Factory, student.Id))!.Status, Is.EqualTo(AccountStatus.Active));
+        Assert.That(await AuditRowsAsync(student.Id), Has.Count.EqualTo(2), "only the two permitted changes are recorded");
+    }
+
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    public async Task AuditFailure_RollsBackStatusSessionRevocationAndAuditRow(int failurePoint)
     {
         var (admin, student) = await ArrangeAdminAndStudentAsync();
         var adminSession = await SessionTestData.CreateAsync(Factory, admin.Id);
@@ -84,9 +126,9 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         using var failing = Factory.WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.RemoveAll<ITransactionalAuditWriter>();
-            services.AddSingleton<ITransactionalAuditWriter, UnavailableAuditWriter>();
+            services.AddSingleton<ITransactionalAuditWriter>(new UnavailableAuditWriter(failurePoint));
         }));
-        using var client = failing.CreateClient();
+        using var client = failing.CreateCsrfClient();
         using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(student.Id))
         {
             Content = JsonContent.Create(new { status = "BLOCKED" })
@@ -110,13 +152,32 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         var other = await UserTestData.AddAsync(Factory, "other@example.com", Password);
         var studentSession = await SessionTestData.CreateAsync(Factory, student.Id);
 
-        var response = await SendAsync(HttpMethod.Put, StatusUrl(other.Id), studentSession.RawToken, new { status = "BLOCKED" });
+        // #113: the shared factory replaces ITrustedAuditWriter with a fake that stores nothing. This test reads
+        // the real access.denied row, so it restores the real writer; ConnectionStrings:Audit is the test database.
+        using var audited = Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<ITrustedAuditWriter>();
+            services.AddScoped<ITrustedAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
+        }));
+        using var client = audited.CreateCsrfClient();
+        using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(other.Id))
+        {
+            Content = JsonContent.Create(new { status = "BLOCKED" })
+        };
+        request.Headers.Add("Cookie", $"{SessionCookie.Name}={studentSession.RawToken}");
+
+        var response = await client.SendAsync(request);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         Assert.That((await UserTestData.GetAsync(Factory, other.Id))!.Status, Is.EqualTo(AccountStatus.Active));
-        var record = (await AuditRowsAsync(other.Id)).Single();
-        Assert.That(record.Outcome, Is.EqualTo("Denied"));
-        Assert.That(record.ActorId, Is.EqualTo(student.Id));
+
+        // ACC-05: the central Access middleware denies a non-administrator before the handler runs, so the
+        // denial is recorded as access.denied for the caller; ChangeAccountStatus never starts and writes no
+        // account.status.changed row (its own Denied record stays the second line, see ChangeAccountStatusTests).
+        Assert.That(await AuditRowsAsync(other.Id), Is.Empty);
+        var denial = (await AccessDeniedRowsAsync(student.Id)).Single();
+        Assert.That(denial.Outcome, Is.EqualTo("Denied"));
+        Assert.That(denial.Details, Does.Contain("account.status.change"));
     }
 
     [Test]
@@ -215,11 +276,36 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
         Assert.That((await AuditRowsAsync(unknown)).Single().Outcome, Is.EqualTo("Failure"));
     }
 
-    private sealed class UnavailableAuditWriter : ITransactionalAuditWriter
+    private sealed class UnavailableAuditWriter(int failurePoint) : ITransactionalAuditWriter
     {
-        public ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
-            DbTransaction transaction, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(AuditWriteResult.Unavailable());
+        public async ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
+            DbTransaction transaction, CancellationToken cancellationToken = default)
+        {
+            if (failurePoint == 0)
+                return AuditWriteResult.Unavailable();
+
+            var result = await new PostgresTransactionalAuditWriter(TimeProvider.System)
+                .WriteAsync(draft, context, transaction, cancellationToken);
+            Assert.That(result.IsRecorded, Is.True);
+            await using var check = transaction.Connection!.CreateCommand();
+            check.Transaction = transaction;
+            check.CommandText = "SELECT count(*) FROM audit.audit_events WHERE resource_id = @target";
+            var target = check.CreateParameter();
+            target.ParameterName = "target";
+            target.Value = draft.Resource!.Id;
+            check.Parameters.Add(target);
+            Assert.That(Convert.ToInt64(await check.ExecuteScalarAsync(cancellationToken)), Is.EqualTo(1));
+
+            if (failurePoint == 2)
+            {
+                await using var failure = transaction.Connection.CreateCommand();
+                failure.Transaction = transaction;
+                failure.CommandText = "SELECT 1 / 0";
+                await failure.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            return AuditWriteResult.Unavailable();
+        }
     }
 
     private static async Task<IssuedSession?> IssueSessionAsync(Guid accountId)
@@ -285,6 +371,23 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
             WHERE event_type = 'account.status.changed' AND resource_id = @id
             """, connection);
         command.Parameters.AddWithValue("id", accountId.ToString("D"));
+
+        var rows = new List<AuditRow>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            rows.Add(new AuditRow(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetGuid(1), reader.GetString(2)));
+        return rows;
+    }
+
+    private static async Task<List<AuditRow>> AccessDeniedRowsAsync(Guid actorId)
+    {
+        await using var connection = new NpgsqlConnection(TestDatabaseFixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT outcome, actor_id, details::text FROM audit.audit_events
+            WHERE event_type = 'access.denied' AND actor_id = @id
+            """, connection);
+        command.Parameters.AddWithValue("id", actorId);
 
         var rows = new List<AuditRow>();
         await using var reader = await command.ExecuteReaderAsync();

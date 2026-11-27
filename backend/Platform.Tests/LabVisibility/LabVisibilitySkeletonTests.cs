@@ -16,19 +16,17 @@ public class LabVisibilitySkeletonTests
     {
         var services = new ServiceCollection();
 
-        services.AddAccessControl();
+        // #185: radnje se prijavljuju pre AddAccessControl(), kao u Program.cs.
         services.AddLabVisibility();
+        services.AddLabVisibilityAccess();
+        services.AddAccessControl();
 
-        var provider = services.BuildServiceProvider(
+        return services.BuildServiceProvider(
             new ServiceProviderOptions
             {
                 ValidateScopes = true,
                 ValidateOnBuild = true
             });
-
-        provider.RegisterLabVisibilityAccess();
-
-        return provider;
     }
 
     private static AccessRequest ActiveStudentRequest(string action) =>
@@ -70,10 +68,12 @@ public class LabVisibilitySkeletonTests
     [Test]
     public void RegisteringTwice_FailsAtStartup()
     {
-        using var provider = BuildProvider();
+        var services = new ServiceCollection();
+        services.AddLabVisibility();
+        services.AddLabVisibilityAccess();
 
         Assert.Throws<InvalidOperationException>(
-            () => provider.RegisterLabVisibilityAccess());
+            () => services.AddLabVisibilityAccess());
     }
 
     [Test]

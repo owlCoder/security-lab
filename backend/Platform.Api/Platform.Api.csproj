@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Platform.Identity.Tests" />
+    <InternalsVisibleTo Include="Platform.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -18,9 +19,13 @@
     <ProjectReference Include="..\Team21.Acc.Api\Team21.Acc.Api.csproj" />
     <ProjectReference Include="..\Platform.LaboratoryPersistence\Platform.LaboratoryPersistence.csproj" />
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
+    <ProjectReference Include="..\Platform.Competencies\Platform.Competencies.csproj" />
+    <ProjectReference Include="..\Platform.LabLocalization\Platform.LabLocalization.csproj" />
+    <ProjectReference Include="..\Platform.SessionSecurity\Platform.SessionSecurity.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.14" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -29,5 +34,10 @@
   <ItemGroup Label="Laboratories">
     <ProjectReference Include="..\Platform.Laboratories.Domain\Platform.Laboratories.Domain.csproj" />
     <ProjectReference Include="..\Platform.Laboratories.Infrastructure\Platform.Laboratories.Infrastructure.csproj" />
+    <ProjectReference Include="..\Platform.Prerequisites\Platform.Prerequisites.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Modules/Administration/Persistence/Migrations/*.sql" />
+    <EmbeddedResource Include="Modules/Administration/Persistence/runtime-permissions.sql" />
   </ItemGroup>
 </Project>

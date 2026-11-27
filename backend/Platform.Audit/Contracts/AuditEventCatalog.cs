@@ -56,6 +56,37 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             null,
             Fields()),
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodesGenerated,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodeRedeemed,
+            Outcomes((AuditOutcome.Success, UserOrAnonymous)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodeRejected,
+            Outcomes((AuditOutcome.Denied, UserOrAnonymous)),
+            AuditPresence.Forbidden,
+            AuditPresence.Optional,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaBackupCodesRevoked,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
 
         new AuditEventSchema(
             AuditEventTypes.AccountStatusChanged,
@@ -66,6 +97,19 @@ public static class AuditEventCatalog
             Fields(
                 ("oldStatus", new AuditDetailField(AuditDetailFormat.AccountStatus)),
                 ("newStatus", new AuditDetailField(AuditDetailFormat.AccountStatus)),
+                ("reasonCode", ReasonCode))),
+
+        // IDN-05: administrator unlock. lockoutEnd is the lockout end that was cleared.
+        new AuditEventSchema(
+            AuditEventTypes.AccountUnlocked,
+            PrivilegedChange,
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("lockoutEnd", new AuditDetailField(
+                    AuditDetailFormat.UtcTimestamp,
+                    new[] { AuditOutcome.Success }.ToFrozenSet())),
                 ("reasonCode", ReasonCode))),
 
         new AuditEventSchema(

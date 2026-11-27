@@ -16,3 +16,11 @@ The update operation is an explicit starter use case for demonstrating a second 
 Actions: `attempt.read`, `attempt.draft.update`; resource type `attempt`; policy `acc04.ownership`, version `acc04:v3`.
 
 Architecture and DFD: `diagrams/acc04-architecture.svg` and `diagrams/acc04-dfd.svg`. See `BACKLOG.md` for order/prerequisites and `CONTRACTS.md` for provider ownership.
+
+
+KT2 runtime progression is in `KT2.md`: real Identity sessions, the existing shared
+membership contract, central read policies, an ATT transport adapter and snapshot/CAS
+checks. Actual ATT/persistent ACC-02 providers are not on the current main revision;
+positive transport tests explicitly use contract doubles. Do not treat them as a
+completed external-provider integration. Current diagrams are
+`diagrams/acc04-kt2-architecture.svg` and `diagrams/acc04-kt2-dfd.svg`.

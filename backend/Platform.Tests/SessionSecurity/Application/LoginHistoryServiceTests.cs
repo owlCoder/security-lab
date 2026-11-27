@@ -79,16 +79,16 @@ public sealed class LoginHistoryServiceTests
     [Test]
     public async Task SearchAsync_WhenResultIsReturned_ContainsNoFullAddressOrSubjectId()
     {
+        var fullAddresses = SyntheticLoginEvents.ForUserA()
+            .Select(loginEvent => loginEvent.SourceAddress)
+            .OfType<string>();
+
         var result = await _service.SearchAsync(
             UserA, new SearchLoginHistoryQuery(FromUtc: Now - LoginHistoryLimits.MaxRange, ToUtc: Now));
         var text = string.Join('|', result.Items.Select(item => item.ToString()));
 
         Assert.Multiple(() =>
         {
-            var fullAddresses = SyntheticLoginEvents.ForUserA()
-                .Select(loginEvent => loginEvent.SourceAddress)
-                .OfType<string>();
-
             foreach (var fullAddress in fullAddresses)
             {
                 Assert.That(text, Does.Not.Contain(fullAddress));
@@ -108,7 +108,7 @@ public sealed class LoginHistoryServiceTests
     }
 
     [Test]
-    public async Task SearchAsync_WhenRangeIsExactlyMaximumAndPageSizeIsMaximum_IsAccepted()
+    public async Task SearchAsync_WhenRangeIsExactlyMaximumAndPageSizeIsMaximum_ReturnsOk()
     {
         var query = new SearchLoginHistoryQuery(
             FromUtc: Now - LoginHistoryLimits.MaxRange, ToUtc: Now, PageSize: LoginHistoryLimits.MaxPageSize);
@@ -209,14 +209,12 @@ public sealed class LoginHistoryServiceTests
     }
 
     [Test]
-    public void Constructor_WhenDependencyIsNull_Throws()
+    public void SearchAsync_WhenCancellationIsRequested_ThrowsOperationCanceledException()
     {
-        // null! is intentional: the test checks the guard against a missing dependency.
-        Assert.Multiple(() =>
-        {
-            Assert.Throws<ArgumentNullException>(() => _ = new LoginHistoryService(null!, TimeProvider.System));
-            Assert.Throws<ArgumentNullException>(() => _ = new LoginHistoryService(_source, null!));
-        });
+        var cancelled = new CancellationToken(canceled: true);
+
+        Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await _service.SearchAsync(UserA, new SearchLoginHistoryQuery(), cancelled));
     }
 
     private static IEnumerable<TestCaseData> InvalidQueries()
@@ -248,10 +246,5 @@ public sealed class LoginHistoryServiceTests
             Assert.That(result.Items, Is.Empty);
             Assert.That(_source.CallCount, Is.Zero);
         });
-    }
-
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
     }
 }

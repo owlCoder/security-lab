@@ -142,6 +142,24 @@ public class PasswordAndCredentialTests
         Assert.That(result.IsLockedOut, Is.True);
     }
 
+    [Test]
+    public async Task Verifier_AttemptThatWasNotCharged_IsRefused_EvenIfTheAccountNowLooksUnlocked()
+    {
+        // IDN-05: the attempt found the account locked, or the limit reached and only set the lockout (nothing
+        // charged either way), and an administrator unlock committed before the account was read. The password
+        // result must not be used.
+        var id = Guid.NewGuid();
+        var verifier = VerifierWith(new CredentialRecord(id, AccountStatus.Active, _hasher.Hash(Password)), out var store);
+        store.Setup(s => s.ReserveAttemptAsync(
+                "student@example.com", It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await verifier.VerifyAsync("student@example.com", Password);
+
+        Assert.That(result, Is.EqualTo(CredentialResult.LockedOut(id)));
+        VerifyFailurePath(store, "student@example.com");
+    }
+
     private static void VerifyFailurePath(Mock<ICredentialStore> store, string normalizedEmail)
     {
         store.Verify(s => s.ReserveAttemptAsync(
@@ -159,6 +177,12 @@ public class PasswordAndCredentialTests
         store = new Mock<ICredentialStore>();
         store.Setup(s => s.FindByEmailAsync("student@example.com", It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
+        // Like EfCredentialStore: an attempt is charged only for an existing account that is not locked and has not
+        // reached the limit.
+        store.Setup(s => s.ReserveAttemptAsync(
+                "student@example.com", It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, int maxAttempts, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
+                record is not null && !(record.LockoutEnd > now) && record.FailedLoginCount < maxAttempts);
         store.Setup(s => s.TryClearFailuresAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         return new CredentialVerifier(store.Object, _hasher, Options.Create(new IdentityLockoutOptions()), TimeProvider.System);

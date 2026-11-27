@@ -13,6 +13,10 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
 
 - IP limiter odbija zahtev pre provere lozinke sa `429 Too Many Requests`, `Retry-After`
   u sekundama, `Cache-Control: no-store`, `X-Correlation-ID` i kodom `rate_limited`.
+- CSRF provera (US-15, [`IDN-02_CSRF.md`](IDN-02_CSRF.md)) radi pre limitera. Prijava bez
+  ispravnog `X-CSRF-TOKEN` dobija `403 csrf_invalid`, ne racuna se u limit, ne stize do
+  provere lozinke i ne pravi `auth.login.throttled`, cak i kada je klijent vec ogranicen
+  (`403` umesto `429`). Takva prijava ostavlja samo `Information` zapis u aplikacionom logu.
 - Brojac neuspeha i kraj blokade naloga cuvaju se u `identity.accounts`.
   `CredentialVerifier` preko `ICredentialStore` rezervise pokusaj pre skupog hasha;
   `EfCredentialStore` koristi atomske SQL UPDATE naredbe i proverava blokadu ponovo
@@ -22,9 +26,12 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
   Nepostojeci email nema red u bazi; jednakost se obezbedjuje javnim odgovorom,
   dummy proverom hasha i istim tokom upita, bez cuvanja proizvoljnih email adresa.
 - Prava prijava je `AuthController.Login`, `POST /api/auth/login`, sa
-  `[AllowAnonymous]`, `[AllowPublic]` i `[EnableRateLimiting(RateLimitPolicies.Login)]`.
-  Prva oznaka vazi za Identity sesije, druga za ACC-05 javnu rutu. Prijava ne koristi
-  `DelegatedAuthorization`. Ne menjaju se ACC-05 fallback deny pravila.
+  `[AllowAnonymous]`, `[RequireAccess(IdentityAccessActions.Login)]` i
+  `[EnableRateLimiting(RateLimitPolicies.Login)]`. `identity.login` je registrovana
+  `ActionScope.Public` akcija sa eksplicitnom politikom pre `AddAccessControl()`.
+  Na strogoj ACC-05 grani nijedna auth ruta ne koristi `AllowPublic` ili
+  `DelegatedAuthorization`. Odjava koristi javnu akciju `identity.logout`, a `/me`
+  akciju `identity.session.read` sa `Authenticated` opsegom i subjektom iz proverene sesije.
 - Komponenta izlaze i `RateLimitPolicies.PasswordReset`; vlasnik IDN-04 je ukljucuje
   na odgovarajucem endpointu. IDN-05 ne implementira reset lozinke.
 
@@ -34,7 +41,9 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
 flowchart LR
   U[Klijent] -->|HTTPS| C[Correlation middleware]
   C --> R[Routing]
-  R --> A[ACC-05: eksplicitno javna prijava]
+  R --> X[US-15: CSRF provera]
+  X -->|Bez ispravnog tokena: 403 csrf_invalid| U
+  X --> A[ACC-05: RequireAccess identity.login i registrovana Public politika]
   A --> F[ForwardedHeaders: samo poznati proxy]
   F --> L[IP sliding-window limiter]
   L <--> I[(Brojaci po IP / IPv6 /64 u memoriji)]
@@ -94,7 +103,7 @@ pokretanje aplikacije. Potrebna je Identity migracija `AddAccountLockout`.
 | Napad sa razlicitih IP adresa zakljucava jedan nalog; ni tacna lozinka ne izdaje sesiju | `LockoutEndpointTests.ManyFailuresForOneAccount_FromDifferentClients_BlockEvenTheCorrectPassword` |
 | Zakljucan nalog i nepostojeci email imaju isti javni odgovor | `LockoutEndpointTests.AccountBlock_AppliesToUnknownEmail_Identically` |
 | Nepostojeci, pogresan i zakljucan login imaju isti 401 | `LockoutEndpointTests.Unknown_wrong_and_locked_logins_get_identical_responses` |
-| Login ima ACC-05 javnu oznaku bez zaobilaznog delegata | `RevisionEndpointMetadataTests.Login_IsExplicitlyPublic_WithoutLegacyDelegation` |
+| Auth rute imaju tacno jednu akciju, politiku i odgovarajuci opseg, bez migracionih markera | `RevisionEndpointMetadataTests.AuthRoutes_RequireExactlyOneRegisteredPolicy_WithoutMigrationMarkers` |
 
 IP testovi koriste pravi API pipeline sa zamenjenim verifier-om i izdavanjem sesije.
 Testovi blokade naloga koriste pravi Identity modul, sesije i izolovani PostgreSQL
@@ -109,7 +118,7 @@ dotnet test backend/Platform.Tests/Platform.Tests.csproj --filter "FullyQualifie
 ```
 
 Za testove sa PostgreSQL potreban je pokrenut Docker. Rezultati ove ispravke
-zabelezeni su u `docs/components/REV-05-authorization/ACCESS-ALIGNMENT.md`.
+za strogu ACC-05 granu zabelezeni su u `docs/components/REV-05-authorization/STRICT-ACCESS-ALIGNMENT.md`.
 
 ## Known limitations
 

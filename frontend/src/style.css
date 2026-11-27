@@ -34,6 +34,9 @@ section { background: white; border: 1px solid #e1e6ed; border-radius: 12px; pad
   .login-form button { transition: none; }
 }
 .login-error { color: #9b1c1c; margin: 0; }
+/* IDN-08: external (OIDC) login, visually secondary to the password form */
+.oidc-login { display: inline-block; margin-top: 16px; padding: 10px 20px; border: 1px solid #245589; border-radius: 8px; color: #245589; font-weight: 600; text-decoration: none; }
+.oidc-login:hover, .oidc-login:focus-visible { background: #e7edf5; }
 .app-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .app-header button { border: 0; border-radius: 6px; padding: 10px 14px; cursor: pointer; font: inherit; }
 .app-header button.secondary { background: #e7edf5; color: #223045; }

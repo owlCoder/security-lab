@@ -26,6 +26,7 @@ using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
+using Platform.Identity.Testing;
 
 namespace Platform.Laboratories.IntegrationTests;
 
@@ -98,7 +99,7 @@ public sealed class RevisionTwoStepApprovalHttpTests
         await identity.SaveChangesAsync();
         authorClient = Client(authorToken); reviewerClient = Client(reviewerToken);
 
-        var laboratory = new Laboratory(Guid.NewGuid(), "Two-step revision", author);
+        var laboratory = new Laboratory(course, "Two-step revision", author);
         await scope.ServiceProvider.GetRequiredService<ILaboratoryRepository>().AddAsync(laboratory);
         lab = laboratory.Id;
         var revisions = scope.ServiceProvider.GetRequiredService<LaboratoriesDbContext>();
@@ -352,7 +353,7 @@ public sealed class RevisionTwoStepApprovalHttpTests
 
     private HttpClient Client(string token)
     {
-        var client = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        var client = host.CreateCsrfClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={token}");
         return client;
     }

@@ -116,7 +116,7 @@ The first call lists the templates (`200`), the second creates a draft from one 
 
 - `backend/SecurityLab.slnx` — backend solution file used by CI.
 - `backend/Platform.Api/` — API entry point.
-- `backend/Platform.Identity/` — identity module: entities, `DbContext`s, migrations, and core services (IDN-01, IDN-02).
+- `backend/Platform.Identity/` — identity module: entities, `DbContext`s, migrations, and core services (IDN-01, IDN-02, IDN-08). Account creation and OIDC federation: [docs/components/identity/IDN-01-IDN-08.md](docs/components/identity/IDN-01-IDN-08.md).
 - `backend/Platform.Identity.Tests/` — NUnit tests for the identity module and the identity part of the API.
 - `backend/Platform.Access/` — access control module (ACC-05, ACC-08).
 - `backend/Platform.Assignments/` — assignments module: assignment model, attempt limit and individual deadline extension (ASN-04, ASN-06). Its tests are in `backend/Platform.Tests/Assignments/`.
@@ -148,3 +148,50 @@ Build/test: `dotnet test backend/SecurityLab.slnx --configuration Release`. The 
 See [the KT1 checklist](docs/components/coursework/KT1.md), [startup and demonstration](docs/components/coursework/DEMO.md), [architecture and DFD diagrams](docs/components/coursework/diagrams), [domain/access matrix](docs/components/coursework/DOMAIN_MODEL.md), [threat model](docs/components/coursework/THREAT_MODEL.md), [provider contracts](docs/components/coursework/CONTRACTS.md), [backlog](docs/components/coursework/BACKLOG.md) and [actual local validation](docs/components/coursework/VALIDATION.md) and [external closure steps](docs/components/coursework/CLOSURE.md).
 
 The synthetic login is enabled only in Development with `Kt1Demo:Enabled=true`; no production authentication, persistent database or actual external contract acceptance is claimed. Other teams' shared components are preserved.
+
+## ACC-04 and ADM-08 KT2 work in progress
+
+ADM-08 has a PostgreSQL adapter with transactional producer audit and a real-session
+API at `/api/course-administration/{courseId}`. Enable it explicitly with
+`CourseworkAdministration:Enabled=true` and configure the Identity/administration
+and Team21 catalog connections. It consumes the existing Identity login/session and shared Access
+contracts. The existing KT1 React screen remains its separate simulator.
+
+Run the isolated database and real-session HTTP checks with Docker Desktop running:
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-coursework-postgres.ps1`.
+Add `-Demonstrate` to display the full login/delegation/update/revocation lifecycle.
+Operator migration and local HTTPS startup are documented in
+[KT2 scope, setup and remaining work](docs/components/coursework/KT2.md).
+See [the actual verification](docs/components/coursework/KT2-VALIDATION.md) and
+[current ADM-08 architecture/DFD](docs/components/coursework/diagrams/README.md).
+The operator can bootstrap the first root against existing active Identity and ACC-01
+records. Runtime requests re-read the catalog, so archived/deleted/unavailable courses
+deny access. An explicit relay sends supported delegation/denial events to the real
+central Audit writer with retry-safe IDs and separate receipts; unmapped settings/root
+bootstrap/read events remain durable locally.
+
+ACC-04 now has a separately enabled real-session API at `/api/resource-attempts/{id}`
+(owner read), `/{id}/review` (course-teacher review), and `/{id}/answer` (draft update),
+a fixed-origin HTTPS ATT adapter and a bridge to the published shared membership
+reader. **The actual ATT read/CAS provider and ACC-02 persistence are not on this main
+revision.** Positive ACC-04 integration tests therefore use explicitly named ATT and
+membership contract doubles, never production fallbacks. Without a real membership
+provider, access is denied. The ATT v1 proposal still needs the neighboring team's
+acceptance and implementation before this is a complete ACC-04 product integration.
+
+
+### Repeatable ADM-08 live HTTPS demonstration
+
+With .NET 10, PowerShell and Docker Desktop running, execute
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/demo-coursework-live.ps1`.
+It creates disposable real PostgreSQL provider state, invokes the actual operator,
+starts the actual API in Production on pinned loopback HTTPS, demonstrates two-course
+administration/restart/same-cookie revocation/Audit delivery, and removes its own
+state. JSON evidence is written under `TestResults/coursework-live-<run>/` with HTTP,
+TLS and state checks separately identified. No provider credential or cookie is
+written to that evidence. This is the ADM flow; missing ATT/membership integration
+is not replaced by an invented production provider. See the current [KT2 scope and
+run guide](docs/components/coursework/KT2.md) and actual validation record.
+
+PR #199 is already merged. The current continuation starts from updated main on a
+new branch and includes the previously unpublished KT2 provider-consumer additions.

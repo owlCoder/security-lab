@@ -13,6 +13,7 @@ public class GetLabContentTests
     private static readonly Guid LabId = Guid.NewGuid();
     private static readonly Guid RevisionId = Guid.NewGuid();
     private const string EvaluatorVersion = "evaluator-v1";
+    private static readonly RevisionText SerbianText = new("Kontrola pristupa", "Opis", "Uputstvo");
 
     private FakeRevisionReader _revisions = null!;
     private InMemoryLabLocalizationRepository _localizations = null!;
@@ -22,7 +23,7 @@ public class GetLabContentTests
     public void SetUp()
     {
         _revisions = new FakeRevisionReader();
-        _revisions.SetCurrent(LabId, new RevisionInfo(RevisionId, EvaluatorVersion));
+        _revisions.SetCurrent(LabId, new RevisionInfo(RevisionId, EvaluatorVersion, SerbianText, IsDraft: false));
         _localizations = new InMemoryLabLocalizationRepository();
         _getContent = new GetLabContent(_revisions, _localizations);
     }
@@ -35,7 +36,6 @@ public class GetLabContentTests
     [Test]
     public async Task Sr_and_en_show_the_same_revision_and_evaluator_with_different_text()
     {
-        await AddTranslation(LabLanguage.Sr, "Kontrola pristupa");
         await AddTranslation(LabLanguage.En, "Access control");
 
         var sr = await _getContent.ExecuteAsync(LabId, "sr");
@@ -49,11 +49,30 @@ public class GetLabContentTests
         Assert.That(en.Instructions, Is.Not.EqualTo(sr.Instructions));
     }
 
+    [Test]
+    public async Task Serbian_text_is_the_revision_text_without_any_stored_translation()
+    {
+        var content = await _getContent.ExecuteAsync(LabId, "sr");
+
+        Assert.That(content.Language, Is.EqualTo(LabLanguage.Sr));
+        Assert.That((content.Title, content.Description, content.Instructions),
+            Is.EqualTo((SerbianText.Title, SerbianText.Description, SerbianText.Instructions)));
+    }
+
+    [Test]
+    public async Task Stored_sr_record_never_replaces_the_revision_text()
+    {
+        await AddTranslation(LabLanguage.Sr, "Neodobren tekst");
+
+        var content = await _getContent.ExecuteAsync(LabId, "sr");
+
+        Assert.That(content.Title, Is.EqualTo(SerbianText.Title));
+    }
+
     [TestCase(null)]
     [TestCase("")]
     public async Task No_requested_language_returns_sr(string? requested)
     {
-        await AddTranslation(LabLanguage.Sr, "Kontrola pristupa");
         await AddTranslation(LabLanguage.En, "Access control");
 
         var content = await _getContent.ExecuteAsync(LabId, requested);
@@ -65,8 +84,6 @@ public class GetLabContentTests
     [Test]
     public async Task Missing_translation_falls_back_to_sr_on_the_same_revision()
     {
-        await AddTranslation(LabLanguage.Sr, "Kontrola pristupa");
-
         var content = await _getContent.ExecuteAsync(LabId, "en");
 
         Assert.That(content.Language, Is.EqualTo(LabLanguage.Sr));
@@ -77,10 +94,8 @@ public class GetLabContentTests
 
     [TestCase("xx")]
     [TestCase("1")]
-    public async Task Unsupported_language_is_rejected(string requested)
+    public void Unsupported_language_is_rejected(string requested)
     {
-        await AddTranslation(LabLanguage.Sr, "Kontrola pristupa");
-
         Assert.That(CodeOf(() => _getContent.ExecuteAsync(LabId, requested)), Is.EqualTo(LocalizationErrorCodes.InvalidLanguage));
     }
 
@@ -91,15 +106,8 @@ public class GetLabContentTests
     }
 
     [Test]
-    public void Revision_without_any_text_is_not_found()
-    {
-        Assert.That(CodeOf(() => _getContent.ExecuteAsync(LabId, "sr")), Is.EqualTo(LocalizationErrorCodes.NotFound));
-    }
-
-    [Test]
     public async Task Translation_of_another_revision_is_never_shown()
     {
-        await AddTranslation(LabLanguage.Sr, "Kontrola pristupa");
         await AddTranslation(LabLanguage.En, "Old revision text", revisionId: Guid.NewGuid());
 
         var content = await _getContent.ExecuteAsync(LabId, "en");

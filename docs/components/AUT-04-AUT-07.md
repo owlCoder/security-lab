@@ -105,6 +105,10 @@ flowchart LR
 
 Svako dokumentuje svoj deo u `docs/components/AUT-04-AUT-07/` po [šablonu komponente](../templates/PROJECT_COMPONENT.md).
 
+## Model pretnji
+
+Pretnje, kontrole i testovi za obe celine, sa granicama poverenja i DFD-om: [threat-model.md](AUT-04-AUT-07/threat-model.md). Svaki član održava redove za svoj deo.
+
 ## Zavisnosti od drugih timova
 
 | Tim / modul | Šta nam treba | Stanje |

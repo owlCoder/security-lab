@@ -29,5 +29,12 @@ public interface IAccountStatusUnitOfWork : IAsyncDisposable
     /// </summary>
     Task<int> ApplyAsync(UserAccount account, AccountStatus newStatus, CancellationToken ct = default);
 
+    /// <summary>
+    /// IDN-05: clears the lockout of an account read by <see cref="FindForUpdateAsync"/> (counter to 0, no lockout end).
+    /// Returns the lockout end that was cleared, or null when the account is not locked at <paramref name="now"/>;
+    /// in that case nothing changes. The status and the sessions are never touched.
+    /// </summary>
+    Task<DateTimeOffset?> ClearLockoutAsync(UserAccount account, DateTimeOffset now, CancellationToken ct = default);
+
     Task CommitAsync(CancellationToken ct = default);
 }

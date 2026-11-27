@@ -9,8 +9,10 @@ using Platform.Identity.Persistence;
 
 namespace Platform.Api.Services.Identity;
 
-public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManager
+public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? timeProvider = null) : ISessionManager
 {
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+
     public async Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default)
     {
         if (userId == Guid.Empty) throw new ArgumentException("userId is required", nameof(userId));
@@ -21,7 +23,7 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
 
         if (sessions.Count == 0) return 0;
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         foreach (var session in sessions)
             session.Revoke(now);
 
@@ -40,12 +42,20 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
 
         if (session is null) return false;
 
-        session.Revoke(DateTimeOffset.UtcNow);
+        session.Revoke(clock.GetUtcNow());
         await db.SaveChangesAsync(ct);
         return true;
     }
 
-    public async Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)
+    public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) =>
+        CheckAsync(token, recordActivity: true, ct);
+
+    // US-15: the CSRF check asks whether the session is valid before it refuses a request. A refused request must
+    // not count as activity (US-14 inactivity), so this runs the same checks without Touch.
+    public Task<ValidateSession?> PeekAsync(string token, CancellationToken ct = default) =>
+        CheckAsync(token, recordActivity: false, ct);
+
+    private async Task<ValidateSession?> CheckAsync(string token, bool recordActivity, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
 
@@ -54,8 +64,8 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
             candidate => candidate.TokenHash == tokenHash,
             ct);
 
-        var now = DateTimeOffset.UtcNow;
-        if (session is null || session.RevokedAt is not null || session.ExpiresAt <= now)
+        var now = clock.GetUtcNow();
+        if (session is null || !session.IsActiveAt(now))
             return null;
 
         // SEC-03 / IDN-03: a blocked or archived account is refused on its very next request, even if a session
@@ -66,15 +76,18 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
             .SingleOrDefaultAsync(ct);
         if (status != AccountStatus.Active) return null;
 
-        session.Touch(now);
-        try
+        if (recordActivity)
         {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            db.Entry(session).State = EntityState.Detached;
-            return null;
+            session.Touch(now);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                db.Entry(session).State = EntityState.Detached;
+                return null;
+            }
         }
 
         var level = session.AuthLevel switch
@@ -91,12 +104,14 @@ public sealed class SessionManager(PlatformIdentityDbContext db) : ISessionManag
     {
         if (userId == Guid.Empty) throw new ArgumentException("userId is required", nameof(userId));
 
-        var now = DateTimeOffset.UtcNow;
+        var now = clock.GetUtcNow();
         return await db.Sessions
             .Where(session =>
-                session.UserId == userId &&
+                session.UserId == userId && 
                 session.RevokedAt == null &&
-                session.ExpiresAt > now)
+                    session.ExpiresAt > now)     // TODO: Once the MFA/session state model is finalized (IDN-06 / TYP-05),
+                                                 // consider whether only fully authenticated sessions (AuthLevel.Active)
+                                                 // should be included in this list
             .Select(session => new SessionInfo(
                 session.SessionHandle,
                 session.CreatedAt,

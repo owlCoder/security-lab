@@ -8,18 +8,23 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Persistence;
+using Platform.Identity.Tests.Helpers;
 using Platform.Api.Services.Identity;
 using Testcontainers.PostgreSql;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Controllers;
 
-// IDN-05 through the real Platform.Api host: real login, real sessions, real Postgres.
-// Nothing is replaced. The database is a throwaway Testcontainers Postgres.
+// IDN-05 through the real Platform.Api host: real login, real sessions and real Postgres.
+// Only the mandatory Audit writer is replaced because this fixture isolates lockout behavior
+// and does not provision a separate Audit database.
 [TestFixture]
 [Category("IDN-05")]
 public sealed class LockoutEndpointTests
@@ -32,12 +37,19 @@ public sealed class LockoutEndpointTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            // The real Program supplies the same strict Access policies as production.
+            // Only database/configuration are isolated here; authorization is not replaced.
             builder.UseEnvironment("Testing");
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting("ConnectionStrings:Identity", connectionString);
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);
             // These tests exercise account lockout independently of the IP limiter.
             builder.UseSetting("RateLimiting:Login:PermitLimit", "1000");
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ITrustedAuditWriter>();
+                services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
+            });
         }
     }
 
@@ -171,9 +183,12 @@ public sealed class LockoutEndpointTests
         LoginFromAsync(string remoteIp, string email, string password)
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { email, password }));
+        using var tokenClient = _factory.CreateClient();
+        var csrf = await CsrfPair.FetchAsync(tokenClient);
         var context = await _factory.Server.SendAsync(http =>
         {
             http.Request.Method = HttpMethods.Post;
+            csrf.ApplyTo(http.Request);
             http.Request.Path = "/api/auth/login";
             http.Connection.RemoteIpAddress = IPAddress.Parse(remoteIp);
             http.Request.ContentType = "application/json";
@@ -189,7 +204,7 @@ public sealed class LockoutEndpointTests
     private async Task<(HttpStatusCode Status, string? ContentType, string? CacheControl, string Body)> LoginAsync(
         string email, string password)
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateCsrfClient();
         using var response = await client.PostAsJsonAsync("/api/auth/login", new { email, password });
         return (
             response.StatusCode,
