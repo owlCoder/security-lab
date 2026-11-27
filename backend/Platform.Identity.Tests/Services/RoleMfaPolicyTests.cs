@@ -39,4 +39,35 @@ public class RoleMfaPolicyTests
 
         Assert.That(result, Is.False);
     }
+
+    [Test]
+    public void IsRequiredFor_TeacherInList_ReturnsTrue()
+    {
+        var result = _policy.IsRequiredFor(AccountRole.Teacher);
+
+        Assert.That(result, Is.True);
+    }
+
+    [Test]
+    public void IsRequiredFor_EmptyList_ReturnsFalse()
+    {
+        var policy = new RoleMfaPolicy(new ConfigurationBuilder().Build());
+
+        Assert.That(policy.IsRequiredFor(AccountRole.Administrator), Is.False);
+    }
+
+    [Test]
+    public void IsRequiredFor_RoleWrittenInOtherCase_ReturnsFalse()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Identity:Mfa:RequiredForRoles:0"] = "teacher"
+            })
+            .Build();
+
+        var policy = new RoleMfaPolicy(configuration);
+
+        Assert.That(policy.IsRequiredFor(AccountRole.Teacher), Is.False);
+    }
 }

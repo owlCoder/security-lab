@@ -87,6 +87,17 @@ public class PasswordAndCredentialTests
     }
 
     [Test]
+    public async Task Verifier_ReturnsTheRoleOfTheAccount()
+    {
+        var verifier = VerifierWith(new CredentialRecord(
+            Guid.NewGuid(), AccountStatus.Active, _hasher.Hash(Password), Role: AccountRole.Teacher));
+
+        var result = await verifier.VerifyAsync("student@example.com", Password);
+
+        Assert.That(result.Role, Is.EqualTo(AccountRole.Teacher));
+    }
+
+    [Test]
     public async Task Verifier_RejectsWrongPassword_UnknownEmail_AndAccountWithoutHash()
     {
         var withHash = VerifierWith(new CredentialRecord(Guid.NewGuid(), AccountStatus.Active, _hasher.Hash(Password)));
