@@ -1,5 +1,4 @@
-﻿
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
