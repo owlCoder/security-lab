@@ -210,11 +210,30 @@ public class SessionManagerValidationTests
 
         Assert.That(await _manager.ValidateAsync(token), Is.Null);
     }
+    [Test]
+    public async Task MfaPendingSession_Timeout_Accepted()
+    {
+        var (token, _) = await CreateSessionAsync(Guid.NewGuid(), AuthLevel.MfaPending);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.MfaPendingTimeoutMinutes - 1));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Not.Null);
+    }
+
+    [Test]
+    public async Task MfaPendingSession_Timeout_Rejected_Border()
+    {
+        var (token, _) = await CreateSessionAsync(Guid.NewGuid(), AuthLevel.MfaPending);
+
+        _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.MfaPendingTimeoutMinutes));
+
+        Assert.That(await _manager.ValidateAsync(token), Is.Null);
+    }
 
     [Test]
     public async Task ActiveSession_ExceedingItsInactivityTimeout_IsRejected()
     {
-        var (token, _) = await CreateSessionAsync(Guid.NewGuid());
+        var (token, session) = await CreateSessionAsync(Guid.NewGuid());
 
         _clock.Advance(TimeSpan.FromMinutes(1));
 
@@ -223,6 +242,7 @@ public class SessionManagerValidationTests
         _clock.Advance(TimeSpan.FromMinutes(_optionsTime.Value.ActivityTimeoutMinutes));
 
         Assert.That(await _manager.ValidateAsync(token), Is.Null);
+        Assert.That(ReadSaved(session.Id).RevokedAt, Is.EqualTo(_clock.GetUtcNow()));
     }
     // Sessions are created and revoked through their own contexts, like separate requests would do.
     private async Task<(string Token, Session Session)> CreateSessionAsync(Guid userId, AuthLevel level = AuthLevel.Active)
