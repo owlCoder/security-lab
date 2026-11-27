@@ -73,8 +73,9 @@ the Audit PostgreSQL fixtures actually executed. Identity integration tests use 
 Testcontainers database. The runner removes its container and restores its temporary
 environment variables. TRX reports remain under ignored `TestResults/audit-s09-*`.
 
-T13 backup/restore and final Team 1 login failure-policy confirmation are separate from
-these S-16 checks; this change does not claim to complete them or the entire AUD-01 module.
+T13 backup/restore is covered separately in [T13-BACKUP-RESTORE.md](T13-BACKUP-RESTORE.md).
+Final Team 1 login failure-policy confirmation remains separate from these S-16 checks;
+this change does not claim to complete it or the entire AUD-01 module.
 
 ## Historical local verification, 2026-11-09
 

@@ -21,6 +21,7 @@ function Assert-AuditPostgresResults($resultsDirectory) {
         'Platform.Audit.Tests.AuditRuntimePermissionsTests'
         'Platform.Audit.Tests.AuditHostPostgresTests'
         'Platform.Audit.Tests.PostgresCourseAuditQueryTests'
+        'Platform.Audit.Tests.AuditBackupRestoreTests'
     )
     $required = $remaining
     foreach ($file in Get-ChildItem -LiteralPath $resultsDirectory -Filter '*.trx' -Recurse) {
@@ -53,7 +54,7 @@ $resultsDirectory = Join-Path $repositoryRoot "TestResults/audit-s09-$runId"
 $container = $null
 $savedEnvironment = @{}
 foreach ($name in 'POSTGRES_PASSWORD', 'AUDIT_RUNTIME_PASSWORD', 'AUDIT_MIGRATION_CONNECTION_STRING',
-    'AUDIT_TEST_ADMIN_CONNECTION_STRING', 'AUDIT_TEST_RUNTIME_CONNECTION_STRING') {
+    'AUDIT_TEST_ADMIN_CONNECTION_STRING', 'AUDIT_TEST_RUNTIME_CONNECTION_STRING', 'AUDIT_TEST_CONTAINER_ID') {
     $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
 }
 
@@ -91,6 +92,7 @@ try {
         throw 'Expected a single loopback PostgreSQL port.'
     }
     $port = $Matches[1]
+    $env:AUDIT_TEST_CONTAINER_ID = $container
     $env:AUDIT_TEST_ADMIN_CONNECTION_STRING =
         New-AuditTestConnectionString $port 'securitylab_bootstrap' $env:POSTGRES_PASSWORD
     $env:AUDIT_TEST_RUNTIME_CONNECTION_STRING =
