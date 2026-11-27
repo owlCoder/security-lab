@@ -11,34 +11,84 @@ namespace Platform.Api.Services.Identity;
 /// US-04: e-mail + password login (DFD process P1). Unknown e-mail, wrong password, missing hash and
 /// blocked/archived accounts all return the same InvalidCredentials; only the audit event tells them apart.
 /// </summary>
-public sealed class LoginService(
+internal sealed class LoginService(
     ICredentialVerifier credentials,
     ISessionCreator sessions,
-    IAuditWriter audit,
-    TimeProvider clock) : ILoginService
+    ISessionManager sessionManager,
+    IdentityAuditProducer audit) : ILoginService
 {
-    private const string AuditAction = "auth.login";
-
     public async Task<LoginResult> ExecuteAsync(
         string? email, string? password, string correlationId, CancellationToken ct = default)
     {
         if (!IsAcceptable(email, password))
-            return Fail(LoginOutcome.InvalidRequest, null, correlationId, "failure", "malformed request");
+            return await FailAsync(LoginOutcome.InvalidRequest, "invalid_request", correlationId, null, ct);
 
-        // IDN-05 (attempt limiting) is not part of this story. It would be called here, before the check.
         var check = await credentials.VerifyAsync(email!, password!, ct);
+
+        // IDN-05: a locked account gets the same answer as a wrong password; only the audit event differs.
+        // The caller is not proven to own the account, so it is the target and not the actor.
+        if (check.IsLockedOut)
+            return await FailAsync(
+                LoginOutcome.InvalidCredentials,
+                "account_locked",
+                correlationId,
+                check.AccountId,
+                ct);
+
         if (!check.IsValid)
-            return Fail(LoginOutcome.InvalidCredentials, null, correlationId, "failure", "invalid credentials");
+            return await FailAsync(LoginOutcome.InvalidCredentials, "invalid_credentials", correlationId, null, ct);
 
         if (check.Status != AccountStatus.Active)
-            return Fail(LoginOutcome.InvalidCredentials, check.AccountId, correlationId, "denied", $"account is {check.Status}");
+            return await FailAsync(
+                LoginOutcome.InvalidCredentials,
+                check.Status == AccountStatus.Blocked ? "account_blocked" : "account_archived",
+                correlationId,
+                check.AccountId,
+                ct,
+                actorConfirmed: true);
 
         // MFA (IDN-06) is not implemented yet: until an MFA policy exists every login is Active.
-        var session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
-        if (session is null)
-            return Fail(LoginOutcome.Unavailable, check.AccountId, correlationId, "failure", "session store unavailable");
+        IssuedSession? session;
+        try
+        {
+            session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
+        }
+        catch (AccountNotActiveException)
+        {
+            // The account was blocked or archived after the status check above (IDN-03, SEC-03): same answer as a
+            // login that was refused up front, and no session exists that a later reactivation could revive.
+            return await FailAsync(
+                LoginOutcome.InvalidCredentials,
+                "account_inactive",
+                correlationId,
+                check.AccountId,
+                ct,
+                actorConfirmed: true);
+        }
 
-        Write(check.AccountId, correlationId, "success", null);
+        if (session is null)
+            return await FailAsync(
+                LoginOutcome.Unavailable,
+                "session_unavailable",
+                correlationId,
+                check.AccountId,
+                ct,
+                actorConfirmed: true);
+
+        // The session has already been persisted. A disconnected client must not cancel
+        // the evidence write for an action that has taken effect.
+        var auditResult = await audit.LoginSucceededAsync(
+            check.AccountId, correlationId, CancellationToken.None);
+        if (!auditResult.IsRecorded)
+        {
+            // The client must never receive a session for a login that could not be
+            // durably audited. Revoke the already-persisted session by its opaque
+            // handle; neither the raw token nor the handle is written to Audit.
+            await sessionManager.RevokeSession(
+                check.AccountId, session.Handle, CancellationToken.None);
+            return new LoginResult(LoginOutcome.Unavailable);
+        }
+
         return new LoginResult(LoginOutcome.Success, check.AccountId, session);
     }
 
@@ -46,13 +96,20 @@ public sealed class LoginService(
         !string.IsNullOrWhiteSpace(email) && email.Length <= CredentialVerifier.MaxEmailLength &&
         !string.IsNullOrEmpty(password) && password.Length <= CredentialVerifier.MaxPasswordLength;
 
-    private LoginResult Fail(LoginOutcome outcome, Guid? actorId, string correlationId, string auditOutcome, string detail)
+    private async Task<LoginResult> FailAsync(
+        LoginOutcome outcome,
+        string reasonCode,
+        string correlationId,
+        Guid? confirmedUserId,
+        CancellationToken cancellationToken,
+        bool actorConfirmed = false)
     {
-        Write(actorId, correlationId, auditOutcome, detail);
+        await audit.LoginFailedAsync(
+            reasonCode,
+            correlationId,
+            confirmedUserId,
+            cancellationToken,
+            actorConfirmed);
         return new LoginResult(outcome);
     }
-
-    // Never put the e-mail, password, hash or token in an audit event (AUD-03).
-    private void Write(Guid? actorId, string correlationId, string outcome, string? detail) =>
-        audit.Write(new AuditEvent(clock.GetUtcNow(), actorId, AuditAction, actorId?.ToString() ?? "-", outcome, correlationId, detail));
 }

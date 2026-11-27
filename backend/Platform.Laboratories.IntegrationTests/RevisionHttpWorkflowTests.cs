@@ -27,11 +27,12 @@ using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
+using Platform.Identity.Testing;
 
 namespace Platform.Laboratories.IntegrationTests;
 
 [TestFixture, Category("Integration"), NonParallelizable]
-public sealed class RevisionHttpWorkflowTests
+public sealed partial class RevisionHttpWorkflowTests
 {
     private readonly PostgreSqlContainer database = new PostgreSqlBuilder("postgres:17-alpine")
         .WithDatabase("rev05_http").WithUsername("rev05_tests").WithPassword(Guid.NewGuid().ToString("N")).Build();
@@ -89,7 +90,7 @@ public sealed class RevisionHttpWorkflowTests
         await identity.SaveChangesAsync();
         authorClient = Client(authorToken); reviewerClient = Client(reviewerToken);
 
-        var laboratory = new Laboratory("HTTP revision", author);
+        var laboratory = new Laboratory(course, "HTTP revision", author);
         await scope.ServiceProvider.GetRequiredService<ILaboratoryRepository>().AddAsync(laboratory);
         lab = laboratory.Id;
         var revisions = scope.ServiceProvider.GetRequiredService<LaboratoriesDbContext>();
@@ -333,7 +334,7 @@ public sealed class RevisionHttpWorkflowTests
 
     private HttpClient Client(string token)
     {
-        var client = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        var client = host.CreateCsrfClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={token}");
         return client;
     }

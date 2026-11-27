@@ -27,7 +27,8 @@ public class LaboratoryPersistenceIntegrationTests
         return new LaboratoryDbContext(options);
     }
 
-    private static Laboratory NewLab(string title) => new(title, Guid.NewGuid());
+    // LAB-03: konstruktor sada trazi kurs; minimalna izmena da build prodje (vidi docs/components/LAB-03.md).
+    private static Laboratory NewLab(string title) => new(Guid.NewGuid(), title, Guid.NewGuid());
 
     private static async Task DeleteLabs(params Guid[] ids)
     {
@@ -61,6 +62,7 @@ public class LaboratoryPersistenceIntegrationTests
                 Assert.Multiple(() =>
                 {
                     Assert.That(result!.Id, Is.EqualTo(lab.Id));
+                    Assert.That(result.CourseId, Is.EqualTo(lab.CourseId));
                     Assert.That(result.CreatedBy, Is.EqualTo(lab.CreatedBy));
                     Assert.That((result.CreatedAt - lab.CreatedAt).Duration(), Is.LessThan(TimeSpan.FromMilliseconds(1)));
                     Assert.That(result.Status, Is.EqualTo(LabStatus.Draft));
@@ -86,6 +88,7 @@ public class LaboratoryPersistenceIntegrationTests
                 var result = await new PostgresLaboratoryRepository(new PostgresLaboratoryStore(db)).GetByIdAsync(lab.Id);
                 Assert.That(result!.Title, Is.EqualTo("After"));
                 Assert.That(result.Id, Is.EqualTo(lab.Id));
+                Assert.That(result.CourseId, Is.EqualTo(lab.CourseId));
                 Assert.That(result.CreatedBy, Is.EqualTo(lab.CreatedBy));
             }
         }

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Moq;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
@@ -97,6 +98,77 @@ public class PasswordAndCredentialTests
         Assert.That((await empty.VerifyAsync("nobody@example.com", Password)).IsValid, Is.False);
     }
 
+    [Test]
+    public async Task Verifier_UnknownEmail_RunsTheSameStatements_SoTimingDoesNotReveal()
+    {
+        var verifier = VerifierWith(null, out var store);
+
+        var result = await verifier.VerifyAsync("  Student@Example.COM ", Password);
+
+        Assert.That(result, Is.EqualTo(CredentialResult.Invalid));
+        VerifyFailurePath(store, "student@example.com");
+    }
+
+    [Test]
+    public async Task Verifier_LockedAccount_IsRefused_EvenWithTheCorrectPassword_AndRunsTheSameStatements()
+    {
+        var id = Guid.NewGuid();
+        var lockoutEnd = DateTimeOffset.UtcNow.AddMinutes(5);
+        var verifier = VerifierWith(
+            new CredentialRecord(id, AccountStatus.Active, _hasher.Hash(Password), LockoutEnd: lockoutEnd), out var store);
+
+        var result = await verifier.VerifyAsync("student@example.com", Password);
+
+        Assert.That(result.IsValid, Is.False);
+        Assert.That(result.IsLockedOut, Is.True);
+        Assert.That(result.AccountId, Is.EqualTo(id));
+        VerifyFailurePath(store, "student@example.com");
+    }
+
+    [Test]
+    public async Task Verifier_RefusesACorrectPassword_WhenTheAccountLockedDuringTheCheck()
+    {
+        var id = Guid.NewGuid();
+        var verifier = VerifierWith(new CredentialRecord(id, AccountStatus.Active, _hasher.Hash(Password)), out var store);
+        store.Setup(s => s.TryClearFailuresAsync(id, It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        store.Setup(s => s.LockIfLimitReachedAsync(
+                It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DateTimeOffset.UtcNow.AddMinutes(5));
+
+        var result = await verifier.VerifyAsync("student@example.com", Password);
+
+        Assert.That(result.IsValid, Is.False);
+        Assert.That(result.IsLockedOut, Is.True);
+    }
+
+    [Test]
+    public async Task Verifier_AttemptThatWasNotCharged_IsRefused_EvenIfTheAccountNowLooksUnlocked()
+    {
+        // IDN-05: the attempt found the account locked, or the limit reached and only set the lockout (nothing
+        // charged either way), and an administrator unlock committed before the account was read. The password
+        // result must not be used.
+        var id = Guid.NewGuid();
+        var verifier = VerifierWith(new CredentialRecord(id, AccountStatus.Active, _hasher.Hash(Password)), out var store);
+        store.Setup(s => s.ReserveAttemptAsync(
+                "student@example.com", It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var result = await verifier.VerifyAsync("student@example.com", Password);
+
+        Assert.That(result, Is.EqualTo(CredentialResult.LockedOut(id)));
+        VerifyFailurePath(store, "student@example.com");
+    }
+
+    private static void VerifyFailurePath(Mock<ICredentialStore> store, string normalizedEmail)
+    {
+        store.Verify(s => s.ReserveAttemptAsync(
+            normalizedEmail, It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once());
+        store.Verify(s => s.LockIfLimitReachedAsync(
+            normalizedEmail, It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Once());
+        store.Verify(s => s.TryClearFailuresAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
     private CredentialVerifier VerifierWith(CredentialRecord? record) => VerifierWith(record, out _);
 
     // The store answers only for the normalized e-mail "student@example.com"; any other lookup returns null.
@@ -105,6 +177,14 @@ public class PasswordAndCredentialTests
         store = new Mock<ICredentialStore>();
         store.Setup(s => s.FindByEmailAsync("student@example.com", It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
-        return new CredentialVerifier(store.Object, _hasher);
+        // Like EfCredentialStore: an attempt is charged only for an existing account that is not locked and has not
+        // reached the limit.
+        store.Setup(s => s.ReserveAttemptAsync(
+                "student@example.com", It.IsAny<int>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, int maxAttempts, DateTimeOffset now, DateTimeOffset _, CancellationToken _) =>
+                record is not null && !(record.LockoutEnd > now) && record.FailedLoginCount < maxAttempts);
+        store.Setup(s => s.TryClearFailuresAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        return new CredentialVerifier(store.Object, _hasher, Options.Create(new IdentityLockoutOptions()), TimeProvider.System);
     }
 }

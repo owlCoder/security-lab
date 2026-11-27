@@ -18,10 +18,23 @@ public sealed record AdminWriteResult(WriteStatus Status, object? Value = null, 
 // Administrative data lives here. Membership, teaching assignments, answers and grades do not.
 public interface ICourseAdministrationStore
 {
-    PortResult<CourseSnapshot> FindCourse(Guid course);
-    PortResult<AdminGrant> FindAuthority(Guid actor, Guid course);
-    PortResult<AdministrationView> ReadAdministration(AdminGrant authority);
-    AdminWriteResult Rename(AdminGrant authority, RenameCourseRequest request);
-    AdminWriteResult Delegate(AdminGrant authority, Guid grantee, AdminCapability capabilities);
-    AdminWriteResult Revoke(AdminGrant authority, Guid grantId, int expectedVersion);
+    PortResult<CourseSnapshot> FindCourse(Guid course) => throw AsyncRequired();
+    PortResult<AdminGrant> FindAuthority(Guid actor, Guid course) => throw AsyncRequired();
+    PortResult<AdministrationView> ReadAdministration(AdminGrant authority) => throw AsyncRequired();
+    AdminWriteResult Rename(AdminGrant authority, RenameCourseRequest request) => throw AsyncRequired();
+    AdminWriteResult Delegate(AdminGrant authority, Guid grantee, AdminCapability capabilities) => throw AsyncRequired();
+    AdminWriteResult Revoke(AdminGrant authority, Guid grantId, int expectedVersion) => throw AsyncRequired();
+    ValueTask<PortResult<CourseSnapshot>> FindCourseAsync(Guid course, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(FindCourse(course)); }
+    ValueTask<PortResult<AdminGrant>> FindAuthorityAsync(Guid actor, Guid course, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(FindAuthority(actor, course)); }
+    ValueTask<PortResult<AdministrationView>> ReadAdministrationAsync(AdminGrant authority, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(ReadAdministration(authority)); }
+    ValueTask<AdminWriteResult> RenameAsync(AdminGrant authority, RenameCourseRequest request, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(Rename(authority, request)); }
+    ValueTask<AdminWriteResult> DelegateAsync(AdminGrant authority, Guid grantee, AdminCapability capabilities, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(Delegate(authority, grantee, capabilities)); }
+    ValueTask<AdminWriteResult> RevokeAsync(AdminGrant authority, Guid grantId, int expectedVersion, CancellationToken ct = default)
+    { ct.ThrowIfCancellationRequested(); return ValueTask.FromResult(Revoke(authority, grantId, expectedVersion)); }
+    private static NotSupportedException AsyncRequired() => new("Use the asynchronous administration port for this adapter.");
 }

@@ -127,6 +127,8 @@ public sealed class AuditDraftValidatorTests
     [TestCase("")]
     [TestCase("corr 0001")]
     [TestCase("corr-0001\nforged line")]
+    [TestCase("corr-0001\n")]
+    [TestCase("corr-0001\r\n")]
     [TestCase("<script>")]
     public void Validate_WhenCorrelationIdIsMalformed_RejectsContext(string correlationId)
     {
@@ -213,6 +215,7 @@ public sealed class AuditDraftValidatorTests
     [TestCase("")]
     [TestCase("id with spaces")]
     [TestCase("id/../other")]
+    [TestCase("account-1\n")]
     public void Validate_WhenResourceIdIsMalformed_RejectsResource(string resourceId)
     {
         var draft = StatusChange() with { Resource = new AuditResourceRef(AuditResourceTypes.Account, resourceId) };
@@ -275,6 +278,66 @@ public sealed class AuditDraftValidatorTests
             CourseId,
             Course,
             Details((key, value)));
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
+    }
+
+    // Account unlock (IDN-05): each case breaks one rule of the account.unlocked schema.
+
+    [TestCase(AuditOutcome.Denied)]
+    [TestCase(AuditOutcome.Failure)]
+    public void Validate_WhenLockoutEndIsGivenOnRefusedUnlock_RejectsUnknownKey(AuditOutcome outcome)
+    {
+        // Nothing was cleared, so a refusal has no lockout end to report.
+        var draft = Unlock(outcome, Details(("lockoutEnd", "2026-11-23T10:15:00Z")));
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.UnknownDetailKey));
+    }
+
+    [Test]
+    public void Validate_WhenReasonCodeIsGivenOnSuccessfulUnlock_RejectsUnknownKey()
+    {
+        var draft = Unlock(details: Details(("lockoutEnd", "2026-11-23T10:15:00Z"), ("reasonCode", "not_locked")));
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.UnknownDetailKey));
+    }
+
+    [Test]
+    public void Validate_WhenCourseIsGivenForUnlock_RejectsCourseNotAllowed()
+    {
+        var draft = Unlock() with { CourseId = CourseId };
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.CourseNotAllowed));
+    }
+
+    [Test]
+    public void Validate_WhenAccountIsMissingForUnlock_RejectsResource()
+    {
+        var draft = Unlock() with { Resource = null };
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidResource));
+    }
+
+    [TestCase(AuditResourceTypes.Course)]
+    [TestCase(AuditResourceTypes.Delegation)]
+    [TestCase(AuditResourceTypes.Revision)]
+    public void Validate_WhenUnlockResourceIsNotAnAccount_RejectsResource(string resourceType)
+    {
+        var draft = Unlock() with { Resource = new AuditResourceRef(resourceType, TargetAccountId.ToString()) };
+
+        Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidResource));
+    }
+
+    [TestCase("")]
+    [TestCase("not-a-timestamp")]
+    [TestCase("2026-11-23T10:15:00")]
+    [TestCase("2026-11-23T10:15:00+01:00")]
+    [TestCase("2026-13-23T10:15:00Z")]
+    [TestCase("2026-11-23T10:15:00.12345678Z")]
+    [TestCase("2026-11-23T10:15:00Z\n")]
+    public void Validate_WhenLockoutEndIsNotAUtcTimestamp_RejectsValue(string value)
+    {
+        var draft = Unlock(details: Details(("lockoutEnd", value)));
 
         Assert.That(_validator.Validate(draft, UserContext), Is.EqualTo(AuditRejectionCode.InvalidDetailValue));
     }

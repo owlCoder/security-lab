@@ -13,6 +13,8 @@ public class AddLabLocalizationTests
     private static readonly Guid LabId = Guid.NewGuid();
     private static readonly Guid RevisionId = Guid.NewGuid();
     private const string EvaluatorVersion = "evaluator-v1";
+    private static readonly RevisionInfo Draft =
+        new(RevisionId, EvaluatorVersion, new RevisionText("Kontrola pristupa", "Opis", "Uputstvo"), IsDraft: true);
 
     private FakeRevisionReader _revisions = null!;
     private InMemoryLabLocalizationRepository _localizations = null!;
@@ -22,7 +24,7 @@ public class AddLabLocalizationTests
     public void SetUp()
     {
         _revisions = new FakeRevisionReader();
-        _revisions.SetCurrent(LabId, new RevisionInfo(RevisionId, EvaluatorVersion));
+        _revisions.Add(LabId, Draft);
         _localizations = new InMemoryLabLocalizationRepository();
         _add = new AddLabLocalization(new FakeLocalizationAccess(TeacherId), _revisions, _localizations);
     }
@@ -42,6 +44,7 @@ public class AddLabLocalizationTests
     public async Task Teacher_adds_a_translation_and_it_can_be_read_on_the_same_revision_and_evaluator()
     {
         await Add(TeacherId, "en", "Access control");
+        _revisions.SetCurrent(LabId, Draft);
 
         var content = await new GetLabContent(_revisions, _localizations).ExecuteAsync(LabId, "en");
 
@@ -81,6 +84,25 @@ public class AddLabLocalizationTests
     public async Task Language_must_be_stated_and_supported(string? language)
     {
         Assert.That(CodeOf(() => Add(TeacherId, language)), Is.EqualTo(LocalizationErrorCodes.InvalidLanguage));
+
+        await AssertNothingStored();
+    }
+
+    [TestCase("sr")]
+    [TestCase("SR")]
+    public async Task Serbian_is_the_revision_text_and_cannot_be_added_as_a_translation(string language)
+    {
+        Assert.That(CodeOf(() => Add(TeacherId, language)), Is.EqualTo(LocalizationErrorCodes.InvalidLanguage));
+
+        await AssertNothingStored();
+    }
+
+    [Test]
+    public async Task Published_revision_cannot_be_translated()
+    {
+        _revisions.SetCurrent(LabId, Draft);
+
+        Assert.That(CodeOf(() => Add(TeacherId)), Is.EqualTo(LocalizationErrorCodes.RevisionNotDraft));
 
         await AssertNothingStored();
     }

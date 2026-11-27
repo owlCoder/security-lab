@@ -5,14 +5,17 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Domain;
+using Platform.LabVisibility.Contracts;
+using Platform.LabVisibility.Infrastructure.Membership;
 
 namespace Laboratories.Tests;
 
-// HTTP testovi LAB-01 API-ja nad stvarnim hostom u memoriji (WebApplicationFactory).
+// HTTP testovi LAB-01 i LAB-03 API-ja nad stvarnim hostom u memoriji (WebApplicationFactory).
 // Svaki test pravi svoj host, pa ima svoje prazno skladiste.
 [TestFixture]
 public sealed class LaboratoriesHttpTests
@@ -22,6 +25,11 @@ public sealed class LaboratoriesHttpTests
     private const string Teacher = "marko:Teacher";
     private const string OtherTeacher = "jelena:Teacher";
     private const string Student = "ana:Student";
+
+    // LAB-03: marko je nastavnik, a ana studentkinja na CourseId (postavlja LaboratoriesHostFactory).
+    // Na OtherCourseId niko od njih nije clan.
+    private static readonly Guid CourseId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid OtherCourseId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
     // ---------- Provera pristupa pre endpoint-a (kostur) ----------
 
@@ -67,13 +75,13 @@ public sealed class LaboratoriesHttpTests
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
 
-        using var teacherResponse = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "Lab nastavnika" }));
+        using var teacherResponse = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "Lab nastavnika", courseId = CourseId }));
         Assert.That(teacherResponse.StatusCode, Is.EqualTo(HttpStatusCode.Created));
 
-        using var studentResponse = await client.SendAsync(CreateJsonRequest("POST", Route, Student, new { title = "Lab studenta" }));
+        using var studentResponse = await client.SendAsync(CreateJsonRequest("POST", Route, Student, new { title = "Lab studenta", courseId = CourseId }));
         Assert.That(studentResponse.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
 
-        using var anonymousResponse = await client.SendAsync(CreateJsonRequest("POST", Route, null, new { title = "Anonimni lab" }));
+        using var anonymousResponse = await client.SendAsync(CreateJsonRequest("POST", Route, null, new { title = "Anonimni lab", courseId = CourseId }));
         Assert.That(anonymousResponse.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
 
         Assert.That(await StoredCountAsync(factory), Is.EqualTo(1));
@@ -107,7 +115,7 @@ public sealed class LaboratoriesHttpTests
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
 
-        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "  RBAC i kontrola pristupa  " }));
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "  RBAC i kontrola pristupa  ", courseId = CourseId }));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
         var created = await response.Content.ReadFromJsonAsync<LaboratoryResponse>();
@@ -125,13 +133,91 @@ public sealed class LaboratoriesHttpTests
     [Test]
     public async Task PostLabs_WhenStudentCreates_Returns403AndStoresNothing()
     {
+        // LAB-03: ana je upisana na kurs, ali student ne pravi laboratorije.
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
 
-        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Student, new { title = "Studentski pokusaj" }));
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Student, new { title = "Studentski pokusaj", courseId = CourseId }));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         Assert.That(await StoredCountAsync(factory), Is.EqualTo(0));
+    }
+
+    // ---------- POST: vezivanje za kurs (LAB-03) ----------
+
+    [Test]
+    public async Task PostLabs_WhenTeacherCreatesOnOwnCourse_Returns201WithCourse()
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Lab na kursu");
+
+        Assert.That(created.CourseId, Is.EqualTo(CourseId));
+        var repository = factory.Services.GetRequiredService<ILaboratoryRepository>();
+        Assert.That((await repository.GetByIdAsync(created.Id))!.CourseId, Is.EqualTo(CourseId));
+    }
+
+    [TestCase(null)]
+    [TestCase("00000000-0000-0000-0000-000000000000")]
+    public async Task PostLabs_WithoutCourse_Returns400AndStoresNothing(string? courseId)
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "Bez kursa", courseId }));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain(LabErrorCodes.InvalidCourse));
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task PostLabs_WhenTeacherIsNotMemberOfCourse_Returns403AndStoresNothing()
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, OtherTeacher, new { title = "Tudji kurs", courseId = CourseId }));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task PostLabs_WhenTeacherSwapsCourseId_Returns403AndStoresNothing()
+    {
+        // marko je nastavnik na CourseId; zamenom ID-a u telu ne moze da pravi na drugom kursu.
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "Zamenjen kurs", courseId = OtherCourseId }));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(await StoredCountAsync(factory), Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task PostLabs_DenialIsSameForExistingAndUnknownCourse()
+    {
+        // Odgovor ne sme da otkrije da li kurs postoji.
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        Guid unknownCourse = Guid.NewGuid();
+
+        using var existing = await client.SendAsync(CreateJsonRequest("POST", Route, OtherTeacher, new { title = "Lab", courseId = CourseId }));
+        using var unknown = await client.SendAsync(CreateJsonRequest("POST", Route, OtherTeacher, new { title = "Lab", courseId = unknownCourse }));
+        string existingBody = await existing.Content.ReadAsStringAsync();
+        string unknownBody = await unknown.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(existing.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(unknown.StatusCode, Is.EqualTo(existing.StatusCode));
+            Assert.That(unknownBody, Is.EqualTo(existingBody));
+            Assert.That(existingBody, Does.Not.Contain(CourseId.ToString()));
+            Assert.That(unknownBody, Does.Not.Contain(unknownCourse.ToString()));
+        });
     }
 
     [TestCase("")]
@@ -142,7 +228,7 @@ public sealed class LaboratoriesHttpTests
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
 
-        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = invalidTitle }));
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = invalidTitle, courseId = CourseId }));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain(LabErrorCodes.InvalidTitle));
@@ -155,7 +241,7 @@ public sealed class LaboratoriesHttpTests
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
 
-        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = new string('a', 201) }));
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = new string('a', 201), courseId = CourseId }));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(await StoredCountAsync(factory), Is.EqualTo(0));
@@ -197,6 +283,7 @@ public sealed class LaboratoriesHttpTests
         {
             id = clientSuppliedId,
             title = "RBAC i kontrola pristupa",
+            courseId = CourseId,
             createdBy = clientSuppliedCreator,
             status = "Archived",
             createdAt = "2000-01-01T00:00:00Z",
@@ -239,8 +326,8 @@ public sealed class LaboratoriesHttpTests
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
 
-        using var teacher = await client.SendAsync(CreateJsonRequest("POST", "/api/labs", Teacher, new { title = "Preko aliasa" }));
-        using var student = await client.SendAsync(CreateJsonRequest("POST", "/api/labs", Student, new { title = "Preko aliasa" }));
+        using var teacher = await client.SendAsync(CreateJsonRequest("POST", "/api/labs", Teacher, new { title = "Preko aliasa", courseId = CourseId }));
+        using var student = await client.SendAsync(CreateJsonRequest("POST", "/api/labs", Student, new { title = "Preko aliasa", courseId = CourseId }));
 
         Assert.Multiple(() =>
         {
@@ -345,6 +432,49 @@ public sealed class LaboratoriesHttpTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
 
+    // ---------- GET /{id}: provera konteksta pri otvaranju (LAB-03) ----------
+    // Student ne prolazi RequireLabAccess(Read), pa su studentski slucajevi u LaboratoryServiceTests.
+
+    [Test]
+    public async Task GetLabById_WhenCourseTeacherOpens_Returns200WithCourse()
+    {
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Otvaranje na kursu");
+
+        using var response = await client.SendAsync(CreateRequest("GET", $"{Route}{created.Id}", Teacher));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var read = await response.Content.ReadFromJsonAsync<LaboratoryResponse>();
+        Assert.That(read!.CourseId, Is.EqualTo(CourseId));
+    }
+
+    [Test]
+    public async Task GetLabById_WhenTeacherOfOtherCourseOpens_Returns404SameAsMissing()
+    {
+        // jelena prolazi globalnu proveru (Teacher), ali je nastavnica na drugom kursu.
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        factory.Services.GetRequiredService<InMemoryCourseMembership>()
+            .Set(OtherCourseId, UserGuid("jelena"), CourseRole.Teacher);
+        LaboratoryResponse created = await CreateLabAsync(client, Teacher, "Lab drugog kursa");
+
+        using var foreign = await client.SendAsync(CreateRequest("GET", $"{Route}{created.Id}", OtherTeacher));
+        using var missing = await client.SendAsync(CreateRequest("GET", $"{Route}{Guid.NewGuid()}", OtherTeacher));
+        string foreignBody = await foreign.Content.ReadAsStringAsync();
+        string missingBody = await missing.Content.ReadAsStringAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(foreign.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+            Assert.That(missing.StatusCode, Is.EqualTo(foreign.StatusCode));
+            Assert.That(foreignBody, Is.EqualTo(missingBody));
+            Assert.That(foreignBody, Does.Not.Contain("Lab drugog kursa"));
+            Assert.That(foreignBody, Does.Not.Contain(created.Id.ToString()));
+            Assert.That(foreignBody, Does.Not.Contain(CourseId.ToString()));
+        });
+    }
+
     // ---------- PATCH /{id}/title: preimenovanje ----------
 
     [Test]
@@ -438,7 +568,7 @@ public sealed class LaboratoriesHttpTests
     }
 
     [Test]
-    public async Task PatchLabTitle_CannotChangeIdOrCreatorThroughBody()
+    public async Task PatchLabTitle_CannotChangeIdCreatorOrCourseThroughBody()
     {
         using var factory = new LaboratoriesHostFactory("Development");
         using var client = factory.CreateClient();
@@ -447,6 +577,7 @@ public sealed class LaboratoriesHttpTests
         using var patch = await client.SendAsync(CreateJsonRequest("PATCH", $"{Route}{created.Id}/title", Teacher, new
         {
             id = Guid.NewGuid(),
+            courseId = OtherCourseId,
             createdBy = Guid.NewGuid(),
             status = "Archived",
             title = "Novi naslov",
@@ -465,7 +596,7 @@ public sealed class LaboratoriesHttpTests
             services.AddSingleton<ILaboratoryRepository, FailingRepository>());
         using var client = factory.CreateClient();
 
-        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "Pad skladista" }));
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, Teacher, new { title = "Pad skladista", courseId = CourseId }));
         string body = await response.Content.ReadAsStringAsync();
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.InternalServerError));
@@ -482,7 +613,7 @@ public sealed class LaboratoriesHttpTests
 
     private static async Task<LaboratoryResponse> CreateLabAsync(HttpClient client, string user, string title)
     {
-        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, user, new { title }));
+        using var response = await client.SendAsync(CreateJsonRequest("POST", Route, user, new { title, courseId = CourseId }));
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));
         var created = await response.Content.ReadFromJsonAsync<LaboratoryResponse>();
         Assert.That(created, Is.Not.Null);
@@ -525,6 +656,26 @@ public sealed class LaboratoriesHttpTests
                 builder.ConfigureTestServices(testServices);
             }
         }
+
+        // LAB-03: clanstvo na test kursu za svaki host.
+        protected override IHost CreateHost(IHostBuilder builder)
+        {
+            IHost host = base.CreateHost(builder);
+            var membership = host.Services.GetRequiredService<InMemoryCourseMembership>();
+            membership.Set(CourseId, UserGuid("marko"), CourseRole.Teacher);
+            membership.Set(CourseId, UserGuid("ana"), CourseRole.Student);
+            return host;
+        }
+    }
+
+    // Isti Guid koji LaboratoryService dobija iz X-Test-User zaglavlja (CallerId).
+    private static Guid UserGuid(string userId) => CallerId.From(new TestUser(userId))!.Value;
+
+    private sealed class TestUser(string userId) : IIdentityContext
+    {
+        public bool IsAuthenticated => true;
+        public string? UserId { get; } = userId;
+        public PlatformRole? Role => null;
     }
 
     // Skladiste koje uvek baca gresku sa "internim" tekstom koji ne sme da stigne do klijenta.

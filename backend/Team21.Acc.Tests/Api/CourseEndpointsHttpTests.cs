@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Platform.Access.Application.Options;
 using Platform.Access.AspNet;
 using Platform.Access.Composition;
 using Platform.Access.Domain.Enums;
@@ -59,11 +60,16 @@ public class CourseEndpointsHttpTests
         services.AddDbContext<CoursesDbContext>(options => options.UseSqlite(_connection));
         services.AddScoped<ICoursesDbContext>(provider => provider.GetRequiredService<CoursesDbContext>());
 
-        services.AddScoped<IAccessSubjectProvider, HeaderSubjectProvider>();
-        services.AddAccessControl();
-        services.AddAccessAspNet();
+        // ACC-05 wants every policy registered before AddAccessControl(), same order as Program.cs
         services.AddTeam21AccessPolicies();
         services.AddCourses();
+        services.AddScoped<IAccessSubjectProvider, HeaderSubjectProvider>();
+
+        // This host serves only the ACC-01 routes, so other modules' actions have no policy here.
+        // They are still denied (NoPolicy); Platform.Api keeps the full coverage check at startup.
+        services.AddSingleton(new AccessConfigurationOptions { RequirePolicyCoverage = false });
+        services.AddAccessControl();
+        services.AddAccessAspNet();
 
         _app = builder.Build();
         _app.UseRouting();
@@ -83,9 +89,14 @@ public class CourseEndpointsHttpTests
     [TearDown]
     public async Task TearDown()
     {
-        _client.Dispose();
-        await _app.StopAsync();
-        await _app.DisposeAsync();
+        // SetUp may have failed before the host existed
+        _client?.Dispose();
+        if (_app is not null)
+        {
+            await _app.StopAsync();
+            await _app.DisposeAsync();
+        }
+
         await _connection.DisposeAsync();
     }
 
