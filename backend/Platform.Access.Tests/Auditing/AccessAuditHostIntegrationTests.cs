@@ -10,6 +10,7 @@ using Platform.Access.AspNet;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
+using Platform.Access.Infrastructure.Auditing;
 using Platform.Api.Security.AccessAudit;
 using Platform.Audit.Contracts;
 
@@ -88,14 +89,14 @@ public sealed class AccessAuditHostIntegrationTests
     }
 
     [Test]
-    public void PlatformApi_RegistersCentralAccessAuditWriter()
+    public void PlatformApi_RegistersTraceDecoratorAroundCentralAccessAuditWriter()
     {
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder => builder.UseEnvironment("Development"));
 
         Assert.That(
             factory.Services.GetRequiredService<IAccessAuditWriter>(),
-            Is.TypeOf<CentralAccessAuditWriter>());
+            Is.TypeOf<DecisionTraceAccessAuditWriter>());
     }
 
     [Test]

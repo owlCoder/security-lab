@@ -14,5 +14,6 @@
 
     <ProjectReference Include="../Platform.Competencies/Platform.Competencies.csproj" />
     <ProjectReference Include="../Platform.Api/Platform.Api.csproj" />
+    <ProjectReference Include="../Platform.Identity.Testing/Platform.Identity.Testing.csproj" />
   </ItemGroup>
 </Project>

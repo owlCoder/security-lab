@@ -12,8 +12,9 @@
 | Wrong password, unknown e-mail, account without password, blocked or archived account | `401` | `{ "code": "invalid_credentials" }` (identical for all of them) | none |
 | Missing, empty or too long input (e-mail over 320, password over 128 characters), or not valid JSON | `400` | `{ "code": "invalid_request" }` (invalid JSON gets the standard ASP.NET problem details) | none |
 | Session could not be stored (database error) | `503` | `{ "code": "login_unavailable" }` | none |
+| No valid CSRF token in `X-CSRF-TOKEN` (US-15, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md)) | `403` | `{ "code": "csrf_invalid" }` | none |
 
-Cookie `SecurityLab.Session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, expires with the session. The session token is **never** in the response body. Responses carry `Cache-Control: no-store`.
+Cookie `SecurityLab.Session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, expires with the session. The session token is **never** in the response body. A successful login also sets a new readable CSRF token `__Host-SecurityLab.CsrfToken` for the new session, because the CSRF token is bound to the session (US-15). Responses carry `Cache-Control: no-store`.
 
 ```
 curl -i -X POST https://localhost:5080/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"student@example.com\",\"password\":\"<password>\"}"
@@ -46,7 +47,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 
 ## Known limitations
 
-- No CSRF token (US-15) yet. Per-account lockout (IDN-05) is in `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md).
+- Per-account lockout (IDN-05) is in `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md).
 - No MFA: every successful login is `Active` until an MFA policy (IDN-06, US-12) exists.
 - No registration (IDN-01): accounts exist only through seeding or direct database work.
 - The login does not revoke a session that was sent with the request.

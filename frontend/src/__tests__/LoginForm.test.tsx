@@ -89,4 +89,26 @@ describe('LoginForm (IDN-05 UI)', () => {
     await submit()
     expect(onSuccess).toHaveBeenCalledOnce()
   })
+
+  // US-15: 403 csrf_invalid comes before the password is read; csrfFetch has already retried once with a new token.
+  const csrfInvalid = () => new Response(JSON.stringify({ code: 'csrf_invalid' }),
+    { status: 403, headers: { 'Content-Type': 'application/json' } })
+
+  it('403 csrf_invalid i posle ponovljenog zahteva prikazuje bezbednosnu poruku, ne pogresnu lozinku', async () => {
+    backend(() => csrfInvalid())
+    await renderForm()
+    await submit()
+    expect(loginCalls).toBe(2)
+    expect(screen.getByRole('alert').textContent).toBe('Security check failed. Refresh the page and try again.')
+    expect(screen.queryByTestId('throttle-message')).toBeNull()
+  })
+
+  it('403 csrf_invalid pa 429 na ponovljenom zahtevu prikazuje odbrojavanje', async () => {
+    backend(() => (loginCalls === 1 ? csrfInvalid() : rateLimited('30')))
+    await renderForm()
+    await submit()
+    expect(loginCalls).toBe(2)
+    expect(screen.getByTestId('throttle-message').textContent).toContain('try again later')
+    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true)
+  })
 })

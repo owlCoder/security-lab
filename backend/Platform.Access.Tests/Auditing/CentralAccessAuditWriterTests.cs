@@ -4,6 +4,7 @@ using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
+using Platform.Access.Infrastructure.Auditing;
 using Platform.Api.Security.AccessAudit;
 using Platform.Audit.Contracts;
 
@@ -140,7 +141,7 @@ public sealed class CentralAccessAuditWriterTests
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
 
-        Assert.That(provider.GetServices<IAccessAuditWriter>().Single(), Is.TypeOf<CentralAccessAuditWriter>());
+        Assert.That(provider.GetServices<IAccessAuditWriter>().Single(), Is.TypeOf<DecisionTraceAccessAuditWriter>());
 
         await provider.GetRequiredService<IAccessDecision>().DecideAsync(Request("unknown.action"));
 

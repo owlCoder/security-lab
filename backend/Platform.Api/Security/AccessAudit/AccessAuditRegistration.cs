@@ -1,4 +1,5 @@
 using Platform.Access.Contracts;
+using Platform.Access.Infrastructure.Auditing;
 
 namespace Platform.Api.Security.AccessAudit;
 
@@ -15,7 +16,13 @@ public static class AccessAuditRegistration
         }
 
         services.AddSingleton<IAccessDeniedAuditMapper, AccessDeniedAuditMapper>();
-        services.AddSingleton<IAccessAuditWriter, CentralAccessAuditWriter>();
+        services.AddSingleton<IDecisionTraceFormatter, DecisionTraceFormatter>();
+        services.AddSingleton<CentralAccessAuditWriter>();
+        services.AddSingleton<IAccessAuditWriter>(provider => new DecisionTraceAccessAuditWriter(
+            provider.GetRequiredService<CentralAccessAuditWriter>(),
+            provider.GetRequiredService<IActionCatalog>(),
+            provider.GetRequiredService<IDecisionTraceFormatter>(),
+            provider.GetRequiredService<ILogger<DecisionTraceAccessAuditWriter>>()));
         return services;
     }
 }
