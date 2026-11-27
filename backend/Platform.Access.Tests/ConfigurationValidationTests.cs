@@ -197,6 +197,8 @@ public class ConfigurationValidationTests
         var services = new ServiceCollection();
         services.AddSingleton<IMembershipReader>(memberships);
         services.AddSingleton<IResourceDescriptorResolver>(resources);
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<IResourceAttributeResolver>(new TestResourceAttributeResolver("laboratory", resources));
         services.AddAccessControl();
 
         await using var provider = services.BuildServiceProvider(
@@ -532,6 +534,52 @@ public class ConfigurationValidationTests
         foreach (var service in provider.GetServices<IHostedService>())
         {
             await service.StartAsync(CancellationToken.None);
+        }
+    }
+    private sealed class TestResourceAttributeResolver
+    : IResourceAttributeResolver
+    {
+        private readonly InMemoryResourceDescriptorResolver resources;
+
+        public string ResourceType { get; }
+
+        public TestResourceAttributeResolver(
+            string resourceType,
+            InMemoryResourceDescriptorResolver resources)
+        {
+            ResourceType = resourceType;
+            this.resources = resources;
+        }
+
+        public async ValueTask<ResourceDescriptor?> ResolveAsync(
+            ResourceRef resource,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.Equals(
+                    resource.Type,
+                    ResourceType,
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var courseId = await resources.ResolveCourseIdAsync(
+                resource,
+                cancellationToken);
+
+            var ownerId = await resources.ResolveOwnerIdAsync(
+                resource,
+                cancellationToken);
+
+            return new ResourceDescriptor(
+                resource.Type,
+                resource.Id,
+                courseId,
+                ownerId,
+                null,
+                new Dictionary<string, AttributeValue>());
         }
     }
 }

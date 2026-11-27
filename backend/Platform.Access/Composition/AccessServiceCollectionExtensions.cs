@@ -14,6 +14,10 @@ using Platform.Access.Infrastructure.Catalog;
 using Platform.Access.Infrastructure.Membership;
 using Platform.Access.Infrastructure.Policies;
 using Platform.Access.Infrastructure.Resources;
+using Platform.Access.Application.Rules;
+using Platform.Access.Application.Snapshots;
+using Platform.Access.Infrastructure.Guards;
+using Platform.Access.Infrastructure.Grants;
 
 namespace Platform.Access.Composition;
 
@@ -111,14 +115,40 @@ public static class AccessServiceCollectionExtensions
             var membershipReader = sp.GetRequiredService<IMembershipReader>();
             var resourceDescriptorResolver = sp.GetRequiredService<IResourceDescriptorResolver>();
 
+                    
+            var contextualRuleSets = sp
+                .GetServices<ContextualRuleSetRegistration>()
+                .ToDictionary(
+                    registration => registration.Action,
+                    registration => registration.Rules,
+                    StringComparer.Ordinal);
+
+            var snapshotLoader =
+                sp.GetRequiredService<IEvaluationSnapshotLoader>();
+
+            var ownershipGuard =
+                sp.GetRequiredService<OwnershipScopeGuard>();
+
             foreach (var definition in CourseRolePolicies.All)
             {
-                registry.Register(
+                IAccessPolicy policy = new CourseRoleAccessPolicy(
+                    definition,
+                    membershipReader,
+                    resourceDescriptorResolver);
+
+
+                contextualRuleSets.TryGetValue(
                     definition.Action.Id,
-                    new CourseRoleAccessPolicy(
-                        definition,
-                        membershipReader,
-                        resourceDescriptorResolver));
+                    out var ruleSet);
+
+                policy = new ContextualAccessPolicy(
+                    definition.Action.Id,
+                    policy,
+                    snapshotLoader,
+                    ownershipGuard,
+                    ruleSet);
+
+                registry.Register(definition.Action.Id, policy);
             }
 
             foreach (var registration in sp.GetServices<AccessPolicyRegistration>())
@@ -151,6 +181,9 @@ public static class AccessServiceCollectionExtensions
                     ?? NullLogger<AccessConfigurationStartupCheck>.Instance));
         services.AddSingleton<IHostedService>(services =>
             services.GetRequiredService<AccessConfigurationStartupCheck>());
+        services.TryAddSingleton<IEvaluationSnapshotLoader, EvaluationSnapshotLoader>();
+        services.TryAddSingleton<IElevatedGrantReader, EmptyElevatedGrantReader>();
+        services.TryAddSingleton<OwnershipScopeGuard>();
 
         return services;
     }
@@ -204,5 +237,63 @@ public static class AccessServiceCollectionExtensions
 
     private sealed class AccessControlServicesRegistered
     {
+    }
+    public static IServiceCollection AddContextualRules(
+    this IServiceCollection services,
+    string action,
+    RuleSet<EvaluationSnapshot> rules)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(action);
+        ArgumentNullException.ThrowIfNull(rules);
+
+        EnsureRegistrationOpen(services);
+
+        var knownAction = CourseRolePolicies.All.Any(
+            definition => definition.Action.Id == action);
+
+        if (!knownAction)
+        {
+            throw new AccessConfigurationException(
+                $"Contextual rules cannot be registered for unknown core action '{action}'.");
+        }
+
+        ContextualRuleIds.Validate(rules);
+
+        var alreadyRegistered = services
+            .Where(descriptor =>
+                descriptor.ServiceType == typeof(ContextualRuleSetRegistration))
+            .Select(descriptor => descriptor.ImplementationInstance)
+            .OfType<ContextualRuleSetRegistration>()
+            .Any(registration => registration.Action == action);
+
+        if (alreadyRegistered)
+        {
+            throw new InvalidOperationException(
+                $"Contextual rules for '{action}' are already registered.");
+        }
+
+        services.AddSingleton(
+            new ContextualRuleSetRegistration(action, rules));
+
+        return services;
+    }
+    internal sealed record ContextualRuleSetRegistration(
+        string Action,
+        RuleSet<EvaluationSnapshot> Rules);
+
+    public static IServiceCollection AddDefaultContextualRules(
+    this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        foreach (var entry in ContextualAccessRules.Create())
+        {
+            services.AddContextualRules(
+                entry.Key,
+                entry.Value);
+        }
+
+        return services;
     }
 }

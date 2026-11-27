@@ -237,6 +237,7 @@ builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
         "laboratory",
         true));
 
+builder.Services.AddDefaultContextualRules();
 builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
 if (kt1Enabled) builder.Services.AddKt1RequestIdentity();

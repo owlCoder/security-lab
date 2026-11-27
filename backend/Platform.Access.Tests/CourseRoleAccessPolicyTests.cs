@@ -199,6 +199,8 @@ public sealed class CourseRoleAccessPolicyTests
         var services = new ServiceCollection();
         services.AddSingleton<IMembershipReader>(memberships);
         services.AddSingleton<IResourceDescriptorResolver>(resources);
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<IResourceAttributeResolver>(new TestResourceAttributeResolver("laboratory", resources));
         services.AddAccessControl();
 
         using var provider = services.BuildServiceProvider();
@@ -209,6 +211,8 @@ public sealed class CourseRoleAccessPolicyTests
 
         Assert.That(result.Outcome, Is.EqualTo(AccessOutcome.Allow));
     }
+
+    
 
     [Test]
     public async Task AddAccessControl_DefaultContextReaders_DenyCourseActions()
@@ -243,6 +247,53 @@ public sealed class CourseRoleAccessPolicyTests
     {
         var definition = CourseRolePolicies.All.Single(x => x.Action.Id == action);
         return new CourseRoleAccessPolicy(definition, memberships, resources);
+    }
+
+    private sealed class TestResourceAttributeResolver
+    : IResourceAttributeResolver
+    {
+        private readonly InMemoryResourceDescriptorResolver resources;
+
+        public string ResourceType { get; }
+
+        public TestResourceAttributeResolver(
+            string resourceType,
+            InMemoryResourceDescriptorResolver resources)
+        {
+            ResourceType = resourceType;
+            this.resources = resources;
+        }
+
+        public async ValueTask<ResourceDescriptor?> ResolveAsync(
+            ResourceRef resource,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.Equals(
+                    resource.Type,
+                    ResourceType,
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var courseId = await resources.ResolveCourseIdAsync(
+                resource,
+                cancellationToken);
+
+            var ownerId = await resources.ResolveOwnerIdAsync(
+                resource,
+                cancellationToken);
+
+            return new ResourceDescriptor(
+                resource.Type,
+                resource.Id,
+                courseId,
+                ownerId,
+                null,
+                new Dictionary<string, AttributeValue>());
+        }
     }
 
     private ResourceRef ResourceForAction(string action)
