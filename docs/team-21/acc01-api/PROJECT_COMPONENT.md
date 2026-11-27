@@ -279,7 +279,9 @@ Spec 7.1 asks every module to keep a threat–control–test–evidence table. T
 **Local verification (2026-11-27):**
 
 - `dotnet build backend/Team21.Acc.slnx` — succeeded, 0 errors.
-- `dotnet test backend/Team21.Acc.Tests` — **117 passed, 1 skipped, 0 failed**. The skipped test still requires a dedicated PostgreSQL test database.
+- `dotnet test backend/Team21.Acc.Tests` — **117 passed, 1 skipped, 0 failed**. The skipped test is the opt-in PostgreSQL test.
+- `CoursePostgreSqlTests` with `TEAM21_ACC_TEST_POSTGRES` pointing at a throwaway `postgres:17-alpine` container — **1 passed**: the migration applies, archiving keeps the row and the database constraints hold on real PostgreSQL.
+- Full `backend/SecurityLab.slnx` in Release with Docker running — **1,462 passed, 27 skipped, 0 failed**.
 - The denied-archive `404`, the `403` on create, default deny and the enrollment refusal after archiving are now demonstrated through HTTP requests in `CourseEndpointsHttpTests`.
 
 **Development test identity:** `00000000-0000-0000-0000-000000000001` via `X-Test-User` header.
@@ -290,5 +292,5 @@ Spec 7.1 asks every module to keep a threat–control–test–evidence table. T
 - Enrollment (ACC-02) and the Administration adapter should call `ICourseEnrollmentPolicy` instead of reading `ICoursesDbContext` directly (member 9, integration).
 - Integrate audit persistence through the AUD module; do not treat the current code as full audit integration.
 - Move permission filtering into the query and add pagination once the ACC-03 role adapter exists; `ICourseAuthorization` answers per course, so the list checks each course in memory today.
-- Add PostgreSQL-backed integration tests for the database-specific race-condition behavior and run the currently skipped dedicated PostgreSQL test.
+- Add a PostgreSQL-backed test for two concurrent creates with the same code (the unique index path); the opt-in PostgreSQL test now passes locally but is not run in CI.
 - Re-run CI and request review when the current changes are committed and submitted to `feature/acc01-courses`.
