@@ -9,6 +9,9 @@ public interface IMfaCredentialsStore
     Task<MfaCredentials?> GetAsync(Guid userId, CancellationToken ct);
     Task<string?> GetEmailAsync(Guid userId, CancellationToken ct);
 
+    /// <summary>US-19: the role of the account, or null when there is no such account.</summary>
+    Task<AccountRole?> GetRoleAsync(Guid userId, CancellationToken ct);
+
     /// <summary>
     /// US-18: counts one wrong second factor in a single UPDATE, so parallel wrong codes cannot skip the threshold.
     /// A lockout that has expired at <paramref name="now"/> starts the counter again at 1. When the counter reaches

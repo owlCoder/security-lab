@@ -23,14 +23,62 @@ public sealed class MfaServiceEnrollTests : MfaServiceTestBase
     }
 
     [Test]
-    public async Task Enroll_WithMfaPendingSession_IsUnauthorized()
+    public async Task Enroll_WithMfaPendingSession_WhenRoleDoesNotRequireMfa_IsUnauthorized()
     {
+        // US-19: a MfaPending session may enroll only when its role requires MFA; this role does not.
         SetupSession(AuthLevel.MfaPending);
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MfaCredentials?)null);
+        _credentials.Setup(store => store.GetRoleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccountRole.Student);
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Student)).Returns(false);
 
         var result = await _service.EnrollAsync(Token, "corr-2", CancellationToken.None);
 
         Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unauthorized));
-        _credentials.Verify(store => store.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        VerifyCreatePending(Times.Never());
+    }
+
+    [Test]
+    [Category("US-19")]
+    public async Task Enroll_WithMfaPendingSession_WhenMfaIsAlreadyEnabled_IsUnauthorized()
+    {
+        // A stolen password must not replace an authenticator that exists, even for a role that requires MFA.
+        SetupSession(AuthLevel.MfaPending);
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MfaCredentials(UserId)
+            {
+                MfaEnabled = true,
+                TotpSecretCiphertext = "existing-ciphertext",
+                TotpSecretKeyVersion = 1
+            });
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(It.IsAny<AccountRole>())).Returns(true);
+
+        var result = await _service.EnrollAsync(Token, "corr-replace", CancellationToken.None);
+
+        Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Unauthorized));
+        VerifyCreatePending(Times.Never());
+    }
+
+    [Test]
+    [Category("US-19")]
+    public async Task Enroll_WithMfaPendingSession_WhenRoleRequiresMfa_CreatesPendingEnrollment()
+    {
+        SetupSession(AuthLevel.MfaPending);
+        _credentials.Setup(store => store.GetAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MfaCredentials?)null);
+        _credentials.Setup(store => store.GetRoleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccountRole.Teacher);
+        _credentials.Setup(store => store.GetEmailAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("teacher@example.test");
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Teacher)).Returns(true);
+
+        var result = await _service.EnrollAsync(Token, "corr-required", CancellationToken.None);
+
+        Assert.That(result.Outcome, Is.EqualTo(MfaOutcome.Success));
+        Assert.That(result.Uri, Does.StartWith("otpauth://totp/"));
+        VerifyLockedSession(AuthLevel.MfaPending);
+        VerifyCreatePending(Times.Once());
     }
 
     [Test]

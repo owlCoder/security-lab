@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Enums;
 
@@ -13,17 +13,9 @@ public class RoleMfaPolicyTests
     [SetUp]
     public void SetUp()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Identity:Mfa:RequiredForRoles:0"] = "Administrator",
-                ["Identity:Mfa:RequiredForRoles:1"] = "Teacher"
-            })
-            .Build();
-
-        _policy = new RoleMfaPolicy(configuration);
+        _policy = PolicyFor("Administrator", "Teacher");
     }
-        
+
     [Test]
     public void IsRequiredFor_AdministratorInList_ReturnsTrue()
     {
@@ -51,23 +43,32 @@ public class RoleMfaPolicyTests
     [Test]
     public void IsRequiredFor_EmptyList_ReturnsFalse()
     {
-        var policy = new RoleMfaPolicy(new ConfigurationBuilder().Build());
+        var policy = PolicyFor();
 
         Assert.That(policy.IsRequiredFor(AccountRole.Administrator), Is.False);
     }
 
     [Test]
-    public void IsRequiredFor_RoleWrittenInOtherCase_ReturnsFalse()
+    public void Validator_KnownRoles_Succeeds()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Identity:Mfa:RequiredForRoles:0"] = "teacher"
-            })
-            .Build();
+        var result = Validate("Administrator", "Teacher");
 
-        var policy = new RoleMfaPolicy(configuration);
-
-        Assert.That(policy.IsRequiredFor(AccountRole.Teacher), Is.False);
+        Assert.That(result.Succeeded, Is.True);
     }
+
+    [TestCase("teacher")]
+    [TestCase("Teachr")]
+    public void Validator_UnknownOrMiscasedRole_Fails(string role)
+    {
+        var result = Validate(role);
+
+        Assert.That(result.Failed, Is.True);
+        Assert.That(result.FailureMessage, Does.Contain(role));
+    }
+
+    private static RoleMfaPolicy PolicyFor(params string[] roles) =>
+        new(Options.Create(new MfaPolicyOptions { RequiredForRoles = [.. roles] }));
+
+    private static ValidateOptionsResult Validate(params string[] roles) =>
+        new MfaPolicyOptionsValidator().Validate(null, new MfaPolicyOptions { RequiredForRoles = [.. roles] });
 }

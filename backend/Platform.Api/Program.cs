@@ -182,7 +182,7 @@ builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
 builder.Services.AddScoped<IMfaService, MfaService>();
 builder.Services.AddScoped<IdentityAuditProducer>();
-builder.Services.AddSingleton<IMfaPolicy,RoleMfaPolicy>();
+builder.Services.AddMfaRolePolicy(builder.Configuration);
 
 // IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
 builder.Services.AddIdentityAuthenticationAccess();

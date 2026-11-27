@@ -4,6 +4,7 @@ using System.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Api.Contracts.Identity;
 using Platform.Identity.Entities;
+using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
 using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Tests.Helpers;
@@ -65,6 +66,22 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
         var response = await Client.PostAsync("/api/auth/mfa/enroll", null);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    [Test]
+    [Category("US-19")]
+    public async Task EnrollRequired_WithMfaPendingSessionOfTeacher_ReturnsTotpUri()
+    {
+        var user = await UserTestData.AddAsync(
+            Factory, "mfa-enroll-required@platform.com", Password, role: AccountRole.Teacher);
+        var session = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+        SetSessionCookie(session.RawToken);
+
+        var response = await Client.PostAsync("/api/auth/mfa/enroll/required", null);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var body = await response.Content.ReadFromJsonAsync<MfaEnrollResponse>();
+        Assert.That(body!.Uri, Does.StartWith("otpauth://totp/"));
     }
 
     [Test]

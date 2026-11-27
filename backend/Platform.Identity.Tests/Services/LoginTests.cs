@@ -143,6 +143,22 @@ public class LoginTests
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
         _sessions.Verify(store => store.CreateAsync(
             id, AuthenticationLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.That(result.MfaEnrollmentRequired, Is.True);
+    }
+
+    [Test]
+    public async Task ValidCredentials_WithRoleRequiringMfa_AndMfaEnabled_DoesNotRequireEnrollment()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active, Role: AccountRole.Teacher));
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Teacher)).Returns(true);
+        _mfaCredentials.Setup(store => store.GetAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MfaCredentials(id) { MfaEnabled = true });
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-role-mfa-enabled");
+
+        Assert.That(result.MfaRequired, Is.True);
+        Assert.That(result.MfaEnrollmentRequired, Is.False);
     }
 
     [Test]

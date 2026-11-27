@@ -47,7 +47,7 @@ public class AuthController(
                     HttpContext.Items[CsrfSessionBinding.SessionOverrideKey] = result.Session.Token;
                     CsrfToken.Issue(HttpContext, antiforgery);
                 }
-                return Ok(new LoginResponse(result.UserId!.Value, result.MfaRequired));
+                return Ok(new LoginResponse(result.UserId!.Value, result.MfaRequired, result.MfaEnrollmentRequired));
             case LoginOutcome.InvalidRequest:
                 return BadRequest(new { code = "invalid_request" });
             case LoginOutcome.Unavailable:
@@ -119,6 +119,40 @@ public class AuthController(
     [RequireAccess(IdentityAccessActions.MfaEnrollConfirm)]
     [HttpPost("mfa/enroll/confirm")]
     public async Task<IActionResult> MfaEnrollConfirm([FromBody] MfaVerifyRequest request, CancellationToken ct)
+    {
+        var outcome = await _mfaService.ConfirmEnrollAsync(Request.Cookies[SessionCookie.Name], request.Code,
+            HttpContext.TraceIdentifier, ct);
+        Response.Headers.CacheControl = "no-store";
+        return outcome switch
+        {
+            MfaOutcome.Success => Ok(),
+            MfaOutcome.InvalidRequest => BadRequest(new { code = "invalid_request" }),
+            MfaOutcome.Unavailable => StatusCode(503, new { code = "mfa_unavailable" }),
+            _ => Unauthorized(new { code = "invalid_mfa" })
+        };
+    }
+
+    // US-19: enrollment that the role requires, with a MfaPending session. MfaService decides who may (MayEnrollAsync).
+    [RequireAccess(IdentityAccessActions.MfaEnrollRequired)]
+    [HttpPost("mfa/enroll/required")]
+    public async Task<IActionResult> MfaEnrollRequired(CancellationToken ct)
+    {
+        var (outcome, uri) =
+            await _mfaService.EnrollAsync(Request.Cookies[SessionCookie.Name], HttpContext.TraceIdentifier, ct);
+        Response.Headers.CacheControl = "no-store";
+        return outcome switch
+        {
+            MfaOutcome.Success => Ok(new MfaEnrollResponse(uri!)),
+            MfaOutcome.AlreadyEnabled => Conflict(new { code = "mfa_already_enabled" }),
+            MfaOutcome.EnrollmentPending => Conflict(new { code = "mfa_enrollment_pending" }),
+            MfaOutcome.Unavailable => StatusCode(503, new { code = "mfa_unavailable" }),
+            _ => Unauthorized(new { code = "invalid_mfa" })
+        };
+    }
+
+    [RequireAccess(IdentityAccessActions.MfaEnrollRequiredConfirm)]
+    [HttpPost("mfa/enroll/required/confirm")]
+    public async Task<IActionResult> MfaEnrollRequiredConfirm([FromBody] MfaVerifyRequest request, CancellationToken ct)
     {
         var outcome = await _mfaService.ConfirmEnrollAsync(Request.Cookies[SessionCookie.Name], request.Code,
             HttpContext.TraceIdentifier, ct);

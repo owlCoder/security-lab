@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Platform.Api.Interfaces.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Contracts;
 using Platform.Identity.Entities;
@@ -30,6 +31,7 @@ public abstract class MfaServiceTestBase
     protected DbTransaction _transaction = null!;
     protected Session _newActiveSession = null!;
     protected ITotpSecretProtector _protector = null!;
+    protected Mock<IMfaPolicy> _mfaPolicy = null!;
     protected MfaService _service = null!;
 
     protected sealed record AuditWrite(AuditEventDraft Draft, AuditContext Context, DbTransaction? Transaction);
@@ -73,6 +75,7 @@ public abstract class MfaServiceTestBase
         _transactionalAudit = new Mock<ITransactionalAuditWriter>(MockBehavior.Strict);
         SetupAuditResults();
         _protector = new DataProtectionTotpSecretProtector(new EphemeralDataProtectionProvider());
+        _mfaPolicy = new Mock<IMfaPolicy>();
         _service = CreateService(new MfaLockoutOptions());
     }
 
@@ -80,7 +83,8 @@ public abstract class MfaServiceTestBase
         new(_credentials.Object, _sessions.Object,
             new IdentityAuditProducer(
                 _trustedAudit.Object, _transactionalAudit.Object, NullLogger<IdentityAuditProducer>.Instance),
-            _clock.Object, _protector, Options.Create(lockout), NullLogger<MfaService>.Instance);
+            _clock.Object, _protector, Options.Create(lockout), NullLogger<MfaService>.Instance,
+            _mfaPolicy.Object);
 
     /// <summary>Both Audit writers record every write in <see cref="_auditWrites"/> and return these results.</summary>
     protected void SetupAuditResults(AuditWriteResult? trusted = null, AuditWriteResult? transactional = null)

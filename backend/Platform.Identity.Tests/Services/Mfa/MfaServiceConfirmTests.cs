@@ -44,6 +44,26 @@ public sealed class MfaServiceConfirmTests : MfaServiceTestBase
     }
 
     [Test]
+    [Category("US-19")]
+    public async Task Confirm_WithMfaPendingSession_WhenRoleRequiresMfa_EnablesMfa()
+    {
+        var current = DateTimeOffset.UtcNow;
+        var secret = TotpHelpers.GenerateSecret();
+        SetupConfirmation(secret, current);
+        SetupSession(AuthLevel.MfaPending, current);
+        _credentials.Setup(store => store.GetRoleAsync(UserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccountRole.Teacher);
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Teacher)).Returns(true);
+        var code = new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp(current.UtcDateTime);
+
+        var result = await _service.ConfirmEnrollAsync(Token, code, "corr-required-confirm", CancellationToken.None);
+
+        Assert.That(result, Is.EqualTo(MfaOutcome.Success));
+        VerifyLockedSession(AuthLevel.MfaPending);
+        VerifyConfirm(Times.Once());
+    }
+
+    [Test]
     public async Task Confirm_WithPreviousTotpPeriod_EnablesMfa()
     {
         var current = DateTimeOffset.UtcNow;

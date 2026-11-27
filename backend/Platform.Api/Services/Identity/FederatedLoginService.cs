@@ -32,7 +32,8 @@ internal sealed class FederatedLoginService(
 
         var accountId = link.AccountId!.Value;
 
-        // Federated login follows the same MFA policy as password login (US-19).
+        // US-19: a role that requires MFA gets a MfaPending session, as with password login. Unlike password login,
+        // the account's own MFA state is not read here, so the response has no MfaEnrollmentRequired.
         var authLevel = mfa.IsRequiredFor(link.Role)
             ? AuthenticationLevel.MfaPending
             : AuthenticationLevel.Active;

@@ -24,7 +24,12 @@ public static class IdentityAuthenticationAccessRegistration
             .AddAccessAction<MfaEnrollmentPolicy>(
                 new ActionDefinition(IdentityAccessActions.MfaEnrollConfirm, ActionScope.Authenticated, null, false))
             .AddAccessAction<MfaVerificationPolicy>(
-                new ActionDefinition(IdentityAccessActions.MfaVerify, ActionScope.Public, null, false));
+                new ActionDefinition(IdentityAccessActions.MfaVerify, ActionScope.Public, null, false))
+            // US-19: MFA that a role requires. Public like MfaVerify: a MfaPending session gives no subject.
+            .AddAccessAction<MfaRequiredEnrollmentPolicy>(
+                new ActionDefinition(IdentityAccessActions.MfaEnrollRequired, ActionScope.Public, null, false))
+            .AddAccessAction<MfaRequiredEnrollmentPolicy>(
+                new ActionDefinition(IdentityAccessActions.MfaEnrollRequiredConfirm, ActionScope.Public, null, false));
 }
 
 /// <summary>
@@ -77,6 +82,22 @@ public sealed class MfaEnrollmentPolicy : IAccessPolicy
             request.Resource is null &&
             request.Subject is { State: AccountState.Active } &&
             Guid.TryParse(request.Subject.Id, out var userId) && userId != Guid.Empty);
+}
+
+/// <summary>
+/// IDN-06 / US-19: enrollment that a role with required MFA must complete before anything else. Like <c>MfaVerify</c> it
+/// has no Access subject (a <c>MfaPending</c> session gives none). This policy only admits the action; the real checks
+/// (session is <c>MfaPending</c>, the role requires MFA, MFA is not enabled yet) are done by <c>MfaService</c>.
+/// </summary>
+public sealed class MfaRequiredEnrollmentPolicy : IAccessPolicy
+{
+    public string Id => "identity.mfa.enrollment.required";
+    public string Version => "v1";
+
+    public ValueTask<bool> EvaluateAsync(AccessRequest request, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(
+            request.Action is IdentityAccessActions.MfaEnrollRequired or IdentityAccessActions.MfaEnrollRequiredConfirm &&
+            request.Resource is null);
 }
 
 /// <summary>

@@ -232,7 +232,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
             new SessionManager(identity),
             new EfMfaCredentialsStore(identity),
             CreateProducer(new UnavailableAuditWriter()),
-            new RoleMfaPolicy(new ConfigurationBuilder().Build()));
+            new RoleMfaPolicy(Options.Create(new MfaPolicyOptions())));
             
 
         var result = await login.ExecuteAsync(email, Password, Guid.NewGuid().ToString("N"));
