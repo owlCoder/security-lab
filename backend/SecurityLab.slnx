@@ -29,6 +29,7 @@
   <Project Path="Platform.SessionSecurity/Platform.SessionSecurity.csproj" />
   <Project Path="Platform.Tests/Platform.Tests.csproj" />
   <Project Path="Platform.Identity.Tests/Platform.Identity.Tests.csproj" />
+  <Project Path="Platform.Identity.Testing/Platform.Identity.Testing.csproj" />
   <Project Path="Platform.Identity/Platform.Identity.csproj" />
   <Folder Name="/Publication/">
     <Project Path="Platform.Laboratories.Domain/Platform.Laboratories.Domain.csproj" />

@@ -8,6 +8,9 @@ type Props = {
 }
 
 const GENERIC_ERROR = 'Incorrect email or password.'
+// US-15: login answers 403 only when the CSRF check refused it, before the password is read, even after
+// csrfFetch fetched a new token and retried once. It says nothing about the account.
+const CSRF_ERROR = 'Security check failed. Refresh the page and try again.'
 
 export default function LoginForm({ onSuccess }: Props) {
   const { request } = useAuth()
@@ -43,7 +46,7 @@ export default function LoginForm({ onSuccess }: Props) {
 			setBlockedUntil(Date.now() + parseRetryAfter(result.retryAfter) * 1000)
 			return false
 		}
-		setError(GENERIC_ERROR)
+		setError(result.status === 403 ? CSRF_ERROR : GENERIC_ERROR)
 		return false
 	}
 

@@ -13,6 +13,10 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
 
 - IP limiter odbija zahtev pre provere lozinke sa `429 Too Many Requests`, `Retry-After`
   u sekundama, `Cache-Control: no-store`, `X-Correlation-ID` i kodom `rate_limited`.
+- CSRF provera (US-15, [`IDN-02_CSRF.md`](IDN-02_CSRF.md)) radi pre limitera. Prijava bez
+  ispravnog `X-CSRF-TOKEN` dobija `403 csrf_invalid`, ne racuna se u limit, ne stize do
+  provere lozinke i ne pravi `auth.login.throttled`, cak i kada je klijent vec ogranicen
+  (`403` umesto `429`). Takva prijava ostavlja samo `Information` zapis u aplikacionom logu.
 - Brojac neuspeha i kraj blokade naloga cuvaju se u `identity.accounts`.
   `CredentialVerifier` preko `ICredentialStore` rezervise pokusaj pre skupog hasha;
   `EfCredentialStore` koristi atomske SQL UPDATE naredbe i proverava blokadu ponovo
@@ -37,7 +41,9 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
 flowchart LR
   U[Klijent] -->|HTTPS| C[Correlation middleware]
   C --> R[Routing]
-  R --> A[ACC-05: RequireAccess identity.login i registrovana Public politika]
+  R --> X[US-15: CSRF provera]
+  X -->|Bez ispravnog tokena: 403 csrf_invalid| U
+  X --> A[ACC-05: RequireAccess identity.login i registrovana Public politika]
   A --> F[ForwardedHeaders: samo poznati proxy]
   F --> L[IP sliding-window limiter]
   L <--> I[(Brojaci po IP / IPv6 /64 u memoriji)]

@@ -27,7 +27,9 @@
 
 ```mermaid
 flowchart LR
-  C[Administrator client] -->|POST /api/admin/accounts/id/unlock + session cookie| SC[SessionCheckMiddleware]
+  C[Administrator client] -->|POST /api/admin/accounts/id/unlock + session cookie + X-CSRF-TOKEN| CS[CsrfProtectionMiddleware US-15]
+  CS -->|valid session, no valid token: 403 csrf_invalid| C
+  CS --> SC[SessionCheckMiddleware]
   SC --> AC[Access middleware ACC-05]
   AC -->|account.unlock| P[RevisionActionPolicy -> RevisionPermissions -> IAdminDirectory]
   AC -->|allowed| CT[AdminAccountsController.Unlock]
@@ -52,7 +54,9 @@ flowchart LR
     P1[P1 Access check: session + account.unlock]
     P2[P2 Unlock use case]
   end
-  U -->|account id in the path, session cookie| P1
+  U -->|account id in the path, session cookie, X-CSRF-TOKEN| P0[P0 CSRF check US-15]
+  P0 -->|403 csrf_invalid, nothing stored| U
+  P0 --> P1
   P1 -->|denied: 401 / 403| U
   P1 -->|access.denied: actor, action, reason| D2[(D2 Audit log)]
   P1 -->|allowed| P2
@@ -65,13 +69,14 @@ Trust boundary: the client is untrusted. The caller's identity comes only from t
 
 ## Behaviour (contract)
 
-`POST /api/admin/accounts/{id:guid}/unlock`, no body, session cookie required.
+`POST /api/admin/accounts/{id:guid}/unlock`, no body, session cookie and `X-CSRF-TOKEN` required (US-15, see [`IDN-02_CSRF.md`](IDN-02_CSRF.md)).
 
 | Case | HTTP | Body `code` | Audit (`account.unlocked`) |
 |-|-|-|-|
 | Admin unlocks a currently locked account, whatever its status (see the first rule) | 200 `{ id, unlocked: true }` | – | Success, actor = admin, `lockoutEnd` = the exact cleared value (UTC, ISO 8601 ending with `Z`, with up to 7 fractional digits when the value has a fraction) |
+| Valid session, but no valid CSRF token | 403 | `csrf_invalid` | none: refused before the session check and Access, so there is no `access.denied` row either, also for a non-administrator |
 | No or invalid session | 401 | `session_invalid` | none (stopped before Access) |
-| Caller is not an admin | 403 | Access default | `access.denied` (central ACC-05 writer), no `account.unlocked` row |
+| Caller is not an admin (with a valid CSRF token) | 403 | Access default | `access.denied` (central ACC-05 writer), no `account.unlocked` row |
 | Unknown account id | 404 | `account_not_found` | Failure, `reasonCode=account_not_found` |
 | Account is not locked (`lockout_end` null or ≤ now) | 409 | `account_not_locked` | Failure, `reasonCode=not_locked` |
 | Admin targets their own account | 409 | `self_change_not_allowed` | Failure, `reasonCode=self_change` |
@@ -102,7 +107,7 @@ Rules:
 |-|-|-|
 | A non-administrator unlocks an account (elevation of privilege) | Access denies `account.unlock` before the handler; the use case checks again | `AccountUnlockIntegrationTests.Student_CannotUnlock_NothingChanges_DenialIsAuditedByAccess`, `UnlockAccountTests.Student_IsForbidden_NothingChanges_DenialIsAudited` |
 | An anonymous caller or a stale session (unknown token, revoked administrator session) | `401 session_invalid` (`no-store`, rejected cookie expired) from `SessionCheckMiddleware`; the use case refuses a caller without a full session | `WithoutSession_Returns401SessionInvalid_NothingChanges`, `InvalidSession_Returns401SessionInvalid_ClearsCookie_NothingChanges` (unknown and revoked), `Anonymous_IsUnauthenticated_NothingChanges_DenialIsAuditedWithoutActor`, `SessionWithoutFullAuthentication_IsUnauthenticated` |
-| Cross-site request forgery: another site makes the administrator's browser send the body-less `POST` (a "simple" request, so no CORS preflight) | The session cookie is `SameSite=Strict` (`SessionCookie.Options`), so a cross-site request carries no session and gets `401 session_invalid`; the cookie is also `HttpOnly` and `Secure` | `LoginIntegrationTests.Login_WithValidCredentials_ShouldSetSessionCookieAndReturnUserId` (asserts `samesite=strict`), `WithoutSession_Returns401SessionInvalid_NothingChanges` |
+| Cross-site request forgery: another site makes the administrator's browser send the body-less `POST` (a "simple" request, so no CORS preflight) | US-15: `CsrfProtectionMiddleware` requires `X-CSRF-TOKEN`, bound to the session, before every other check; without it `403 csrf_invalid`, nothing changes and no audit row is written. As a second layer the session cookie is `SameSite=Strict` (`SessionCookie.Options`), so a cross-site request carries no session and gets `401 session_invalid`; the cookie is also `HttpOnly` and `Secure` | `CsrfProtectionIntegrationTests.AdminUnlock_WithoutToken_IsRefused_KeepsTheLockout_AndRecordsNoUnlock`, `LoginIntegrationTests.Login_WithValidCredentials_ShouldSetSessionCookieAndReturnUserId` (asserts `samesite=strict`), `WithoutSession_Returns401SessionInvalid_NothingChanges` |
 | An administrator under attack reopens their own guess budget | Self-unlock refused and audited as Failure `self_change` | `Admin_CannotUnlockOwnAccount`, `Admin_CannotUnlockOwnAccount_Returns409_LockoutStays` |
 | An unlock without an audit trail (repudiation) | Change and audit in one transaction; no audit record, no unlock | `AuditNotRecorded_RollsBackTheUnlock`, `AuditFailure_RollsBackTheUnlockAndTheAuditRow` (3 failure points) |
 | A database failure leaves a half-done change | Rollback and `503 unavailable` | `DatabaseFailure_ReturnsUnavailable_AndStoresNothing`, `AuditFailure_RollsBackTheUnlockAndTheAuditRow` |
@@ -122,6 +127,7 @@ Rules:
 |-|-|-|-|-|
 | IDN-05 | A student account is locked; the caller is an administrator | `POST /api/admin/accounts/{id}/unlock` | 200; `failed_login_count = 0`, `lockout_end` null; the correct password logs in | `Admin_UnlocksLockedAccount_LoginWorksAgain_AndSuccessIsAudited` (Testcontainers Postgres) |
 | IDN-05 | The caller is a student | Unlock another account | 403; the lockout stays | `Student_CannotUnlock_NothingChanges_DenialIsAuditedByAccess` |
+| SEC-03 (US-15) | A student account is locked; the caller is an administrator without a CSRF token | Unlock | 403 `csrf_invalid`; `lockout_end` and `failed_login_count` stay, no `account.unlocked` row; with a token the same unlock works | `CsrfProtectionIntegrationTests.AdminUnlock_WithoutToken_IsRefused_KeepsTheLockout_AndRecordsNoUnlock` |
 | IDN-05 | The account is not locked (never locked, or the lockout expired) | Unlock | 409 `account_not_locked`; nothing changes, the counter included | `AccountThatIsNotLocked_Returns409_AndFailureIsAudited`, `ExpiredLockout_Returns409_CounterUnchanged_AndFailureIsAudited` |
 | IDN-05 | The locked account is Blocked or Archived | Unlock, then login with the correct password | 200; the status and the sessions stay; the login is refused | `InactiveAccount_IsUnlocked_StatusAndSessionsStay_LoginIsStillRefused` |
 | IDN-05 | A login is in flight while the unlock commits | Login with any password | Refused as locked; not counted; the next login works | `Login_in_flight_during_an_admin_unlock_is_refused_whatever_the_password` |
@@ -147,7 +153,7 @@ Rules:
   - No migration: the columns come from `AddAccountLockout`.
 - **Run instructions:**
   - `dotnet test backend/Platform.Identity.Tests/Platform.Identity.Tests.csproj --filter "TestCategory=IDN-05|TestCategory=IDN-03"`. Docker is required for the Testcontainers tests.
-  - Manual check in Development: lock a seeded student with N wrong `POST /api/auth/login`, log in as the dev admin (`11111111-1111-1111-1111-111111111111`), `POST /api/admin/accounts/{studentId}/unlock` with the admin cookie (200), log in as the student (200), repeat the unlock (409 `account_not_locked`), try it with the student's cookie (403).
+  - Manual check in Development: lock a seeded student with N wrong `POST /api/auth/login`, log in as the dev admin (`11111111-1111-1111-1111-111111111111`), get a CSRF token with `GET /api/auth/csrf` and the admin cookie, then `POST /api/admin/accounts/{studentId}/unlock` with the admin cookie, the `__Host-SecurityLab.Csrf` cookie and the token in `X-CSRF-TOKEN` (200; without the token 403 `csrf_invalid`), log in as the student (200), repeat the unlock (409 `account_not_locked`), try it with the student's cookie (403).
 - **Tests and results:** 2026-11-24: `Platform.Identity.Tests` with `TestCategory=IDN-05|TestCategory=IDN-03` 110 passed, 0 failed (22 in `UnlockAccountTests`, 15 in `AccountUnlockIntegrationTests`, 4 in-flight unlock cases and the charge report test in `AccountLockoutTests`; Testcontainers Postgres). The whole `Platform.Identity.Tests` project: 484 passed. `Platform.RateLimiting.Tests` 38 passed. `Platform.Audit.Tests` 308 passed, 36 skipped (Postgres tests that run only under `scripts/audit/test-postgres.ps1`). `Platform.Tests` (`RevisionAuthorization`) 101 passed. `Platform.Access.Tests` 232 passed. Both cases of `Login_in_flight_during_an_admin_unlock_...` failed before the `CredentialVerifier` fix: the correct password logged in, and the wrong password came back as a plain invalid attempt. Both cases of `Login_that_sets_the_lockout_itself_...` failed the same way while `ReserveAttemptAsync` returned true for every updated row, and so did the charge report test. With `lockoutEnd` allowed for every outcome on purpose, `Validate_WhenLockoutEndIsGivenOnRefusedUnlock_RejectsUnknownKey` failed for Denied and Failure.
 - **Next steps:**
   - An administrator form in the frontend.

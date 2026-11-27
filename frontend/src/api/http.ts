@@ -1,5 +1,7 @@
 
 
+import { csrfFetch } from '../auth/csrf'
+
 export type ApiError = {
   status: number
   code: string
@@ -95,11 +97,12 @@ export async function apiRequest<T>(
 
   let response: Response
   try {
-    response = await fetcher(path, {
+    // US-15: csrfFetch adds the CSRF header to state-changing requests and still sends them through fetcher.
+    response = await csrfFetch(path, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-    })
+    }, (url, init) => fetcher(String(url), init))
   } catch {
     return { ok: false, error: { status: 0, code: 'network_error', message: 'Server nije dostupan. Proverite vezu.' } }
   }

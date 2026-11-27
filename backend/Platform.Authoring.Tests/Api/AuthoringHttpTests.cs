@@ -27,6 +27,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
+using Platform.Identity.Testing;
 
 namespace Platform.Authoring.Tests.Api;
 
@@ -128,7 +129,7 @@ public sealed class AuthoringHttpRequests
                 });
             });
         });
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/authoring/templates/{templateId}/drafts");
 
@@ -181,7 +182,7 @@ public sealed class AuthoringHttpRequests
             });
         });
 
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/authoring/templates/{unknownTemplateId}/drafts");
 
@@ -217,7 +218,7 @@ public sealed class AuthoringHttpRequests
             });
         });
 
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/authoring/templates/{templateId}/drafts");
 
@@ -258,6 +259,8 @@ public sealed class AuthoringHttpRequests
 
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
+        // US-15: this host refuses every Access decision, also GET /api/auth/csrf, so the pair is issued in the host.
+        CsrfPair.Issue(factory.Services, AuthoringHostFactory.SessionToken).ApplyTo(client.DefaultRequestHeaders);
         using var response = await client.PostAsync($"/api/authoring/templates/{templateId}/drafts", null);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
@@ -292,7 +295,7 @@ public sealed class AuthoringHttpRequests
             });
         });
 
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={AuthoringHostFactory.SessionToken}");
         using var response = await client.PostAsync($"/api/authoring/templates/{templateId}/drafts", null);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created));

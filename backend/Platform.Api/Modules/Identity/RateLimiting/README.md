@@ -82,6 +82,10 @@ važi za login politiku; politika za reset lozinke ne emituje login događaj.
   `CredentialVerifier` / `EfCredentialStore`, sa brojacem i krajem blokade u `identity.accounts`.
   Zakljucan nalog, pogresna lozinka i nepostojeci email vracaju isti `401 invalid_credentials`.
   `429` i `Retry-After` pripadaju ogranicenju po IP adresi, pre provere lozinke.
+- **CSRF provera (US-15) je pre limitera.** Prijava bez ispravnog `X-CSRF-TOKEN` dobija
+  `403 csrf_invalid`, ne racuna se u limit i ne pravi `auth.login.throttled`, cak i kada je
+  klijent vec ogranicen (tada `403`, ne `429`). Isto vazi za promenu statusa naloga. Vidi
+  [`IDN-02_CSRF.md`](../../../../../docs/components/identity/IDN-02_CSRF.md).
 
 ## Provera integracije
 

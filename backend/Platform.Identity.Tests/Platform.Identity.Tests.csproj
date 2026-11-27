@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Platform.Identity\Platform.Identity.csproj" />
     <ProjectReference Include="..\Platform.Api\Platform.Api.csproj" />
+    <ProjectReference Include="..\Platform.Identity.Testing\Platform.Identity.Testing.csproj" />
     <ProjectReference Include="..\Platform.Audit\Platform.Audit.csproj" />
   </ItemGroup>
   <ItemGroup>

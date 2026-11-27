@@ -1,5 +1,6 @@
 import { ApiError, NetworkError } from '../models/ApiErrors'
 import type { UnauthorizedHandler } from '../types/api'
+import { csrfFetch } from './csrf'
 
 export async function apiFetch(
   input: RequestInfo | URL,
@@ -8,7 +9,8 @@ export async function apiFetch(
 ): Promise<Response> {
   let response: Response
   try {
-    response = await fetch(input, {
+    // US-15: csrfFetch adds the CSRF header to state-changing requests.
+    response = await csrfFetch(input, {
       ...init,
       credentials: 'same-origin'
     })

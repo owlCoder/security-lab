@@ -54,6 +54,7 @@ Trust boundary: the client is untrusted. Every decision (counter, lockout window
 4. A correct password is accepted only by an atomic `UPDATE` that fails if the account locked during the hash. That update resets the counter and clears an expired lockout.
 5. A wrong password that used the last charged attempt sets `lockout_end` and restarts the counter, so a full run of failures is needed after a lockout ends.
 6. Unknown emails and locked accounts run the same statements as a wrong password. Those statements match no row or change nothing, so the failure paths cost the same database round trips.
+7. A login without a valid CSRF token (US-15) is refused with `403 csrf_invalid` before it reaches `CredentialVerifier`. It does not charge an attempt, does not change the counter and cannot lock the account. See [`IDN-02_CSRF.md`](IDN-02_CSRF.md).
 
 ## Configuration
 
