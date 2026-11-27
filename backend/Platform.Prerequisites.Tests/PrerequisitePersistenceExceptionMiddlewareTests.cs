@@ -1,6 +1,6 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
-using Platform.Api.ExceptionHandling;
 using Platform.Api.Middleware;
 using Platform.Prerequisites.Exceptions;
 
@@ -20,9 +20,7 @@ public class PrerequisitePersistenceExceptionMiddlewareTests
             return Task.CompletedTask;
         };
 
-        var middleware = new PrerequisitePersistenceExceptionMiddleware(
-            next,
-            CreateHandler());
+        var middleware = CreateMiddleware(next);
 
         await middleware.InvokeAsync(CreateHttpContext());
 
@@ -32,15 +30,10 @@ public class PrerequisitePersistenceExceptionMiddlewareTests
     [Test]
     public async Task InvokeAsync_WhenPrerequisitePersistenceIsUnavailable_Returns503()
     {
-        var handler = CreateHandler();
-
         RequestDelegate next = _ =>
             throw new PrerequisitePersistenceUnavailableException();
 
-        var middleware = new PrerequisitePersistenceExceptionMiddleware(
-            next,
-            handler);
-
+        var middleware = CreateMiddleware(next);
         var context = CreateHttpContext();
 
         await middleware.InvokeAsync(context);
@@ -52,28 +45,64 @@ public class PrerequisitePersistenceExceptionMiddlewareTests
         Assert.That(
             context.Response.ContentType,
             Does.StartWith("application/problem+json"));
+
+        Assert.That(
+            context.Response.Headers.CacheControl.ToString(),
+            Is.EqualTo("no-store"));
+    }
+
+    [Test]
+    public async Task InvokeAsync_WhenPrerequisitePersistenceIsUnavailable_ReturnsUserFriendlyProblemDetails()
+    {
+        RequestDelegate next = _ =>
+            throw new PrerequisitePersistenceUnavailableException();
+
+        var middleware = CreateMiddleware(next);
+        var context = CreateHttpContext();
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.Body.Position = 0;
+
+        using var document = await JsonDocument.ParseAsync(context.Response.Body);
+
+        var root = document.RootElement;
+
+        Assert.That(
+            root.GetProperty("title").GetString(),
+            Is.EqualTo("Laboratorije trenutno nisu dostupne"));
+
+        Assert.That(
+            root.GetProperty("detail").GetString(),
+            Is.EqualTo("Došlo je do privremenog problema. Pokušajte ponovo kasnije."));
+
+        Assert.That(
+            root.GetProperty("status").GetInt32(),
+            Is.EqualTo(StatusCodes.Status503ServiceUnavailable));
+
+        Assert.That(
+            root.GetRawText(),
+            Does.Not.Contain("Prerequisite persistence is unavailable."));
     }
 
     [Test]
     public void InvokeAsync_WhenAnotherExceptionOccurs_DoesNotHandleIt()
     {
-        var handler = CreateHandler();
-
         RequestDelegate next = _ =>
             throw new InvalidOperationException("Unrelated error");
 
-        var middleware = new PrerequisitePersistenceExceptionMiddleware(
-            next,
-            handler);
-
+        var middleware = CreateMiddleware(next);
         var context = CreateHttpContext();
 
         Assert.ThrowsAsync<InvalidOperationException>(
             async () => await middleware.InvokeAsync(context));
     }
 
-    private static PrerequisitePersistenceExceptionHandler CreateHandler() =>
-        new(NullLogger<PrerequisitePersistenceExceptionHandler>.Instance);
+    private static PrerequisitePersistenceExceptionMiddleware CreateMiddleware(
+        RequestDelegate next) =>
+        new(
+            next,
+            NullLogger<PrerequisitePersistenceExceptionMiddleware>.Instance);
 
     private static DefaultHttpContext CreateHttpContext()
     {

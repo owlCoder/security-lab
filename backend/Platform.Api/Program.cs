@@ -42,7 +42,6 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
-using Platform.Api.ExceptionHandling;
 using Platform.Prerequisites.Application;
 using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Infrastructure;
@@ -114,7 +113,6 @@ builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
-builder.Services.AddTransient<PrerequisitePersistenceExceptionHandler>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
