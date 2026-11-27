@@ -6,7 +6,7 @@ namespace Platform.Api.Modules.Laboratories.Application;
 
 public sealed class CatalogService(
     ILaboratoryRepository laboratoryRepository,
-    ILaboratoryMetadataStore metadataStore)
+    ILaboratoryMetadataStore? metadataStore = null)
 {
     public async Task<int> GetLaboratoryCountAsync(
         CancellationToken cancellationToken = default)
@@ -22,6 +22,9 @@ public sealed class CatalogService(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filter);
+
+        if (metadataStore is null)
+            throw new InvalidOperationException("Laboratory metadata storage is not configured.");
 
         var laboratories = await laboratoryRepository.ListAsync(
             cancellationToken);

@@ -13,12 +13,14 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Audit.Composition;
 using Platform.Audit.Contracts;
 using Platform.Audit.Infrastructure.Persistence;
 using Platform.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 using Testcontainers.PostgreSql;
 using Platform.Identity.Testing;
@@ -142,6 +144,76 @@ public sealed class IdentityAuditPostgresIntegrationTests
     }
 
     [Test]
+    public async Task LoginAndRevokeHttpFlow_PersistsSessionRevokedWithRequestCorrelation()
+    {
+        var userId = Guid.NewGuid();
+        var email = $"audit-revoke-{userId:N}@example.com";
+        await SeedAccountAsync(userId, email);
+
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Testing");
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Identity"] = database.GetConnectionString(),
+                    ["ConnectionStrings:Audit"] = auditRuntimeConnection
+                }));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<PlatformIdentityDbContext>();
+                services.RemoveAll<DbContextOptions<PlatformIdentityDbContext>>();
+                services.AddDbContext<PlatformIdentityDbContext>(options =>
+                    options.UseNpgsql(database.GetConnectionString(), postgres =>
+                        postgres.MigrationsHistoryTable(
+                            "__EFMigrationsHistory",
+                            PlatformIdentityDbContext.SchemaName)));
+
+                services.RemoveAll<AuditDbContext>();
+                services.RemoveAll<DbContextOptions<AuditDbContext>>();
+                services.AddDbContext<AuditDbContext>(options =>
+                    options.UseNpgsql(auditRuntimeConnection, postgres =>
+                        postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
+            });
+        });
+        using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+            HandleCookies = true,
+            AllowAutoRedirect = false
+        });
+
+        using var loginResponse = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { email, password = Password });
+        Assert.That(loginResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        await using var identity = new PlatformIdentityDbContext(identityOptions);
+        var session = await identity.Sessions.AsNoTracking()
+            .SingleAsync(value => value.UserId == userId && value.RevokedAt == null);
+
+        using var revokeResponse = await client.DeleteAsync(
+            $"/api/auth/sessions/{session.SessionHandle}");
+        var correlationId = revokeResponse.Headers.GetValues("X-Correlation-ID").Single();
+
+        await using var audit = new AuditDbContext(auditOptions);
+        var record = await audit.Events.AsNoTracking()
+            .SingleAsync(value =>
+                value.ActorId == userId
+                && value.EventType == AuditEventTypes.AuthSessionRevoked
+                && value.CorrelationId == correlationId);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(revokeResponse.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+            Assert.That(record.Outcome, Is.EqualTo(AuditOutcome.Success));
+            Assert.That(record.ResourceId, Is.EqualTo(userId.ToString()));
+            Assert.That(record.DetailsJson, Does.Contain("user_request"));
+            Assert.That(record.DetailsJson, Does.Contain(session.SessionHandle.ToString("D")));
+        });
+    }
+
+    [Test]
     public async Task Login_WhenAuditWriteFails_PersistsOnlyARevokedSession()
     {
         var userId = Guid.NewGuid();
@@ -158,6 +230,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
                 TimeProvider.System),
             new StoreSessionCreator(sessionStore, NullLogger<StoreSessionCreator>.Instance),
             new SessionManager(identity),
+            new EfMfaCredentialsStore(identity),
             CreateProducer(new UnavailableAuditWriter()));
 
         var result = await login.ExecuteAsync(email, Password, Guid.NewGuid().ToString("N"));
@@ -412,7 +485,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
     }
 
     private static IdentityAuditProducer CreateProducer(ITrustedAuditWriter writer) =>
-        new(writer, NullLogger<IdentityAuditProducer>.Instance);
+        new(writer, new PostgresTransactionalAuditWriter(TimeProvider.System), NullLogger<IdentityAuditProducer>.Instance);
 
     private sealed class UnavailableAuditWriter : ITrustedAuditWriter
     {

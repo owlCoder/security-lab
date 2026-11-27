@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using Platform.Audit.Composition;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
 using Respawn;
@@ -33,6 +34,8 @@ public class TestDatabaseFixture
 
         // 2. Kreiranje baze preko migracija
         await ApplyMigrationsAsync();
+        // Audit šema (AUD-01): uspešan MFA confirm i verify upisuju audit zapis u istoj transakciji.
+        await AuditPersistenceExtensions.MigrateAuditDatabaseAsync(ConnectionString);
 
         // 3. Inicijalizacija Respawn
         _connection = new NpgsqlConnection(ConnectionString);
@@ -41,7 +44,9 @@ public class TestDatabaseFixture
         _respawner = await Respawner.CreateAsync(_connection, new RespawnerOptions
         {
             DbAdapter = DbAdapter.Postgres,
-            TablesToIgnore = [new Table("__EFMigrationsHistory") ]
+            TablesToIgnore = [new Table("__EFMigrationsHistory") ],
+            // audit.audit_events ne dozvoljava DELETE (ProtectAuditHistory); testovi čitaju samo redove svog korisnika.
+            SchemasToExclude = ["audit"]
         });
     }
 

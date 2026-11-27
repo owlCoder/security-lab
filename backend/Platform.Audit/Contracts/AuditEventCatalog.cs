@@ -23,6 +23,28 @@ public static class AuditEventCatalog
     private static readonly AuditDetailField ReasonCode = new(
         AuditDetailFormat.Code,
         new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet());
+    private static readonly AuditDetailField FailureReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Failure }.ToFrozenSet());
+    private static readonly AuditDetailField MfaEnabledFailureReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Failure }.ToFrozenSet(),
+        new[] { AuditOutcome.Failure }.ToFrozenSet(),
+        ValuesByOutcome((AuditOutcome.Failure, Codes(
+            "invalid_code",
+            "no_valid_enrollment",
+            "already_enabled",
+            "invalid_enrollment",
+            "session_inactive"))));
+    private static readonly AuditDetailField MfaVerifiedReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet(),
+        new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet(),
+        ValuesByOutcome(
+            (AuditOutcome.Failure, Codes("invalid_code", "replayed_code", "invalid_secret", "session_inactive")),
+            (AuditOutcome.Denied, Codes("attempt_limit"))));
+    private static readonly IReadOnlySet<string> RevocationCauses =
+        Codes("user_request", "mfa_attempts_exceeded");
 
     // Privileged changes: denied for an anonymous caller too, failed only for an authenticated one.
     private static readonly IReadOnlyDictionary<AuditOutcome, IReadOnlySet<AuditActorKind>> PrivilegedChange =
@@ -87,6 +109,48 @@ public static class AuditEventCatalog
             AuditPresence.Required,
             AuditResourceTypes.Account,
             Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaEnrollmentStarted,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaEnabled,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", MfaEnabledFailureReasonCode))),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaVerified,
+            Outcomes(
+                (AuditOutcome.Success, User),
+                (AuditOutcome.Failure, User),
+                (AuditOutcome.Denied, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", MfaVerifiedReasonCode))),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthSessionRevoked,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("revocationCause", new AuditDetailField(
+                    AuditDetailFormat.Code,
+                    AllowedValuesByOutcome: ValuesByOutcome(
+                        (AuditOutcome.Success, RevocationCauses),
+                        (AuditOutcome.Failure, RevocationCauses)))),
+                ("revokedHandle", new AuditDetailField(AuditDetailFormat.Uuid)),
+                ("reasonCode", FailureReasonCode))),
 
         new AuditEventSchema(
             AuditEventTypes.AccountStatusChanged,
@@ -196,6 +260,13 @@ public static class AuditEventCatalog
             : new[] { "authorId", "operationId", "contentHash" }).ToFrozenSet(StringComparer.Ordinal));
 
     private static IReadOnlySet<AuditActorKind> Kinds(params AuditActorKind[] kinds) => kinds.ToFrozenSet();
+
+    private static IReadOnlySet<string> Codes(params string[] values) =>
+        values.ToFrozenSet(StringComparer.Ordinal);
+
+    private static IReadOnlyDictionary<AuditOutcome, IReadOnlySet<string>> ValuesByOutcome(
+        params (AuditOutcome Outcome, IReadOnlySet<string> Values)[] entries) =>
+        entries.ToFrozenDictionary(entry => entry.Outcome, entry => entry.Values);
 
     private static IReadOnlyDictionary<AuditOutcome, IReadOnlySet<AuditActorKind>> Outcomes(
         params (AuditOutcome Outcome, IReadOnlySet<AuditActorKind> Actors)[] entries) =>

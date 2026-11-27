@@ -1,10 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using Platform.Access.Domain.Models;
+using Platform.Access.Infrastructure.Membership;
+using Platform.Access.Infrastructure.Resources;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Platform.Api.Modules.Laboratories.Api;
@@ -12,6 +16,7 @@ using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Domain;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
+using Platform.LabMetadata;
 
 namespace Laboratories.Tests;
 
@@ -130,6 +135,86 @@ public sealed class LaboratoriesHttpTests
         });
     }
 
+    [Test]
+    public async Task CreateSaveLoadAndEditDraftMetadata_UsesRealLaboratoryRoutesWithoutPublicContent()
+    {
+        // Real Development host and central Access decision: do not replace IAccessDecision.
+        using var factory = new LaboratoriesHostFactory("Development");
+        using var client = factory.CreateClient();
+        var metadataRepository = factory.Services.GetRequiredService<ILaboratoryMetadataRepository>();
+        var demoCourseId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var demoTeacherId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        factory.Services.GetRequiredService<InMemoryCourseMembership>()
+            .Set(demoCourseId, demoTeacherId, CourseRole.Teacher);
+        const string demoTeacher = "11111111-1111-1111-1111-111111111111:Teacher";
+
+        HttpRequestMessage CreateMetadataRequest(string method, string path, object? body = null)
+        {
+            var request = body is null
+                ? CreateRequest(method, path, demoTeacher)
+                : CreateJsonRequest(method, path, demoTeacher, body);
+            return request;
+        }
+
+        using var createRequest = CreateMetadataRequest(
+            "POST", Route, new { title = "LAB-02 draft", courseId = demoCourseId });
+        using var createResponse = await client.SendAsync(createRequest);
+        Assert.That(createResponse.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        var created = await createResponse.Content.ReadFromJsonAsync<LaboratoryResponse>();
+        Assert.That(created, Is.Not.Null);
+
+        var metadataPath = $"{Route}{created!.Id}/metadata";
+        using var saveRequest = CreateMetadataRequest("POST", metadataPath, new
+        {
+            objective = "Početni cilj laboratorije",
+            difficulty = 0,
+            type = 0,
+            tags = new[] { "osnove" }
+        });
+        using var saveResponse = await client.SendAsync(saveRequest);
+        Assert.That(saveResponse.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+
+        using var loadRequest = CreateMetadataRequest("GET", metadataPath);
+        using var loadResponse = await client.SendAsync(loadRequest);
+        Assert.That(loadResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var loaded = await loadResponse.Content.ReadFromJsonAsync<LaboratoryMetadataDetailResponse>();
+        Assert.That(loaded, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(loaded!.Title, Is.EqualTo("LAB-02 draft"));
+            Assert.That(loaded.Objective, Is.EqualTo("Početni cilj laboratorije"));
+            Assert.That(loaded.Tags, Is.EqualTo(new[] { "osnove" }));
+        });
+
+        using var renameRequest = CreateMetadataRequest(
+            "PATCH", $"{Route}{created.Id}/title", new { title = "Izmenjen LAB-02 draft" });
+        using var renameResponse = await client.SendAsync(renameRequest);
+        Assert.That(renameResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        using var editRequest = CreateMetadataRequest("PATCH", metadataPath, new
+        {
+            objective = "Izmenjeni cilj laboratorije",
+            difficulty = 1,
+            type = 3,
+            tags = new[] { "izmena", "bezbednost" }
+        });
+        using var editResponse = await client.SendAsync(editRequest);
+        Assert.That(editResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+
+        using var reloadRequest = CreateMetadataRequest("GET", metadataPath);
+        using var reloadResponse = await client.SendAsync(reloadRequest);
+        Assert.That(reloadResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var reloaded = await reloadResponse.Content.ReadFromJsonAsync<LaboratoryMetadataDetailResponse>();
+        Assert.That(reloaded, Is.Not.Null);
+        Assert.Multiple(() =>
+        {
+            Assert.That(reloaded!.Title, Is.EqualTo("Izmenjen LAB-02 draft"));
+            Assert.That(reloaded.Objective, Is.EqualTo("Izmenjeni cilj laboratorije"));
+            Assert.That(reloaded.Tags, Is.EqualTo(new[] { "izmena", "bezbednost" }));
+        });
+
+        Assert.That(await metadataRepository.GetByLaboratoryIdAsync(created.Id), Is.Not.Null);
+    }
     [Test]
     public async Task PostLabs_WhenStudentCreates_Returns403AndStoresNothing()
     {

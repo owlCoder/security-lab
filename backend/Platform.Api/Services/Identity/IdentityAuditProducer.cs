@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,7 @@ namespace Platform.Api.Services.Identity;
 /// </summary>
 public sealed class IdentityAuditProducer(
     ITrustedAuditWriter writer,
+    ITransactionalAuditWriter transactionalWriter,
     ILogger<IdentityAuditProducer> logger)
 {
     public ValueTask<AuditWriteResult> LoginThrottledAsync(
@@ -59,6 +61,126 @@ public sealed class IdentityAuditProducer(
             UserContext(userId, correlationId),
             cancellationToken);
 
+    public ValueTask<AuditWriteResult> MfaEnrollmentStartedAsync(
+        Guid userId,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnrollmentStarted,
+                AuditOutcome.Success,
+                Resource: Account(userId)),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    /// <summary>
+    /// IDN-06 (US-17): MFA was enabled. Written in the caller's transaction; the caller commits the change only
+    /// when this returns <see cref="AuditWriteResult.IsRecorded"/>.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaEnabledAsync(
+        Guid userId,
+        string correlationId,
+        DbTransaction transaction,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnabled,
+                AuditOutcome.Success,
+                Resource: Account(userId)),
+            UserContext(userId, correlationId),
+            transaction,
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaEnableFailedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnabled,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    /// <summary>
+    /// IDN-06 (US-18): the second factor was verified and the session is being promoted. Written in the caller's
+    /// transaction; the caller commits only when this returns <see cref="AuditWriteResult.IsRecorded"/>.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaVerifiedAsync(
+        Guid userId,
+        string correlationId,
+        DbTransaction transaction,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Success,
+                Resource: Account(userId)),
+            UserContext(userId, correlationId),
+            transaction,
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaVerifyFailedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaVerifyDeniedByAttemptLimitAsync(
+        Guid userId,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Denied,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", "attempt_limit"))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> SessionRevokedAsync(
+        Guid userId,
+        Guid revokedHandle,
+        string revocationCause,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthSessionRevoked,
+                AuditOutcome.Success,
+                Resource: Account(userId),
+                Details: Details(
+                    ("revocationCause", revocationCause),
+                    ("revokedHandle", revokedHandle.ToString("D")))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> SessionRevokeFailedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthSessionRevoked,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
     public ValueTask<AuditWriteResult> AccountStatusChangedAsync(
         Guid actorId,
         Guid targetId,
@@ -97,14 +219,32 @@ public sealed class IdentityAuditProducer(
                 : AnonymousContext(correlationId),
             cancellationToken);
 
-    private async ValueTask<AuditWriteResult> WriteAsync(
+    private ValueTask<AuditWriteResult> WriteAsync(
         AuditEventDraft draft,
         AuditContext context,
+        CancellationToken cancellationToken) =>
+        GuardAsync(draft, context, () => writer.WriteAsync(draft, context, cancellationToken), cancellationToken);
+
+    private ValueTask<AuditWriteResult> WriteAsync(
+        AuditEventDraft draft,
+        AuditContext context,
+        DbTransaction transaction,
+        CancellationToken cancellationToken) =>
+        GuardAsync(
+            draft,
+            context,
+            () => transactionalWriter.WriteAsync(draft, context, transaction, cancellationToken),
+            cancellationToken);
+
+    private async ValueTask<AuditWriteResult> GuardAsync(
+        AuditEventDraft draft,
+        AuditContext context,
+        Func<ValueTask<AuditWriteResult>> write,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await writer.WriteAsync(draft, context, cancellationToken);
+            var result = await write();
             if (!result.IsRecorded)
             {
                 logger.LogError(

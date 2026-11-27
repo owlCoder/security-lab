@@ -65,6 +65,37 @@ internal static class AuditDraftExamples
                 Resource: TargetAccount),
             UserContext);
 
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnrollmentStarted,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnabled,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthSessionRevoked,
+                AuditOutcome.Success,
+                Resource: TargetAccount,
+                Details: Details(
+                    ("revocationCause", "user_request"),
+                    ("revokedHandle", "66666666-6666-6666-6666-666666666666"))),
+            UserContext);
+
         yield return (StatusChange(), UserContext);
 
         yield return (Unlock(), UserContext);

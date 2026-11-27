@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Platform.Audit.Contracts;
 using Platform.Api.Controllers.Identity;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
@@ -15,6 +17,9 @@ public class SessionControllerTests
 {
     private Mock<IIdentityContext> _identity = null!;
     private Mock<ISessionManager> _sessionManager = null!;
+    private RecordingAuditWriter _auditWriter = null!;
+    private StubCorrelationContext _correlation = null!;
+    private IdentityAuditProducer _audit = null!;
     private SessionController _controller = null!;
 
     [SetUp]
@@ -22,10 +27,18 @@ public class SessionControllerTests
     {
         _identity = new Mock<IIdentityContext>();
         _sessionManager = new Mock<ISessionManager>();
+        _auditWriter = new RecordingAuditWriter();
+        _correlation = new StubCorrelationContext("corr-session-test");
+        _audit = new IdentityAuditProducer(
+            _auditWriter,
+            Mock.Of<ITransactionalAuditWriter>(),
+            NullLogger<IdentityAuditProducer>.Instance);
 
         _controller = new SessionController(
             _identity.Object,
-            _sessionManager.Object)
+            _sessionManager.Object,
+            _audit,
+            _correlation)
         {
             ControllerContext = new ControllerContext
             {
@@ -187,6 +200,20 @@ public class SessionControllerTests
         _sessionManager.Verify(
             s => s.RevokeSession(userId, sessionHandle, cancellationToken),
             Times.Once);
+        var write = _auditWriter.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthSessionRevoked));
+            Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+            Assert.That(write.Draft.Resource!.Id, Is.EqualTo(userId.ToString()));
+            Assert.That(write.Draft.Details, Is.EquivalentTo(new Dictionary<string, string>
+            {
+                ["revocationCause"] = "user_request",
+                ["revokedHandle"] = sessionHandle.ToString("D")
+            }));
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.ForUser(userId)));
+            Assert.That(write.Context.CorrelationId, Is.EqualTo("corr-session-test"));
+        });
         Assert.That(
             _controller.Response.Headers.CacheControl.ToString(),
             Is.EqualTo("no-store"));
@@ -222,6 +249,17 @@ public class SessionControllerTests
         _sessionManager.Verify(
             s => s.RevokeSession(userId, sessionHandle, CancellationToken.None),
             Times.Once);
+        var write = _auditWriter.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthSessionRevoked));
+            Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+            Assert.That(write.Draft.Resource!.Id, Is.EqualTo(userId.ToString()));
+            Assert.That(write.Draft.Details, Is.EquivalentTo(
+                new Dictionary<string, string> { ["reasonCode"] = "not_found" }));
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.ForUser(userId)));
+            Assert.That(write.Context.CorrelationId, Is.EqualTo("corr-session-test"));
+        });
         Assert.That(
             _controller.Response.Headers.CacheControl.ToString(),
             Is.EqualTo("no-store"));
@@ -247,6 +285,7 @@ public class SessionControllerTests
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+        Assert.That(_auditWriter.Writes, Is.Empty);
     }
 
     [Test]
@@ -268,6 +307,7 @@ public class SessionControllerTests
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+        Assert.That(_auditWriter.Writes, Is.Empty);
     }
 
     private void CallerIs(CallerIdentity? caller) =>
@@ -279,5 +319,29 @@ public class SessionControllerTests
         Assert.That(
             body.GetType().GetProperty("code")!.GetValue(body),
             Is.EqualTo("unauthenticated"));
+    }
+
+    private sealed record RecordedAuditWrite(AuditEventDraft Draft, AuditContext Context);
+
+    private sealed class RecordingAuditWriter : ITrustedAuditWriter
+    {
+        public List<RecordedAuditWrite> Writes { get; } = [];
+
+        public ValueTask<AuditWriteResult> WriteAsync(
+            AuditEventDraft draft,
+            AuditContext context,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Add(new RecordedAuditWrite(draft, context));
+            return ValueTask.FromResult(
+                AuditWriteResult.Recorded(Guid.Parse("44444444-4444-4444-4444-444444444444")));
+        }
+
+        public RecordedAuditWrite Single() => Writes.Single();
+    }
+
+    private sealed class StubCorrelationContext(string? correlationId) : ICorrelationContext
+    {
+        public string? CorrelationId { get; } = correlationId;
     }
 }

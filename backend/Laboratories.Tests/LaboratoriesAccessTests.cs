@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Platform.Access.AspNet;
 using Platform.Access.Domain.Enums;
@@ -205,6 +207,34 @@ public sealed class LaboratoriesAccessTests
     }
 
     [Test]
+    public async Task SubjectProvider_OnDraftMetadataRoute_UsesDevelopmentModuleIdentity()
+    {
+        var inner = new CountingProvider();
+        var provider = new LaboratorySubjectProvider(inner);
+        HttpContext http = Context(Teacher, Platform.Access.Domain.Constants.AccessActions.LabDraftManage.Id);
+
+        SubjectRef? subject = await provider.GetSubjectAsync(http);
+
+        Assert.That(subject, Is.EqualTo(new SubjectRef(
+            CallerId.From(http.RequestServices.GetRequiredService<IIdentityContext>())!.Value.ToString("D"),
+            AccountState.Active)));
+        Assert.That(inner.Calls, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task SubjectProvider_OnDraftMetadataRoute_UsesOriginalProviderOutsideDevelopment()
+    {
+        var inner = new CountingProvider();
+        var provider = new LaboratorySubjectProvider(inner, new TestHostEnvironment("Production"));
+        HttpContext http = Context(Teacher, Platform.Access.Domain.Constants.AccessActions.LabDraftManage.Id);
+
+        SubjectRef? subject = await provider.GetSubjectAsync(http);
+
+        Assert.That(subject, Is.SameAs(CountingProvider.Subject));
+        Assert.That(inner.Calls, Is.EqualTo(1));
+    }
+
+    [Test]
     public async Task SubjectProvider_OnLaboratoryRouteWithoutIdentity_ReturnsNull()
     {
         var provider = new LaboratorySubjectProvider(new CountingProvider());
@@ -311,6 +341,14 @@ public sealed class LaboratoriesAccessTests
             Calls++;
             return ValueTask.FromResult<SubjectRef?>(Subject);
         }
+    }
+
+    private sealed class TestHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "Laboratories.Tests";
+        public string ContentRootPath { get; set; } = string.Empty;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 
     private sealed class HostFactory(string environment) : WebApplicationFactory<Program>

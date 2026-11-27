@@ -17,8 +17,10 @@ using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Models;
 using Platform.Identity.Services;
+using Platform.Identity.Entities;
 using Platform.Audit.Contracts;
 using Platform.Identity.Testing;
 
@@ -30,7 +32,7 @@ namespace Platform.RateLimiting.Tests;
 /// Za razliku od <see cref="RateLimitingHttpTests"/> (mala test aplikacija sa probnim endpointima), ovi
 /// testovi gadjaju PRAVI <c>POST /api/auth/login</c> kroz kompletan pipeline iz Program.cs
 /// (Access middleware, rate limiter, AuthController, LoginService). Baza nije potrebna: zamenjeni su
-/// samo ICredentialVerifier i ISessionCreator, jer njihova trajna implementacija nije predmet IDN-05.
+/// ICredentialVerifier, ISessionCreator i MFA store, jer njihove trajne implementacije nisu predmet IDN-05.
 /// </summary>
 [TestFixture, Category("Integration"), Category("IDN-05")]
 public sealed class LoginEndpointRateLimitingTests
@@ -367,6 +369,8 @@ public sealed class LoginEndpointRateLimitingTests
                 services.AddSingleton<ICredentialVerifier>(Credentials);
                 services.RemoveAll<ISessionCreator>();
                 services.AddSingleton<ISessionCreator, FakeSessionCreator>();
+                services.RemoveAll<IMfaCredentialsStore>();
+                services.AddSingleton<IMfaCredentialsStore, NoMfaCredentialsStore>();
                 // This fixture isolates IDN-05 throttling and has no Audit database. Successful
                 // login still needs the mandatory writer contract to report a durable record.
                 services.RemoveAll<ITrustedAuditWriter>();
@@ -430,6 +434,26 @@ internal sealed class FakeSessionCreator : ISessionCreator
     public Task<IssuedSession?> CreateAsync(Guid userId, AuthenticationLevel level, CancellationToken ct = default) =>
         Task.FromResult<IssuedSession?>(new IssuedSession(
             Convert.ToHexString(RandomNumberGenerator.GetBytes(32)), Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(1)));
+}
+
+internal sealed class NoMfaCredentialsStore : IMfaCredentialsStore
+{
+    public Task<MfaCredentials?> GetAsync(Guid userId, CancellationToken ct) =>
+        Task.FromResult<MfaCredentials?>(null);
+
+    public Task<string?> GetEmailAsync(Guid userId, CancellationToken ct) =>
+        Task.FromResult<string?>(null);
+
+    public Task<IMfaUnitOfWork> BeginAsync(CancellationToken ct) =>
+        throw new NotSupportedException("Login rate-limit tests never enroll or verify a second factor.");
+
+    public Task<bool> RecordFailedAttemptAsync(
+        Guid userId,
+        int maxAttempts,
+        DateTimeOffset now,
+        DateTimeOffset lockedUntil,
+        CancellationToken ct) =>
+        Task.FromResult(false);
 }
 
 internal sealed class SuccessfulAuditWriter : ITrustedAuditWriter

@@ -25,6 +25,9 @@ jobs:
       - name: Test LAB-06 prerequisites with isolated PostgreSQL
         shell: pwsh
         run: ./scripts/test-prerequisites-postgres.ps1 -NoBuild
+      - name: Test LAB-02 metadata and catalog with isolated PostgreSQL
+        shell: pwsh
+        run: ./scripts/test-metadata-postgres.ps1 -NoBuild
       - name: Live ADM-08 HTTPS demonstration with isolated PostgreSQL
         shell: pwsh
         run: ./scripts/demo-coursework-live.ps1 -NoBuild

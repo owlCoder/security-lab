@@ -1,8 +1,11 @@
+using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Services;
 
 namespace Platform.Api.Services.Identity;
@@ -15,6 +18,7 @@ internal sealed class LoginService(
     ICredentialVerifier credentials,
     ISessionCreator sessions,
     ISessionManager sessionManager,
+    IMfaCredentialsStore mfaCredentials,
     IdentityAuditProducer audit) : ILoginService
 {
     public async Task<LoginResult> ExecuteAsync(
@@ -47,11 +51,29 @@ internal sealed class LoginService(
                 ct,
                 actorConfirmed: true);
 
-        // MFA (IDN-06) is not implemented yet: until an MFA policy exists every login is Active.
+        // IDN-06: without the MFA state the level of the session is unknown, so no session is created.
+        bool mfaEnabled;
+        try
+        {
+            mfaEnabled = (await mfaCredentials.GetAsync(check.AccountId, ct))?.MfaEnabled == true;
+        }
+        catch (Exception ex) when (ex is DbException or DbUpdateException)
+        {
+            return await FailAsync(
+                LoginOutcome.Unavailable,
+                "mfa_unavailable",
+                correlationId,
+                check.AccountId,
+                ct,
+                actorConfirmed: true);
+        }
+
+        var authenticationLevel = mfaEnabled ? AuthenticationLevel.MfaPending : AuthenticationLevel.Active;
+
         IssuedSession? session;
         try
         {
-            session = await sessions.CreateAsync(check.AccountId, AuthenticationLevel.Active, ct);
+            session = await sessions.CreateAsync(check.AccountId, authenticationLevel, ct);
         }
         catch (AccountNotActiveException)
         {
@@ -89,7 +111,8 @@ internal sealed class LoginService(
             return new LoginResult(LoginOutcome.Unavailable);
         }
 
-        return new LoginResult(LoginOutcome.Success, check.AccountId, session);
+        return new LoginResult(
+            LoginOutcome.Success, check.AccountId, session, authenticationLevel == AuthenticationLevel.MfaPending);
     }
 
     private static bool IsAcceptable(string? email, string? password) =>

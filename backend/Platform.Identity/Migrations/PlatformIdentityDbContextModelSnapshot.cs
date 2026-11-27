@@ -66,6 +66,62 @@ namespace Platform.Identity.Migrations
                     b.ToTable("external_logins", "identity");
                 });
 
+            modelBuilder.Entity("Platform.Identity.Entities.MfaCredentials", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<long?>("LastTotpTimeStep")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_totp_time_step");
+
+                    b.Property<bool>("MfaEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("mfa_enabled");
+
+                    b.Property<int>("MfaFailedAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("mfa_failed_attempts");
+
+                    b.Property<DateTimeOffset?>("MfaLockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("mfa_locked_until");
+
+                    b.Property<DateTimeOffset?>("PendingEnrollmentExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("pending_enrollment_expires_at");
+
+                    b.Property<string>("PendingTotpSecretCiphertext")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("pending_totp_secret_ciphertext");
+
+                    b.Property<int?>("PendingTotpSecretKeyVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("pending_totp_secret_key_version");
+
+                    b.Property<string>("TotpSecretCiphertext")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("totp_secret_ciphertext");
+
+                    b.Property<int?>("TotpSecretKeyVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("totp_secret_key_version");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_mfa_credentials_user_id");
+
+                    b.ToTable("mfa_credentials", "identity");
+                });
+
             modelBuilder.Entity("Platform.Identity.Entities.Session", b =>
                 {
                     b.Property<Guid>("Id")
@@ -179,6 +235,15 @@ namespace Platform.Identity.Migrations
                         .WithMany()
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Platform.Identity.Entities.MfaCredentials", b =>
+                {
+                    b.HasOne("Platform.Identity.Entities.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

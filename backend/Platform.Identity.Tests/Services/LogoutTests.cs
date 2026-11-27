@@ -1,3 +1,4 @@
+using Moq;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -25,7 +26,7 @@ public class LogoutTests
         _audit = new RecordingAudit();
         _logout = new LogoutService(
             _store,
-            new IdentityAuditProducer(_audit, NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance));
     }
 
     [Test]
