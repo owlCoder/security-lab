@@ -12,6 +12,7 @@ using Moq;
 using OtpNet;
 using Platform.Api.Contracts.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Testing;
 using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Integration.Mfa;
@@ -204,9 +205,16 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
         }
     }
 
+    // US-15: every POST carries a CSRF pair. A pair is bound to the session it was issued for, and these tests use
+    // several session cookies, so the login gets a pair without a session and each POST one for its own session.
     private async Task<string> LoginTokenAsync(string email)
     {
-        var response = await _client.PostAsJsonAsync("/api/auth/login", new { Email = email, Password });
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+        {
+            Content = JsonContent.Create(new { Email = email, Password })
+        };
+        (await CsrfPair.FetchAsync(_client)).ApplyTo(request);
+        var response = await _client.SendAsync(request);
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         return SessionTokenFrom(response);
     }
@@ -216,7 +224,7 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         if (body is not null)
             request.Content = JsonContent.Create(body);
-        request.Headers.Add("Cookie", $"{SessionCookie.Name}={rawToken}");
+        (await CsrfPair.FetchAsync(_client, rawToken)).ApplyTo(request, rawToken);
         return await _client.SendAsync(request);
     }
 
