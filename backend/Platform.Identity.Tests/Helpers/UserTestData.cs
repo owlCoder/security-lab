@@ -30,6 +30,31 @@ public static class UserTestData
         return user;
     }
 
+    /// <summary>
+    /// IDN-05: locks the account in the store until <paramref name="lockedFor"/> from now (15 minutes by default),
+    /// without failed logins, so the per-IP login limiter plays no part in the arrangement.
+    /// </summary>
+    public static async Task LockAsync(
+        CustomWebApplicationFactory<Program> factory,
+        Guid id,
+        int failedLogins = 0,
+        TimeSpan? lockedFor = null,
+        CancellationToken ct = default)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var lockoutEnd = DateTimeOffset.UtcNow + (lockedFor ?? TimeSpan.FromMinutes(15));
+
+        var updated = await db.Accounts
+            .Where(user => user.Id == id)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(user => user.LockoutEnd, lockoutEnd)
+                .SetProperty(user => user.FailedLoginCount, failedLogins), ct);
+
+        if (updated != 1)
+            throw new InvalidOperationException($"Account {id} does not exist.");
+    }
+
     public static async Task<UserAccount?> GetAsync(
         CustomWebApplicationFactory<Program> factory,
         Guid id,

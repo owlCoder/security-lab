@@ -78,4 +78,43 @@ public sealed class InMemoryGroupMembershipTests
 
         Assert.Throws<ArgumentException>(() => membership.Add(courseId, groupId, Student));
     }
+
+    [Test]
+    public async Task Remove_WhenStudentIsMember_NextCheckReturnsFalse()
+    {
+        var membership = new InMemoryGroupMembership();
+        membership.Add(Course, Group, Student);
+
+        var removed = membership.Remove(Course, Group, Student);
+
+        Assert.That(removed, Is.True);
+        Assert.That(await membership.IsGroupMemberAsync(Student, Course, Group), Is.False);
+    }
+
+    [TestCase(Course, "group-b", Student)]
+    [TestCase("course-2", Group, Student)]
+    [TestCase(Course, Group, "student-2")]
+    public async Task Remove_ForAnotherMembership_ReturnsFalseAndKeepsExistingOne(
+        string courseId,
+        string groupId,
+        string studentId)
+    {
+        var membership = new InMemoryGroupMembership();
+        membership.Add(Course, Group, Student);
+
+        var removed = membership.Remove(courseId, groupId, studentId);
+
+        Assert.That(removed, Is.False);
+        Assert.That(await membership.IsGroupMemberAsync(Student, Course, Group), Is.True);
+    }
+
+    [TestCase("", Group, Student)]
+    [TestCase(Course, " ", Student)]
+    [TestCase(Course, Group, "student 1")]
+    public void Remove_WithInvalidValue_Throws(string courseId, string groupId, string studentId)
+    {
+        var membership = new InMemoryGroupMembership();
+
+        Assert.Throws<ArgumentException>(() => membership.Remove(courseId, groupId, studentId));
+    }
 }

@@ -18,13 +18,13 @@ describe('LAB-01 createLab', () => {
     const fetchMock = reply(201, { id: 'server-id' })
     vi.stubGlobal('fetch', fetchMock)
 
-    const outcome = await createLab('Nova laboratorija', teacher)
+    const outcome = await createLab('Nova laboratorija', 'course-123', teacher)
 
     expect(outcome).toEqual({ kind: 'created', id: 'server-id' })
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe(`${LABS_BASE_PATH}/`)
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body)).toEqual({ title: 'Nova laboratorija' })
+    expect(JSON.parse(init.body)).toEqual({ title: 'Nova laboratorija', courseId: 'course-123' })
     expect(init.headers[TEST_USER_HEADER]).toBe('marko:Teacher')
   })
 
@@ -32,7 +32,7 @@ describe('LAB-01 createLab', () => {
     const fetchMock = reply(401)
     vi.stubGlobal('fetch', fetchMock)
 
-    const outcome = await createLab('Naslov', null)
+    const outcome = await createLab('Naslov', 'course-123', null)
 
     expect(outcome.kind).toBe('unauthenticated')
     expect(fetchMock.mock.calls[0][1].headers[TEST_USER_HEADER]).toBeUndefined()
@@ -40,28 +40,28 @@ describe('LAB-01 createLab', () => {
 
   it('student dobija 403 od servera i to se prikazuje kao zabrana', async () => {
     vi.stubGlobal('fetch', reply(403, { title: 'Access denied', traceId: 'abc-123' }))
-    expect(await createLab('Naslov', student)).toEqual({ kind: 'forbidden', requestId: 'abc-123' })
+    expect(await createLab('Naslov', 'course-123', student)).toEqual({ kind: 'forbidden', requestId: 'abc-123' })
   })
 
   it('400 sa poznatim kodom daje našu poruku', async () => {
     vi.stubGlobal('fetch', reply(400, { code: 'INVALID_TITLE' }))
-    const outcome = await createLab('x'.repeat(201), teacher)
+    const outcome = await createLab('x'.repeat(201), 'course-123', teacher)
     expect(outcome.kind).toBe('invalid')
     expect(outcome.kind === 'invalid' && outcome.messages[0]).toContain('najviše 200 znakova')
   })
 
   it('400 ne prikazuje proizvoljan tekst sa servera', async () => {
     vi.stubGlobal('fetch', reply(400, { code: 'SQL error near users table', detail: 'stack trace' }))
-    const outcome = await createLab('Naslov', teacher)
+    const outcome = await createLab('Naslov', 'course-123', teacher)
     expect(outcome).toEqual({ kind: 'invalid', messages: ['Unos nije ispravan.'], requestId: undefined })
   })
 
   it('501 iz LAB-01 kostura i greška mreže imaju svoje ishode', async () => {
     vi.stubGlobal('fetch', reply(501))
-    expect((await createLab('Naslov', teacher)).kind).toBe('notImplemented')
+    expect((await createLab('Naslov', 'course-123', teacher)).kind).toBe('notImplemented')
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
-    expect((await createLab('Naslov', teacher)).kind).toBe('error')
+    expect((await createLab('Naslov', 'course-123', teacher)).kind).toBe('error')
   })
 })
 
