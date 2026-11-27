@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -650,7 +649,7 @@ public sealed class LaboratoriesHttpTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(environment).UseMfaTestKeyRing();
+            builder.UseEnvironment(environment);
             builder.ConfigureLogging(logging => logging.ClearProviders());
             if (testServices is not null)
             {

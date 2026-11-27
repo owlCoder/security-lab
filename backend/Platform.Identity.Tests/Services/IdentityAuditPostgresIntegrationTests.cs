@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -89,7 +88,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
 
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseEnvironment("Testing").UseMfaTestKeyRing();
+            builder.UseEnvironment("Testing");
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -153,7 +152,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
 
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseEnvironment("Testing").UseMfaTestKeyRing();
+            builder.UseEnvironment("Testing");
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -452,7 +451,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
     private WebApplicationFactory<Program> CreateIdentityHost(int loginPermitLimit = 1, int maxFailedAttempts = 5) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseEnvironment("Testing").UseMfaTestKeyRing();
+            builder.UseEnvironment("Testing");
             builder.UseSetting("RateLimiting:Login:PermitLimit", loginPermitLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("RateLimiting:Login:WindowSeconds", "60");
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxFailedAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture));

@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -318,7 +317,7 @@ public sealed class LaboratoriesAccessTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(environment).UseMfaTestKeyRing();
+            builder.UseEnvironment(environment);
             builder.ConfigureLogging(logging => logging.ClearProviders());
         }
     }

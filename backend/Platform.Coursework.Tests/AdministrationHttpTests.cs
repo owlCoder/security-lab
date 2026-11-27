@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -441,7 +440,7 @@ public sealed partial class AdministrationHttpTests
         public volatile bool BodyRead;
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(environment).UseMfaTestKeyRing();
+            builder.UseEnvironment(environment);
             builder.UseSetting(AdministrationEndpoints.EnabledSetting, enabled.ToString());
             builder.UseSetting(Platform.Api.Modules.Access.Api.AttemptEndpoints.EnabledSetting, attempts.ToString());
             builder.UseSetting("CourseworkAttempts:ProviderBaseUrl", "https://att.example.invalid/v1/");

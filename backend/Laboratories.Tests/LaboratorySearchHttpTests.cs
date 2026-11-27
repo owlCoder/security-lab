@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -393,7 +392,7 @@ public sealed class LaboratorySearchHttpTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(environment).UseMfaTestKeyRing();
+            builder.UseEnvironment(environment);
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureTestServices(services =>
                 services.AddSingleton<ICourseMembership>(LabSearchTestContext.CreateMembership()));

@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -607,7 +606,7 @@ public sealed class CompetencyEndpointsTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment(_environment).UseMfaTestKeyRing();
+            builder.UseEnvironment(_environment);
             // Avoid developer secrets, migrations or a database on the real machine.
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {

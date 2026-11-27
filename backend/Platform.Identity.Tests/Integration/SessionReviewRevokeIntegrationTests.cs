@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -91,7 +90,7 @@ public class SessionReviewRevokeIntegrationTests : IntegrationTestBase
 
         using var host = environment == "Development"
             ? null
-            : Factory.WithWebHostBuilder(builder => builder.UseEnvironment(environment).UseMfaTestKeyRing());
+            : Factory.WithWebHostBuilder(builder => builder.UseEnvironment(environment));
         using var ownClient = host is null ? null : NewClient(host);
         var client = ownClient ?? _http;
 

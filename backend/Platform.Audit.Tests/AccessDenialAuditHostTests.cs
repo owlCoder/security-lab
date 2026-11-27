@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
@@ -166,7 +165,7 @@ public sealed class AccessDenialAuditFailureTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment("Testing").UseMfaTestKeyRing();
+            builder.UseEnvironment("Testing");
             builder.ConfigureLogging(logging =>
             {
                 logging.ClearProviders();

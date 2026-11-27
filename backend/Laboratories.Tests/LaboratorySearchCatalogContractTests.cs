@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -86,7 +85,7 @@ public sealed class LaboratorySearchCatalogContractTests
     {
         using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseEnvironment("Production").UseMfaTestKeyRing();
+            builder.UseEnvironment("Production");
             builder.UseSetting("ConnectionStrings:Authoring",
                 "Host=127.0.0.1;Port=1;Database=lab05_composition;Username=unused;Password=unused;Timeout=1");
             builder.ConfigureLogging(logging => logging.ClearProviders());

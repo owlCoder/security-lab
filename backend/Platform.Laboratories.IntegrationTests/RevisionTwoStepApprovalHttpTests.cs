@@ -1,4 +1,3 @@
-using SecurityLab.TestShared;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -55,7 +54,7 @@ public sealed class RevisionTwoStepApprovalHttpTests
         await database.StartAsync();
         host = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseEnvironment("Production").UseMfaTestKeyRing();
+            builder.UseEnvironment("Production");
             builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {

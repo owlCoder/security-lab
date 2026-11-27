@@ -292,6 +292,39 @@ public sealed class MfaKeyRingTests
         Assert.That(error!.Message, Does.Contain("key file that cannot be read"));
     }
 
+    // Upgrade from #232 (KeysPath alone): the old key has a plain master key, and Data Protection would keep using it
+    // after the certificate is added instead of writing an encrypted one.
+    [Test]
+    public void AddMfaKeyRing_KeyWrittenWithoutCertificate_Throws()
+    {
+        // Arrange
+        using (var withoutCertificate = BuildProvider(new Dictionary<string, string?>(), Environments.Development,
+                   configure: services => services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(_keys))))
+            withoutCertificate.GetRequiredService<ITotpSecretProtector>().Protect("JBSWY3DPEHPK3PXP");
+        Assert.That(File.ReadAllText(Directory.GetFiles(_keys, "key-*.xml").Single()), Does.Contain("<masterKey"),
+            "precondition: the key is on disk in plain text");
+
+        // Act
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(Settings()));
+
+        // Assert
+        Assert.That(error!.Message, Does.Contain("not encrypted with a certificate"));
+    }
+
+    [Test]
+    public void AddMfaKeyRing_KeyFileThatIsNotXml_Throws()
+    {
+        // Arrange
+        Directory.CreateDirectory(_keys);
+        File.WriteAllText(Path.Combine(_keys, "key-damaged.xml"), "not xml");
+
+        // Act
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(Settings()));
+
+        // Assert
+        Assert.That(error!.Message, Does.Contain("not encrypted with a certificate"));
+    }
+
     [Test]
     public void AddMfaKeyRing_WritableKeysPath_LeavesNoProbeFile()
     {
@@ -310,8 +343,13 @@ public sealed class MfaKeyRingTests
     public void ApiHost_InProductionWithoutKeyRing_DoesNotStart()
     {
         // Arrange
-        using var factory = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(builder => builder.UseEnvironment(Environments.Production));
+        // The test key ring of this process (MfaTestKeyRing) is overridden with empty values, as on a server where
+        // nothing is set.
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
+            .UseEnvironment(Environments.Production)
+            .UseSetting("Identity:DataProtection:KeysPath", "")
+            .UseSetting("Identity:DataProtection:CertificatePath", "")
+            .UseSetting("Identity:DataProtection:CertificatePassword", ""));
 
         // Act
         var error = Assert.Catch(() => _ = factory.Services);
@@ -339,6 +377,30 @@ public sealed class MfaKeyRingTests
         // Assert
         Assert.That(protector.Unprotect(ciphertext), Is.EqualTo("JBSWY3DPEHPK3PXP"));
         Assert.That(Directory.GetFiles(_keys, "key-*.xml"), Is.Not.Empty, "the host uses the configured KeysPath");
+    }
+
+    // backend/Directory.Build.props + MfaTestKeyRing: every test process has a usable key ring before any host starts.
+    [Test]
+    public void TestProcess_HasTheSharedTestKeyRing()
+    {
+        // Arrange
+        var keysPath = Environment.GetEnvironmentVariable("Identity__DataProtection__KeysPath");
+        var certificatePath = Environment.GetEnvironmentVariable("Identity__DataProtection__CertificatePath");
+
+        // Act
+        var settings = new Dictionary<string, string?>
+        {
+            ["Identity:DataProtection:KeysPath"] = keysPath,
+            ["Identity:DataProtection:CertificatePath"] = certificatePath,
+            ["Identity:DataProtection:CertificatePassword"] =
+                Environment.GetEnvironmentVariable("Identity__DataProtection__CertificatePassword")
+        };
+        using var provider = BuildProvider(settings);
+
+        // Assert
+        Assert.That(Directory.Exists(keysPath), Is.True);
+        Assert.That(File.Exists(certificatePath), Is.True);
+        Assert.That(provider.GetRequiredService<ITotpSecretProtector>().Protect("x"), Is.Not.Empty);
     }
 
     private string CreateCertificate(string fileName)

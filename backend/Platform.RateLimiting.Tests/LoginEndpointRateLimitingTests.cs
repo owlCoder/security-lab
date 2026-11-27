@@ -22,7 +22,6 @@ using Platform.Identity.Models;
 using Platform.Identity.Services;
 using Platform.Identity.Entities;
 using Platform.Audit.Contracts;
-using SecurityLab.TestShared;
 using Platform.Identity.Testing;
 
 namespace Platform.RateLimiting.Tests;
@@ -356,7 +355,7 @@ public sealed class LoginEndpointRateLimitingTests
             // WebApplicationFactory runs the real Program registrations: central audit,
             // authentication action policies, session subject provider and strict Access middleware.
             // Do not add a second Access stack or replace its decisions in this factory.
-            builder.UseEnvironment("Production").UseMfaTestKeyRing();
+            builder.UseEnvironment("Production");
             builder.ConfigureLogging(logging =>
             {
                 logging.ClearProviders();

@@ -16,7 +16,6 @@ using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
-using SecurityLab.TestShared;
 
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
 
@@ -50,7 +49,7 @@ public sealed class StudentLabViewTests
     {
         factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             {
-                builder.UseEnvironment(environment).UseMfaTestKeyRing();
+                builder.UseEnvironment(environment);
 
                 builder.ConfigureTestServices(services =>
                 {

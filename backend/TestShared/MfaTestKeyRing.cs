@@ -1,33 +1,43 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Microsoft.AspNetCore.Hosting;
 
 namespace SecurityLab.TestShared;
 
 /// <summary>
-/// IDN-06: outside Development the API does not start without a persistent, certificate-protected Data Protection
-/// key ring (<c>Identity:DataProtection</c>). Test hosts that run as Production or Testing call
-/// <see cref="UseMfaTestKeyRing"/>: a key directory and a self-signed PFX in the temp folder, created once per
-/// test process and deleted when the process exits. Folders left by a process that was killed are deleted by a
-/// later run once they are a day old. Linked into each test project from backend/TestShared; not a production
-/// setting.
+/// US-22 (IDN-06): outside Development the API does not start without a persistent, certificate-protected Data
+/// Protection key ring (<c>Identity:DataProtection</c>). backend/Directory.Build.props compiles this file into every
+/// test project; its module initializer sets <c>Identity__DataProtection__*</c> environment variables once per test
+/// process, before any host is built, so test hosts that run as Production or Testing need no call of their own.
+/// The key directory and the self-signed PFX are in the temp folder and are deleted when the process exits; folders
+/// left by a killed process are deleted by a later run once they are a day old. Variables that are already set (by
+/// CI or a developer) are left as they are. Not a production setting.
 /// </summary>
 internal static class MfaTestKeyRing
 {
+    public const string KeysPathVariable = "Identity__DataProtection__KeysPath";
+    public const string CertificatePathVariable = "Identity__DataProtection__CertificatePath";
+    public const string CertificatePasswordVariable = "Identity__DataProtection__CertificatePassword";
+
     private const string FolderPrefix = "securitylab-mfa-keyring-";
     private static readonly TimeSpan StaleAfter = TimeSpan.FromDays(1);
-    private static readonly Lazy<(string KeysPath, string CertificatePath, string Password)> Files = new(Create);
 
-    public static IWebHostBuilder UseMfaTestKeyRing(this IWebHostBuilder builder)
+#pragma warning disable CA2255 // A module initializer is the point: it runs before any test builds a host.
+    [ModuleInitializer]
+#pragma warning restore CA2255
+    internal static void SetForTestProcess()
     {
-        var (keysPath, certificatePath, password) = Files.Value;
-        return builder
-            .UseSetting("Identity:DataProtection:KeysPath", keysPath)
-            .UseSetting("Identity:DataProtection:CertificatePath", certificatePath)
-            .UseSetting("Identity:DataProtection:CertificatePassword", password);
+        if (Environment.GetEnvironmentVariable(KeysPathVariable) is not null
+            || Environment.GetEnvironmentVariable(CertificatePathVariable) is not null)
+            return;
+
+        var (keysPath, certificatePath, password) = Create();
+        Environment.SetEnvironmentVariable(KeysPathVariable, keysPath);
+        Environment.SetEnvironmentVariable(CertificatePathVariable, certificatePath);
+        Environment.SetEnvironmentVariable(CertificatePasswordVariable, password);
     }
 
-    private static (string, string, string) Create()
+    private static (string KeysPath, string CertificatePath, string Password) Create()
     {
         DeleteStaleFolders();
         var root = Path.Combine(Path.GetTempPath(), FolderPrefix + Guid.NewGuid().ToString("N"));
