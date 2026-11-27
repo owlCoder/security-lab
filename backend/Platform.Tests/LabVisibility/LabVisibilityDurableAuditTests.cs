@@ -220,6 +220,92 @@ public class LabVisibilityDurableAuditTests
         });
     }
 
+    // Svaki poznat ishod ima fiksan reasonCode; tekst ishoda iz koda nikad ne ide u zapis.
+    [TestCase("Allow", AuditOutcome.Success, null)]
+    [TestCase("allowed", AuditOutcome.Success, null)]
+    [TestCase("Saved", AuditOutcome.Success, null)]
+    [TestCase("Deny", AuditOutcome.Denied, "forbidden")]
+    [TestCase("denied", AuditOutcome.Denied, "forbidden")]
+    [TestCase("Unauthenticated", AuditOutcome.Denied, "unauthenticated")]
+    [TestCase("Published", AuditOutcome.Denied, "lab_published")]
+    [TestCase("NotFound", AuditOutcome.Failure, "not_found")]
+    [TestCase("not_found", AuditOutcome.Failure, "not_found")]
+    [TestCase("Invalid", AuditOutcome.Failure, "invalid")]
+    public void KnownOutcome_MapsToFixedReasonCode(string outcome, AuditOutcome expected, string? reasonCode)
+    {
+        var draft = LabVisibilityAuditMapping.ToDraft(
+            new LabVisibilityAuditEvent(LabVisibilityActions.KeyRead, LabId, TeacherId.ToString(), outcome, "corr-1"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(draft.Outcome, Is.EqualTo(expected));
+            Assert.That(draft.Details!.TryGetValue("reasonCode", out var reason) ? reason : null, Is.EqualTo(reasonCode));
+        });
+    }
+
+    // Negativni test: ishod koji prolazi stari regex (mala slova, cifre, '_') ali nije poznat
+    // ne prenosi se u reasonCode, jer oblik stringa ne garantuje da u njemu nema poverljivog podatka.
+    [TestCase("secret_answer_42")]
+    [TestCase("SecretAnswer42")]
+    [TestCase("ok")]
+    [TestCase("success")]
+    [TestCase("")]
+    [TestCase(null)]
+    public void UnexpectedOutcome_IsFailureWithFixedCode_AndNeverCopied(string? outcome)
+    {
+        var draft = LabVisibilityAuditMapping.ToDraft(
+            new LabVisibilityAuditEvent(LabVisibilityActions.KeyRead, LabId, TeacherId.ToString(), outcome!, "corr-1"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+            Assert.That(draft.Details!["reasonCode"], Is.EqualTo("unknown_outcome"));
+            Assert.That(JsonSerializer.Serialize(draft), Does.Not.Contain("secret").IgnoreCase);
+        });
+    }
+
+    // Svaka od četiri radnje modula prolazi; ništa drugo.
+    [TestCase(LabVisibilityActions.StudentView)]
+    [TestCase(LabVisibilityActions.Preview)]
+    [TestCase(LabVisibilityActions.KeyRead)]
+    [TestCase(LabVisibilityActions.KeyWrite)]
+    public void KnownAction_IsWritten(string action)
+    {
+        var draft = LabVisibilityAuditMapping.ToDraft(
+            new LabVisibilityAuditEvent(action, LabId, TeacherId.ToString(), "Allow", "corr-1"));
+
+        Assert.That(draft.Details!["action"], Is.EqualTo(action));
+    }
+
+    // Negativni test: nepoznata radnja (i ona koja liči na pravu) ne ide u AUD,
+    // a alarm ne sadrži njen tekst.
+    [TestCase("lab.answers.dump")]
+    [TestCase("lab.key.read.secret_answer_42")]
+    [TestCase("LAB.KEY.READ")]
+    [TestCase(LabVisibilityActions.Entry)]
+    [TestCase("")]
+    public async Task UnknownAction_IsNotWritten_AndAlarmHidesIt(string action)
+    {
+        var audit = provider.GetRequiredService<ILabVisibilityAudit>();
+
+        await audit.WriteAsync(new LabVisibilityAuditEvent(action, LabId, TeacherId.ToString(), "Allow", "corr-1"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(store.Records, Is.Empty);
+            Assert.That(
+                () => LabVisibilityAuditMapping.ToDraft(
+                    new LabVisibilityAuditEvent(action, LabId, TeacherId.ToString(), "Allow", "corr-1")),
+                Throws.ArgumentException);
+            var alarm = logs.Entries.Single(entry => entry.EventId == AuditWriterLabVisibilityAudit.AuditLost.Id);
+            Assert.That(alarm.Message, Does.Contain("UnknownAction"));
+            if (action.Length > 0)
+            {
+                Assert.That(alarm.Message, Does.Not.Contain(action));
+            }
+        });
+    }
+
     // Negativni test: kad AUD ne sačuva zapis, odluka se ne menja, a alarm u logu je bez odgovora.
     [Test]
     public async Task AuditUnavailable_KeepsDecisionAndRaisesAlarmWithoutAnswer()

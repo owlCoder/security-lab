@@ -13,12 +13,46 @@ public static partial class LabVisibilityAuditMapping
     [GeneratedRegex("^[A-Za-z0-9._-]{1,64}$")]
     private static partial Regex ValidCorrelationId();
 
-    [GeneratedRegex("^[a-z][a-z0-9_]{0,31}$")]
-    private static partial Regex ValidReasonCode();
+    // Samo četiri radnje modula idu u AUD. Nepoznata radnja se ne upisuje, ni kao tekst (AUD-03).
+    private static readonly HashSet<string> KnownActions = new(LabVisibilityActions.All, StringComparer.Ordinal);
+
+    // Fiksno mapiranje poznatih ishoda modula na ishod AUD-a i reasonCode.
+    // U zapis nikad ne ide tekst ishoda koji je poslao kod: oblik stringa ne garantuje da ne nosi poverljiv podatak.
+    private static readonly Dictionary<string, (AuditOutcome Outcome, string? ReasonCode)> KnownOutcomes =
+        new(StringComparer.Ordinal)
+        {
+            ["allow"] = (AuditOutcome.Success, null),
+            ["allowed"] = (AuditOutcome.Success, null),
+            ["saved"] = (AuditOutcome.Success, null),
+            ["deny"] = (AuditOutcome.Denied, ReasonCodes.Forbidden),
+            ["denied"] = (AuditOutcome.Denied, ReasonCodes.Forbidden),
+            ["unauthenticated"] = (AuditOutcome.Denied, ReasonCodes.Unauthenticated),
+            ["published"] = (AuditOutcome.Denied, ReasonCodes.LabPublished),
+            ["not_found"] = (AuditOutcome.Failure, ReasonCodes.NotFound),
+            ["invalid"] = (AuditOutcome.Failure, ReasonCodes.Invalid)
+        };
+
+    public static class ReasonCodes
+    {
+        public const string Forbidden = "forbidden";
+        public const string Unauthenticated = "unauthenticated";
+        public const string LabPublished = "lab_published";
+        public const string NotFound = "not_found";
+        public const string Invalid = "invalid";
+        public const string UnknownOutcome = "unknown_outcome";
+    }
+
+    public static bool IsKnownAction(string? action) => action is not null && KnownActions.Contains(action);
 
     public static AuditEventDraft ToDraft(LabVisibilityAuditEvent auditEvent)
     {
         ArgumentNullException.ThrowIfNull(auditEvent);
+
+        if (!IsKnownAction(auditEvent.Action))
+        {
+            // Poruka namerno ne sadrži vrednost radnje.
+            throw new ArgumentException("Unknown LabVisibility action.", nameof(auditEvent));
+        }
 
         var (outcome, reasonCode) = MapOutcome(auditEvent.Outcome);
 
@@ -56,22 +90,12 @@ public static partial class LabVisibilityAuditMapping
         return new AuditContext(actor, NormalizeCorrelationId(auditEvent.CorrelationId));
     }
 
-    // Naši ishodi su ranije bili slobodni stringovi ("Allow", "allowed", "NotFound", "denied"...).
-    // Ovde se svode na tri ishoda AUD modula; sve što nije uspeh ni odbijanje je Failure.
-    private static (AuditOutcome Outcome, string? ReasonCode) MapOutcome(string? outcome)
-    {
-        var code = ToSnakeCase(outcome);
-
-        return code switch
-        {
-            "allow" or "allowed" or "ok" or "saved" or "success" => (AuditOutcome.Success, null),
-            "deny" or "denied" => (AuditOutcome.Denied, "forbidden"),
-            "unauthenticated" => (AuditOutcome.Denied, "unauthenticated"),
-            "published" => (AuditOutcome.Denied, "lab_published"),
-            _ when ValidReasonCode().IsMatch(code) => (AuditOutcome.Failure, code),
-            _ => (AuditOutcome.Failure, "unknown")
-        };
-    }
+    // Ishodi modula su stringovi ("Allow", "allowed", "NotFound", "denied"...). Normalizacija služi
+    // samo za pretragu u fiksnoj tabeli; sve što nije u tabeli je Failure sa unknown_outcome.
+    private static (AuditOutcome Outcome, string? ReasonCode) MapOutcome(string? outcome) =>
+        KnownOutcomes.TryGetValue(ToSnakeCase(outcome), out var mapped)
+            ? mapped
+            : (AuditOutcome.Failure, ReasonCodes.UnknownOutcome);
 
     private static string ToSnakeCase(string? value)
     {

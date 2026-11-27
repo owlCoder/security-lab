@@ -92,6 +92,7 @@ Ključ nikada ne prelazi granicu server–klijent. Nijedan kontroler ne prima `I
 
 - `LabVisibilityAuditEvent` nema polje za sadržaj; zapisuju se samo radnja, laboratorija, akter, ishod i correlation ID (AUD-03).
 - Odbijen zahtev vraća `null`, bez razloga odbijanja i bez informacije da li ključ postoji.
+- Ishodi se u AUD modulu svode na tri vrednosti, po fiksnoj tabeli u `LabVisibilityAuditMapping`: dozvola je `Success`; odbijanje je `Denied` (`forbidden`, `unauthenticated`, `lab_published`); greška je `Failure` (`not_found`, `invalid`). Ishod koji nije u tabeli upisuje se kao `Failure` sa `unknown_outcome`: tekst ishoda iz koda nikad ne ide u zapis, jer oblik stringa ne garantuje da u njemu nema poverljivog podatka. U AUD idu samo četiri radnje iz `LabVisibilityActions.All`; nepoznata radnja se ne upisuje, a alarm `LabVisibilityAuditLost` (status `UnknownAction`) ne ispisuje njen tekst. Zato se `NotFound` posle dozvoljene odluke upisuje kao `Failure` sa `not_found`, a ne kao `Denied`: politika je čitanje već dozvolila, ali ključ za tu laboratoriju ne postoji (još nije unet). `Denied` bi u pregledu audita pogrešno pokazao da je nastavniku ili evaluatoru odbijen pristup. Klijent u oba slučaja dobija isto (`null`), pa ova razlika postoji samo u auditu.
 
 ### Ograničenja
 
@@ -117,7 +118,7 @@ Fajl: `backend/Platform.Tests/LabVisibility/LabVisibilitySkeletonTests.cs` (6 te
 - dupla registracija radnji pada pri pokretanju;
 - korisnik bez članstva nema ulogu na kursu.
 
-Fajl: `backend/Platform.Tests/LabVisibility/LabVisibilityDurableAuditTests.cs` (19 testova)
+Fajl: `backend/Platform.Tests/LabVisibility/LabVisibilityDurableAuditTests.cs` (testovi adaptera i mapiranja)
 
 - sa AUD modulom koristi se trajni audit, bez njega log;
 - nastavnik, student, anoniman korisnik i evaluator dobijaju zapis sa ispravnim akterom (`User`, `Anonymous`, `Service`);
@@ -125,6 +126,13 @@ Fajl: `backend/Platform.Tests/LabVisibility/LabVisibilityDurableAuditTests.cs` (
 - ni zapis ni kontekst ne sadrže tekst odgovora;
 - svaki ishod modula (`Allow`, `Deny`, `NotFound`, `Saved`, `Published`, `Invalid`…) daje zapis koji AUD katalog prihvata;
 - kad AUD nije dostupan, odluka ostaje ista, a alarm u logu ne sadrži odgovor.
+- poznati ishodi daju fiksni `reasonCode`; neočekivan ishod (i onaj koji liči na kod, npr. `secret_answer_42`) daje `unknown_outcome` i nikad se ne kopira;
+- nepoznata radnja se ne upisuje u AUD, a alarm ne sadrži njen tekst.
+
+Fajl: `backend/Platform.Audit.Tests/LabVisibilityAuditPostgresTests.cs` (PostgreSQL, deo `scripts/audit/test-postgres.ps1` u CI-ju)
+
+- stvarni tok `EvaluatorKeyReader` → `AuditWriterLabVisibilityAudit` → registrovani `ITrustedAuditWriter` → PostgreSQL kroz pravi `Platform.Api` host: zapis pročitan iz novog `AuditDbContext`-a ima tačnog aktera (nastavnik `User`, student `User`/`Denied`, evaluator `Service`), radnju `lab.key.read` i correlation ID, a nema sadržaj ključa;
+- nepoznata radnja ne stiže u bazu.
 
 Primer u `backend/Platform.Audit.Tests/AuditDraftExamples.cs` prolazi validator AUD modula i upis u PostgreSQL (`PostgresAuditEventStoreTests`).
 

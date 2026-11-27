@@ -19,6 +19,13 @@ public sealed class AuditWriterLabVisibilityAudit(
     {
         ArgumentNullException.ThrowIfNull(auditEvent);
 
+        // Nepoznata radnja ne ide u AUD; alarm ne ispisuje njen tekst.
+        if (!LabVisibilityAuditMapping.IsKnownAction(auditEvent.Action))
+        {
+            LogLost("UnknownAction", auditEvent, LabVisibilityAuditMapping.ToContext(auditEvent).CorrelationId);
+            return;
+        }
+
         var draft = LabVisibilityAuditMapping.ToDraft(auditEvent);
         var context = LabVisibilityAuditMapping.ToContext(auditEvent);
 
@@ -48,7 +55,7 @@ public sealed class AuditWriterLabVisibilityAudit(
         logger.LogError(
             AuditLost,
             "LabVisibility audit was not saved. Action: {Action}, Lab: {LabId}, Status: {Status}, CorrelationId: {CorrelationId}",
-            auditEvent.Action,
+            LabVisibilityAuditMapping.IsKnownAction(auditEvent.Action) ? auditEvent.Action : "unknown",
             auditEvent.LabId,
             status,
             correlationId);
