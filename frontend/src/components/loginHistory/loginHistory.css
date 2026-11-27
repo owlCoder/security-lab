@@ -1,0 +1,37 @@
+/* IDN-22 TIM 09: styles are scoped to .login-history so other pages stay unchanged. */
+.login-history h1 { margin: 0 0 8px; font-size: 1.5rem; }
+.login-history .login-history-hint { margin: 0 0 20px; font-size: .875rem; color: #5b6b7f; }
+
+.login-history .login-history-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; }
+.login-history .login-history-field { display: grid; gap: 6px; }
+.login-history label { font-size: .9375rem; font-weight: 600; }
+.login-history input[type="date"],
+.login-history select { padding: 8px 10px; border: 1px solid #c7d0db; border-radius: 7px; font: inherit; background: white; }
+
+.login-history .login-history-outcome { display: flex; gap: 14px; margin: 0; padding: 8px 12px; border: 1px solid #c7d0db; border-radius: 7px; }
+.login-history .login-history-outcome legend { padding: 0 4px; font-size: .9375rem; font-weight: 600; }
+.login-history .login-history-outcome label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; }
+
+.login-history .login-history-actions { display: flex; gap: 10px; }
+.login-history .login-history-actions button,
+.login-history .login-history-paging button { margin-top: 0; }
+
+.login-history .login-history-status { min-height: 1.5em; margin: 16px 0 0; color: #5b6b7f; }
+.login-history .login-history-error { margin: 8px 0 0; color: #a12622; font-weight: 600; }
+
+.login-history .login-history-results { margin-top: 12px; overflow-x: auto; }
+.login-history .login-history-table { width: 100%; border-collapse: collapse; }
+.login-history .login-history-table caption { text-align: left; font-weight: 700; padding: 0 0 8px; }
+.login-history .login-history-table th,
+.login-history .login-history-table td { padding: 8px 10px; border-bottom: 1px solid #e1e6ed; text-align: left; }
+.login-history .login-history-succeeded { color: #1d6b3a; }
+.login-history .login-history-failed { color: #a12622; font-weight: 600; }
+.login-history .login-history-empty { margin: 12px 0; }
+
+.login-history .login-history-paging { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.login-history button:disabled { opacity: .5; cursor: not-allowed; }
+
+.login-history select:focus-visible,
+.login-history input[type="radio"]:focus-visible,
+.login-history caption:focus-visible,
+.login-history .login-history-empty:focus-visible { outline: 2px solid #315d8a; outline-offset: 2px; }

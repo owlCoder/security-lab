@@ -10,10 +10,21 @@ public sealed class LabPrerequisiteStoreAdapter : IPrerequisiteRepository
 
     public LabPrerequisiteStoreAdapter(ILabPrerequisiteStore store)
     {
-        _store = store;
+        _store = store ?? throw new ArgumentNullException(nameof(store));
     }
 
-    public async Task<AddPrerequisiteResult> AddAsync(
+    public Task<AddPrerequisiteResult> AddAsync(
+    LabPrerequisite prerequisite,
+    CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(prerequisite);
+
+        return _store.RunInPrerequisiteLockAsync(
+            ct => AddInsideLockAsync(prerequisite, ct),
+            cancellationToken);
+    }
+
+    private async Task<AddPrerequisiteResult> AddInsideLockAsync(
         LabPrerequisite prerequisite,
         CancellationToken cancellationToken = default)
     {

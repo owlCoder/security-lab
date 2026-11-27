@@ -12,5 +12,5 @@ public static class AuthoringActions
     public static readonly IReadOnlyList<string> All = [TemplateList, TemplateCopy];
 
     /// <summary>Resource type used in access requests for a template.</summary>
-    public const string TemplateResourceType = "lab-template";
+    public const string TemplateResourceType = "labtemplate";
 }

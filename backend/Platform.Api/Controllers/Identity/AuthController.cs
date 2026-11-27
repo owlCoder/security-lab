@@ -1,16 +1,17 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Access.AspNet;
+using Platform.Api.Contracts.Identity;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
-using Platform.Api.Models.Identity;
+using Platform.Api.Modules.Identity.RateLimiting;
 using Platform.Api.Services.Identity;
+using Platform.Api.Security.IdentityAccess;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Platform.Api.Controllers.Identity;
 
-// ACC-05: login/logout are reachable without a session and /me checks the session itself,
-// so the strict Access middleware delegates authorization to these handlers.
-[DelegatedAuthorization]
 [ApiController]
 [Route("api/auth")]
 public class AuthController(ILoginService login, ILogoutService logout, IIdentityContext identity) : ControllerBase
@@ -20,6 +21,8 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
     private readonly ILogoutService _logout = logout;
 
     [AllowAnonymous]
+    [RequireAccess(IdentityAccessActions.Login)]
+    [EnableRateLimiting(RateLimitPolicies.Login)]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest body, CancellationToken ct)
     {
@@ -31,7 +34,14 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
             case LoginOutcome.Success:
                 // The token goes only into the cookie, never into the body.
                 Response.Cookies.Append(SessionCookie.Name, result.Session!.Token, SessionCookie.Options(result.Session.ExpiresAt));
-                return Ok(new { userId = result.UserId });
+                // US-15: the CSRF token is bound to the session, so the old one stops working now. Issue one for
+                // the new session at once, so the next request does not start with a 403 and a retry.
+                if (HttpContext.RequestServices?.GetService<IAntiforgery>() is { } antiforgery)
+                {
+                    HttpContext.Items[CsrfSessionBinding.SessionOverrideKey] = result.Session.Token;
+                    CsrfToken.Issue(HttpContext, antiforgery);
+                }
+                return Ok(new LoginResponse(result.UserId!.Value));
             case LoginOutcome.InvalidRequest:
                 return BadRequest(new { code = "invalid_request" });
             case LoginOutcome.Unavailable:
@@ -41,7 +51,21 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
         }
     }
 
+    // US-15: the frontend calls this when the app starts and after a 403 csrf_invalid. The request token is bound
+    // to the session cookie of this request (CsrfSessionBinding), returned and also put in a readable cookie.
     [AllowAnonymous]
+    [RequireAccess(IdentityAccessActions.CsrfToken)]
+    [HttpGet("csrf")]
+    public IActionResult Csrf([FromServices] IAntiforgery antiforgery)
+    {
+        var token = CsrfToken.Issue(HttpContext, antiforgery);
+
+        Response.Headers.CacheControl = "no-store";
+        return Ok(new CsrfTokenResponse(token));
+    }
+
+    [AllowAnonymous]
+    [RequireAccess(IdentityAccessActions.Logout)]
     [HttpPost("logout")]
     public async Task<IActionResult> Logout()
     {
@@ -51,18 +75,21 @@ public class AuthController(ILoginService login, ILogoutService logout, IIdentit
 
         Response.Headers.CacheControl = "no-store";
         Response.Cookies.Delete(SessionCookie.Name, SessionCookie.Options(DateTimeOffset.UnixEpoch));
+        // US-15: the pair belonged to the ended session; the next user of this browser gets a new one.
+        CsrfToken.Clear(Response);
         return NoContent();
     }
 
+    [RequireAccess(IdentityAccessActions.SessionRead)]
     [HttpGet("me")]
     public IActionResult Me()
     {
         var caller = _identity.Current;
 
-        if (caller == null || !caller.IsAuthenticated)
+        if (caller is not { IsAuthenticated: true })
             return Unauthorized();
 
         Response.Headers.CacheControl = "no-store";
-        return Ok(new { userId = caller.UserId, level = caller.Level.ToString() });
+        return Ok(new MeResponse(caller.UserId!.Value, caller.Level.ToString()));
     }
 }

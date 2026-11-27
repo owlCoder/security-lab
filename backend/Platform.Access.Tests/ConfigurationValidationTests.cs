@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Builder;
+using Platform.Access.AspNet;
 using Platform.Access.Application.Options;
 using Platform.Access.Application.Services;
 using Platform.Access.Composition;
@@ -109,9 +111,9 @@ public class ConfigurationValidationTests
     public async Task ACC05_Composition_RegistersAdditionalActionAndPolicyBeforeBuild()
     {
         var services = new ServiceCollection();
-        services.AddAccessControl();
         services.AddAccessAction<RegisteredPolicy>(
             new ActionDefinition("example.read", ActionScope.Authenticated, null, false));
+        services.AddAccessControl();
 
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
@@ -164,8 +166,8 @@ public class ConfigurationValidationTests
         var services = new ServiceCollection();
         services.AddScoped<ScopedDependency>();
         services.AddSingleton<ScopedDependencyPolicy>();
-        services.AddAccessControl();
         services.AddAccessPolicy<ScopedDependencyPolicy>("audit.events.read");
+        services.AddAccessControl();
 
         var exception = Assert.Throws<AggregateException>(
             () => services.BuildServiceProvider(
@@ -239,6 +241,34 @@ public class ConfigurationValidationTests
 
         Assert.That(() => catalog.Register(new ActionDefinition("lab.export", ActionScope.Course, null, false)),
             Throws.InstanceOf<ActionCatalogValidationException>());
+    }
+
+    [Test]
+    public void ACC05_Catalog_RejectsUnknownScope()
+    {
+        var catalog = new InMemoryActionCatalog();
+
+        Assert.That(
+            () => catalog.Register(new ActionDefinition("lab.unknown.scope", ActionScope.Unknown, null, false)),
+            Throws.InstanceOf<ActionCatalogValidationException>());
+    }
+
+    [Test]
+    public void ACC05_Catalog_RejectsInvalidResourceTypeUsingMetadataRules()
+    {
+        var catalog = new InMemoryActionCatalog();
+
+        Assert.That(
+            () => catalog.Register(new ActionDefinition(
+                "lab.invalid.resource",
+                ActionScope.Course,
+                new string('a', 65),
+                false)),
+            Throws.InstanceOf<ActionCatalogValidationException>());
+
+        var app = WebApplication.CreateBuilder().Build();
+        Assert.Throws<ArgumentException>(
+            () => app.MapGet("/a", () => "x").RequireAccess("lab.read", new string('a', 65), "id"));
     }
 
     
@@ -356,9 +386,9 @@ public class ConfigurationValidationTests
 
     
     [Test]
-    public async Task ACC05_Startup_DefaultConfiguration_Succeeds()
+    public async Task ACC05_Startup_WithExplicitPolicyExemptions_Succeeds()
     {
-        await using var provider = BuildProvider(_ => { });
+        await using var provider = BuildProvider(ConfigureCoursePolicyCoverage);
 
         await StartCheckAsync(provider);
     }
@@ -366,7 +396,7 @@ public class ConfigurationValidationTests
     [Test]
     public async Task ACC05_Startup_FreezesActionAndPolicyRegistration()
     {
-        await using var provider = BuildProvider(_ => { });
+        await using var provider = BuildProvider(ConfigureCoursePolicyCoverage);
         await StartCheckAsync(provider);
 
         var catalog = provider.GetRequiredService<InMemoryActionCatalog>();
@@ -467,7 +497,7 @@ public class ConfigurationValidationTests
         services.AddAccessControl();
         services.AddAccessControl();
 
-        Assert.That(services.Count(descriptor => descriptor.ServiceType == typeof(IHostedService)), Is.EqualTo(2));
+        Assert.That(services.Count(descriptor => descriptor.ServiceType == typeof(IHostedService)), Is.EqualTo(1));
     }
 
     private static ServiceProvider BuildProvider(Action<IServiceCollection> configure)
@@ -478,6 +508,23 @@ public class ConfigurationValidationTests
         services.AddAccessControl();
         return services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
+    }
+
+    private static void ConfigureCoursePolicyCoverage(IServiceCollection services)
+    {
+        var actionsWithPolicies = CourseRolePolicies.All
+            .Select(definition => definition.Action.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        var actionsWithoutPolicies = AccessActions.All
+            .Select(definition => definition.Id)
+            .Where(action => !actionsWithPolicies.Contains(action))
+            .ToHashSet(StringComparer.Ordinal);
+
+        services.AddSingleton(new AccessConfigurationOptions
+        {
+            RequirePolicyCoverage = true,
+            ActionsWithoutPolicy = actionsWithoutPolicies
+        });
     }
 
     private static async Task StartCheckAsync(IServiceProvider provider)

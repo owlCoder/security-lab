@@ -45,6 +45,12 @@ public class LabPrerequisiteStoreAdapterTests
 
             return Task.FromResult(result);
         }
+        public Task<T> RunInPrerequisiteLockAsync<T>(
+            Func<CancellationToken, Task<T>> action,
+            CancellationToken ct = default)
+        {
+            return action(ct);
+        }
     }
 
     [Test]
@@ -83,4 +89,51 @@ public class LabPrerequisiteStoreAdapterTests
 
         Assert.That(result, Is.EqualTo(AddPrerequisiteResult.Added));
     }
+
+
+    [Test]
+    public void GetForLaboratoryAsync_StorageFails_DoesNotReturnEmptyList()
+    {
+        var adapter = new LabPrerequisiteStoreAdapter(
+            new FailingPrerequisiteStore());
+
+        Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await adapter.GetForLaboratoryAsync(
+                Guid.NewGuid(),
+                CancellationToken.None));
+    }
+
+    private sealed class FailingPrerequisiteStore : ILabPrerequisiteStore
+    {
+        public Task<IReadOnlyList<Guid>> GetIdsAsync(
+            Guid laboratoryId,
+            CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("Simulated storage failure");
+        }
+
+        public Task AddAsync(
+            Guid laboratoryId,
+            Guid prerequisiteLabId,
+            CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("Simulated storage failure");
+        }
+
+        public Task RemoveAsync(
+            Guid laboratoryId,
+            Guid prerequisiteLabId,
+            CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("Simulated storage failure");
+        }
+
+        public Task<T> RunInPrerequisiteLockAsync<T>(
+            Func<CancellationToken, Task<T>> action,
+            CancellationToken ct = default)
+        {
+            return action(ct);
+        }
+    }
+
 }

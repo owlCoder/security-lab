@@ -35,6 +35,9 @@ public static class AccessEndpointExtensions
         return builder;
     }
 
+    [Obsolete(
+        "Migration required: replace this marker with exactly one RequireAccess(action) and register its policy before AddAccessControl(). The Access middleware rejects delegation metadata; it never grants or bypasses authorization.",
+        false)]
     public static TBuilder DelegateAuthorization<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
     {
@@ -43,6 +46,9 @@ public static class AccessEndpointExtensions
         return builder;
     }
 
+    [Obsolete(
+        "Migration required: replace this marker with RequireAccess(publicAction) and register an explicit policy for that ActionScope.Public action before AddAccessControl(). The Access middleware rejects public metadata; it never grants or bypasses authorization.",
+        false)]
     public static TBuilder AllowPublic<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
     {

@@ -10,15 +10,52 @@ public sealed class StartAttemptService
     private readonly IAttemptStore _attemptStore;
 
     private readonly IStartAttemptAuthorization _authorization;
+    private readonly IGroupMembership _groupMembership;
 
     public StartAttemptService(
         IAssignmentRepository assignmentRepository,
         IAttemptStore attemptStore,
-        IStartAttemptAuthorization authorization)
+        IStartAttemptAuthorization authorization,
+        IGroupMembership groupMembership)
     {
         _assignmentRepository = assignmentRepository;
         _attemptStore = attemptStore;
         _authorization = authorization;
+        _groupMembership = groupMembership;
+    }
+
+    // ASN-05
+    // Runs after IStartAttemptAuthorization has confirmed an active student of the course,
+    // so enrollment is already established here. A group assignment additionally requires
+    // membership in exactly the group stored on the assignment (never a value from the request).
+    // Fail closed: an error in the membership check denies access.
+    private async ValueTask<bool> IsInAssignmentGroupAsync(
+        Assignment assignment,
+        string studentId,
+        CancellationToken cancellationToken)
+    {
+        var isGroupMember = false;
+
+        if (assignment.Scope == AssignmentScope.Group)
+        {
+            try
+            {
+                isGroupMember = await _groupMembership.IsGroupMemberAsync(
+                    studentId,
+                    assignment.CourseId,
+                    assignment.GroupId!,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        return AssignmentGroupPolicy.DecideVisibility(
+            assignment.Scope,
+            isEnrolled: true,
+            isGroupMember).Allowed;
     }
 
     private async ValueTask<Assignment?> LoadAssignmentAsync(
@@ -62,6 +99,16 @@ public sealed class StartAttemptService
             studentId,
             assignment.Id,
             assignment.CourseId,
+            cancellationToken))
+        {
+            throw new UnauthorizedAccessException("Access denied.");
+        }
+
+        // ASN-05: a student of another group gets the same denial as any unauthorized caller,
+        // before availability or the attempt limit are revealed.
+        if (!await IsInAssignmentGroupAsync(
+            assignment,
+            studentId,
             cancellationToken))
         {
             throw new UnauthorizedAccessException("Access denied.");
