@@ -1,7 +1,7 @@
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
-using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
+using Platform.Identity.Services.Sessions;
 
 namespace Platform.Api.Services.Identity;
 
@@ -19,7 +19,7 @@ public sealed class SessionIdentityContext : IIdentityContext
     {
         get
         {
-            var session = _httpContextAccessor.HttpContext?.Items[SessionCheckMiddleware.SessionItemKey] as ValidateSession;
+            var session = _httpContextAccessor.HttpContext?.Items[SessionHttpContextItems.Session] as ValidateSession;
 
             if (session == null)
                 return null;
