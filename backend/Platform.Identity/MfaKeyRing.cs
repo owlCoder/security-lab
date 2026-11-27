@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -111,11 +113,54 @@ public static class MfaKeyRingRegistration
             return $"{MfaKeyRingOptions.Section}:KeysPath holds a key file that cannot be read, for example after a " +
                    "restore with another file owner. Data Protection needs every key to decrypt stored secrets.";
 
+        // A key written before the certificate was set (KeysPath alone, as in #232) keeps its master key in plain
+        // text, and Data Protection goes on using it until it expires instead of writing an encrypted one.
+        if (!EveryKeyIsCertificateEncrypted(options.KeysPath!))
+            return $"{MfaKeyRingOptions.Section}:KeysPath holds a key that is not encrypted with a certificate, for " +
+                   "example one written before CertificatePath was set. Start from an empty KeysPath; secrets " +
+                   "stored with the old key have to be enrolled again.";
+
         if (!CanWrite(options.KeysPath!))
             return $"{MfaKeyRingOptions.Section}:KeysPath is not writable. Data Protection writes the first key " +
                    "on first use and a new key about every 90 days.";
 
         return null;
+    }
+
+    /// <summary>
+    /// Every <c>&lt;key&gt;</c> file has its secret in an <c>encryptedSecret</c> made by the certificate
+    /// (<c>EncryptedXmlDecryptor</c>) and no plain <c>masterKey</c>. Revocation files hold no secret and are skipped.
+    /// A file that is not valid XML counts as not encrypted.
+    /// </summary>
+    private static bool EveryKeyIsCertificateEncrypted(string directory)
+    {
+        var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(directory, "*.xml"))
+            {
+                XDocument document;
+                using (var reader = XmlReader.Create(file, settings))
+                    document = XDocument.Load(reader);
+
+                if (document.Root?.Name.LocalName != "key")
+                    continue;
+
+                var elements = document.Root.Descendants().ToList();
+                var plainMasterKey = elements.Any(e => e.Name.LocalName == "masterKey");
+                var encryptedByCertificate = elements.Any(e =>
+                    e.Name.LocalName == "encryptedSecret"
+                    && ((string?)e.Attribute("decryptorType"))?.Contains("EncryptedXmlDecryptor", StringComparison.Ordinal) == true);
+                if (plainMasterKey || !encryptedByCertificate)
+                    return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is XmlException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static bool CanRead(string directory)
