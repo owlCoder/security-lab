@@ -92,15 +92,7 @@ public sealed class CourseService : ICourseService
 
         await _audit.RecordAsync("course.create", course.Id, AuditOutcome.Success, cancellationToken);
 
-        return new CourseDto(
-            course.Id,
-            course.Code,
-            course.Name,
-            course.Description,
-            course.Status.ToString(),
-            course.CreatedAt,
-            course.ArchivedAt
-        );
+        return ToDto(course);
     }
 
     public async Task<Result> ArchiveAsync(
@@ -149,11 +141,11 @@ public sealed class CourseService : ICourseService
 
         return Result.Success();
     }
+
     public async Task<Result<CourseDto>> GetCourseAsync(
         Guid courseId,
         CancellationToken cancellationToken = default)
     {
-        // 1. Authentication
         if (!_actor.IsAuthenticated ||
             _actor.UserId is not Guid userId ||
             userId == Guid.Empty)
@@ -161,41 +153,28 @@ public sealed class CourseService : ICourseService
             return Error.Unauthorized("Sign in first.");
         }
 
-        // 2. Authorization
-        // Do not reveal whether a forbidden course exists.
+        // Same answer as a missing course, a denial must not show the course exists
         if (!await _authorization.CanViewAsync(
                 userId, courseId, cancellationToken))
         {
             return Error.NotFound("Course not found.");
         }
 
-        // 3. Read the course
         var course = await _context.Courses
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                c => c.Id == courseId,
+                course => course.Id == courseId,
                 cancellationToken);
 
         if (course is null)
             return Error.NotFound("Course not found.");
 
-        // 4. Return DTO
-        return new CourseDto(
-            course.Id,
-            course.Code,
-            course.Name,
-            course.Description,
-            course.Status.ToString(),
-            course.CreatedAt,
-            course.ArchivedAt
-        );
+        return ToDto(course);
     }
-
 
     public async Task<Result<IReadOnlyList<CourseDto>>> GetCoursesAsync(
         CancellationToken cancellationToken = default)
     {
-        // 1. Authentication
         if (!_actor.IsAuthenticated ||
             _actor.UserId is not Guid userId ||
             userId == Guid.Empty)
@@ -203,34 +182,35 @@ public sealed class CourseService : ICourseService
             return Error.Unauthorized("Sign in first.");
         }
 
-        // 2. Read courses sorted by code
+        // Archived courses stay in the list, ACC-01 keeps their history readable
         var courses = await _context.Courses
             .AsNoTracking()
             .OrderBy(course => course.Code)
             .ToListAsync(cancellationToken);
 
-        // 3. Include only courses the caller is allowed to view
-        var visibleCourses = new List<CourseDto>();
+        // ICourseAuthorization answers per course. Once the ACC-03 role adapter exists this
+        // filter belongs in the query, see "Remaining integration work" in the ACC-01 doc.
+        var visible = new List<CourseDto>(courses.Count);
 
         foreach (var course in courses)
         {
-            if (!await _authorization.CanViewAsync(
+            if (await _authorization.CanViewAsync(
                     userId, course.Id, cancellationToken))
             {
-                continue;
+                visible.Add(ToDto(course));
             }
-
-            visibleCourses.Add(new CourseDto(
-                course.Id,
-                course.Code,
-                course.Name,
-                course.Description,
-                course.Status.ToString(),
-                course.CreatedAt,
-                course.ArchivedAt
-            ));
         }
 
-        return Result<IReadOnlyList<CourseDto>>.Success(visibleCourses);
+        return Result<IReadOnlyList<CourseDto>>.Success(visible);
     }
+
+    private static CourseDto ToDto(Course course) =>
+        new(
+            course.Id,
+            course.Code,
+            course.Name,
+            course.Description,
+            course.Status.ToString(),
+            course.CreatedAt,
+            course.ArchivedAt);
 }

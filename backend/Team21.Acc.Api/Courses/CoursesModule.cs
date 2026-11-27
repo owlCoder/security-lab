@@ -13,6 +13,7 @@ public static class CoursesModule
         this IServiceCollection services)
     {
         services.AddScoped<ICourseService, CourseService>();
+        services.AddScoped<ICourseEnrollmentPolicy, CourseEnrollmentPolicy>();
 
         services.AddScoped<ICourseAuthorization>(provider =>
         {

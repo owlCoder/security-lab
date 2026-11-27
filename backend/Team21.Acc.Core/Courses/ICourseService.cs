@@ -1,4 +1,3 @@
-
 using Team21.Acc.Core.Common;
 
 namespace Team21.Acc.Core.Courses;
