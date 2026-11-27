@@ -5,6 +5,7 @@
 // Frontend nije bezbednosna granica: server proverava prava i validira unos.
 // Ovde se odgovori servera samo prevode u poruke za korisnika.
 
+import { csrfFetch } from '../auth/csrf'
 import { fakeLabContentResponse } from './fakeLabContent'
 
 /** Putanja iz LAB-01 kostura u main grani. Timski plan pominje /api/labs; ako se to usvoji, menja se samo ova linija. */
@@ -136,7 +137,7 @@ export async function toFailure(res: Response): Promise<ApiFailure> {
 export async function createLab(title: string, user: TestUser): Promise<CreateLabOutcome> {
   let res: Response
   try {
-    res = await fetch(`${LABS_BASE_PATH}/`, {
+    res = await csrfFetch(`${LABS_BASE_PATH}/`, {
       method: 'POST',
       headers: headersFor(user, true),
       credentials: 'same-origin',

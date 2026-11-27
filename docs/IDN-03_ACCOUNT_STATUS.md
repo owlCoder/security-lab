@@ -82,8 +82,9 @@ flowchart LR
   P4 -->|"200 / 404 / 409 / 503"| A
 ```
 
-Order of checks: authenticated, then administrator, then status value valid, then not self-change, then account exists, then not the same status.
+Order of checks: CSRF token (US-15, only for a valid session), then authenticated, then administrator, then status value valid, then not self-change, then account exists, then not the same status.
 Authorization comes before the account lookup on purpose, so a non-administrator cannot learn which accounts exist.
+The CSRF check comes first of all, before the session check and Access (see [`IDN-02_CSRF.md`](components/identity/IDN-02_CSRF.md)). A request with a valid session but without a valid `X-CSRF-TOKEN` gets `403` with the body `{ "code": "csrf_invalid" }`, not Access's `403` `ProblemDetails`, for every account id, so it reveals nothing about accounts either. A request with a revoked, expired or unknown session is not refused by the CSRF check and still gets `401`. A refused CSRF request is written to the application log with its correlation ID, not to Audit.
 
 ## Security requirements
 
@@ -97,6 +98,8 @@ Authorization comes before the account lookup on purpose, so a non-administrator
 
 |Misuse|Control|Test|
 |-|-|-|
+|Forged request (no valid CSRF token) with an administrator's session|`403 csrf_invalid` before every other check, nothing changes, the session is not extended|`AdminStatusChange_WithoutToken_IsRefused_AndChangesNoStatusOrSession`, `RefusedRequest_DoesNotExtendTheSession` (`CsrfProtectionIntegrationTests`)|
+|Forged request with a non-administrator's session|`403 csrf_invalid`, the same answer for an existing and an unknown account|`NonAdminStatusChange_WithoutToken_GetsTheSameAnswerForAnExistingAndAnUnknownAccount`|
 |Student or non-admin blocks an account|403, nothing changes, denial audited|`Student_IsForbidden_NothingChanges_DenialIsAudited`, `Student_CannotChangeStatus_NothingChanges_DenialIsAudited` (integration)|
 |Request without a caller|401, nothing changes|`Anonymous_IsUnauthenticated_NothingChanges_DenialIsAuditedWithoutActor`|
 |Invalid or numeric status|strict parsing, 400|`InvalidStatusValue_IsRejected_NothingChanges` (7 cases)|

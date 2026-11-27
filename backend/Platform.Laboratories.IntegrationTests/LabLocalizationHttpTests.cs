@@ -27,6 +27,7 @@ using Platform.LaboratoryPersistence.Infrastructure.Persistence;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Testcontainers.PostgreSql;
+using Platform.Identity.Testing;
 
 namespace Platform.Laboratories.IntegrationTests;
 
@@ -484,7 +485,7 @@ public sealed class LabLocalizationHttpTests
 
     private HttpClient Client(string token)
     {
-        var client = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        var client = host.CreateCsrfClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={token}");
         return client;
     }

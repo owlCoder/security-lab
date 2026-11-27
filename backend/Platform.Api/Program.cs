@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Security.AccessAudit;
@@ -9,6 +10,7 @@ using Platform.Api.Modules.Administration.Api;
 
 using Platform.Api.Modules.Access.Api;
 using Platform.Api.Modules.RevisionReviews;
+using Platform.Api.Modules.SessionSecurity;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 
@@ -121,6 +123,18 @@ builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddSessionExpiry(builder.Configuration);
 builder.Services.AddControllers();
+// US-15 / SEC-03: antiforgery makes and checks the CSRF token pair. AuthController writes the cookie itself with
+// Secure always on (CsrfToken.Options), so SameAsRequest only keeps antiforgery from refusing plain HTTP in dev and tests.
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = CsrfToken.HeaderName;
+    options.Cookie.Name = CsrfToken.CookieName;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    // The token is read only from X-CSRF-TOKEN. The check runs before the ADM-08 body size limit and every other
+    // module limit, so antiforgery must never read (buffer) a form body to look for the token there.
+    options.SuppressReadingTokenFromFormBody = true;
+});
+builder.Services.AddSingleton<IAntiforgeryAdditionalDataProvider, CsrfSessionBinding>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
@@ -173,6 +187,7 @@ builder.Services.AddScoped<IdentityAuditProducer>();
 // IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
 builder.Services.AddIdentityAuthenticationAccess();
 builder.Services.AddIdentitySessionAccess();
+builder.Services.AddSessionSecurity();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -257,6 +272,10 @@ app.UseRouting();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
+// US-15 / SEC-03: right after routing and correlation, before session checks, Access, rate limiting, audit and
+// authentication, so a refused request has no side effect (US-14: the session is not extended). The token is bound
+// to the session cookie (CsrfSessionBinding), not to HttpContext.User.
+app.UseMiddleware<CsrfProtectionMiddleware>();
 if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 // Preserve KT1's non-enumerating public denial contract using the same central decider.
 if (kt1Enabled) app.UseMiddleware<Kt1AccessContractMiddleware>();

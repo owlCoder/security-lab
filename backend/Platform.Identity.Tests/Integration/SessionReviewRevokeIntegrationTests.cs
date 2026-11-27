@@ -16,6 +16,7 @@ using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -251,7 +252,7 @@ public class SessionReviewRevokeIntegrationTests : IntegrationTestBase
     // Helpers
 
     private static HttpClient NewClient(WebApplicationFactory<Program> factory) =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        factory.CreateCsrfClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
 
     private static async Task SetLastActivityAsync(Guid sessionId, DateTimeOffset lastActivityAt)
     {

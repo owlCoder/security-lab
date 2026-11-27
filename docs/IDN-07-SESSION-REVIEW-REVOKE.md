@@ -21,6 +21,7 @@
   - The next request that carries a revoked or expired session is rejected by `SessionCheckMiddleware` with `401` and the stable code `session_invalid`. The rejected cookie is cleared and the response is `no-store`. This holds for the revoked session itself too, so revoking the current session ends it immediately.
   - Revoking one session leaves the user's other sessions valid.
   - 401 and 403 stay separate: no valid session is `401`, a valid session without permission is `403`. A session that was revoked gets `401` on the next request, not `403`, even on a permission-checked route.
+  - Since US-15 there are two kinds of `403`, with different bodies. A valid session without permission gets Access's `403` (`ProblemDetails`). A state-changing request (`DELETE /api/auth/sessions/{handle}`) with a valid session but without a valid CSRF token gets `403` with `{ "code": "csrf_invalid" }`, before the session check and Access, and before any handle is looked up, so it cannot probe for other sessions. A revoked or expired session without a token still gets `401 session_invalid` (cookie cleared), because the CSRF check leaves requests without a valid session to the session check. See [`IDN-02_CSRF.md`](components/identity/IDN-02_CSRF.md).
 
 - Contracts with other modules:
 
@@ -161,6 +162,8 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   | Request with an unknown token | `401 session_invalid`, cookie cleared | `ProtectedRoute_WithUnknownToken_Returns401SessionInvalid_AndClearsTheCookie` |
   | Valid session without permission | `403` (Access `ProblemDetails`), nothing changed, session stays valid | `ProtectedRoute_ValidSessionWithoutPermission_Returns403_AndChangesNothing` |
   | Revoked session is used again | `401 session_invalid` on the next request (not `403`), cookie cleared | `RevokedSession_Gets401OnTheNextRequest_WhilePermissionDenialStays403` |
+  | Revoked or expired session, revoke request without a CSRF token | `401 session_invalid` (not `403 csrf_invalid`), cookie cleared | `InvalidSession_WithoutToken_GetsSessionInvalid_NotTheCsrfAnswer` (`CsrfProtectionIntegrationTests`, 2 cases) |
+  | Forged revoke request (valid session, no CSRF token) | `403 csrf_invalid`, no session is revoked, the caller's session is not extended | `CsrfAttack_RevokeWithSessionCookieButNoToken_Returns403_AndTheSessionStaysValid`, `RefusedRequest_DoesNotExtendTheSession` |
   | User revokes another of their sessions | `204`; the revoked one is refused at once, the caller's session stays valid | `RevokeOtherSession_RejectsItImmediately_AndKeepsTheCallersSessionValid` |
   | User revokes the session they are using | `204`; the same cookie is refused on the next request | `RevokeCurrentSession_RejectsTheSameCookieOnTheNextRequest` |
   | Revoke with another user's handle (IDOR, SEC-01) | `404 session_not_found`, same body as an unknown handle, nothing revoked | `RevokeSessionOfAnotherUser_Returns404_IndistinguishableFromUnknown_AndRevokesNothing` |

@@ -1,4 +1,5 @@
 
+import { csrfFetch } from '../auth/csrf'
 import type { Course, CreateCourseRequest } from '../types/course'
 
 const API_URL = '/api/courses'
@@ -65,7 +66,7 @@ export async function getCourse(id: string): Promise<Course> {
 export async function createCourse(
   request: CreateCourseRequest,
 ): Promise<Course> {
-  const response = await fetch(API_URL, {
+  const response = await csrfFetch(API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -81,7 +82,7 @@ export async function createCourse(
 
 // POST /api/courses/{id}/archive
 export async function archiveCourse(id: string): Promise<void> {
-  const response = await fetch(
+  const response = await csrfFetch(
     `${API_URL}/${encodeURIComponent(id)}/archive`,
     {
       method: 'POST',

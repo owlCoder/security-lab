@@ -19,6 +19,7 @@ using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -89,7 +90,7 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
             builder.UseSetting("RateLimiting:AccountStatusChange:PermitLimit", "2");
             builder.UseSetting("RateLimiting:AccountStatusChange:WindowSeconds", "60");
         });
-        using var client = limited.CreateClient();
+        using var client = limited.CreateCsrfClient();
 
         async Task<HttpResponseMessage> PutAsync(string status)
         {
@@ -127,7 +128,7 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
             services.RemoveAll<ITransactionalAuditWriter>();
             services.AddSingleton<ITransactionalAuditWriter>(new UnavailableAuditWriter(failurePoint));
         }));
-        using var client = failing.CreateClient();
+        using var client = failing.CreateCsrfClient();
         using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(student.Id))
         {
             Content = JsonContent.Create(new { status = "BLOCKED" })
@@ -158,7 +159,7 @@ public class AccountStatusChangeIntegrationTests : IntegrationTestBase
             services.RemoveAll<ITrustedAuditWriter>();
             services.AddScoped<ITrustedAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
         }));
-        using var client = audited.CreateClient();
+        using var client = audited.CreateCsrfClient();
         using var request = new HttpRequestMessage(HttpMethod.Put, StatusUrl(other.Id))
         {
             Content = JsonContent.Create(new { status = "BLOCKED" })

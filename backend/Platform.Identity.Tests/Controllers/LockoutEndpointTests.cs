@@ -18,6 +18,7 @@ using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
 using Platform.Api.Services.Identity;
 using Testcontainers.PostgreSql;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Controllers;
 
@@ -182,9 +183,12 @@ public sealed class LockoutEndpointTests
         LoginFromAsync(string remoteIp, string email, string password)
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { email, password }));
+        using var tokenClient = _factory.CreateClient();
+        var csrf = await CsrfPair.FetchAsync(tokenClient);
         var context = await _factory.Server.SendAsync(http =>
         {
             http.Request.Method = HttpMethods.Post;
+            csrf.ApplyTo(http.Request);
             http.Request.Path = "/api/auth/login";
             http.Connection.RemoteIpAddress = IPAddress.Parse(remoteIp);
             http.Request.ContentType = "application/json";
@@ -200,7 +204,7 @@ public sealed class LockoutEndpointTests
     private async Task<(HttpStatusCode Status, string? ContentType, string? CacheControl, string Body)> LoginAsync(
         string email, string password)
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateCsrfClient();
         using var response = await client.PostAsJsonAsync("/api/auth/login", new { email, password });
         return (
             response.StatusCode,

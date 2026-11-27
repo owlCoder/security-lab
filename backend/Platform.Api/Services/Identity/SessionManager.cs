@@ -51,7 +51,15 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
         return true;
     }
 
-    public async Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default)
+    public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) =>
+        CheckAsync(token, recordActivity: true, ct);
+
+    // US-15: the CSRF check asks whether the session is valid before it refuses a request. A refused request must
+    // not count as activity (US-14 inactivity), so this runs the same checks without Touch.
+    public Task<ValidateSession?> PeekAsync(string token, CancellationToken ct = default) =>
+        CheckAsync(token, recordActivity: false, ct);
+
+    private async Task<ValidateSession?> CheckAsync(string token, bool recordActivity, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
 
@@ -94,15 +102,18 @@ public sealed class SessionManager(PlatformIdentityDbContext db,IOptions<Session
             .SingleOrDefaultAsync(ct);
         if (status != AccountStatus.Active) return null;
 
-        session.Touch(now);
-        try
+        if (recordActivity)
         {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            db.Entry(session).State = EntityState.Detached;
-            return null;
+            session.Touch(now);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                db.Entry(session).State = EntityState.Detached;
+                return null;
+            }
         }
 
         var level = session.AuthLevel switch

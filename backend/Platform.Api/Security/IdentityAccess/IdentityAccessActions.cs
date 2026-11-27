@@ -15,6 +15,9 @@ public static class IdentityAccessActions
     public const string Logout = "identity.logout";
     public const string SessionRead = "identity.session.read";
 
+    /// <summary>US-15: anyone, signed in or not, gets a CSRF token (<c>GET /api/auth/csrf</c>); login needs one too.</summary>
+    public const string CsrfToken = "identity.csrf.token";
+
     /// <summary>IDN-07: the caller lists their own active sessions (<c>GET /api/auth/sessions</c>).</summary>
     public const string SessionList = "identity.session.list";
 
