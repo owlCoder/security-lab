@@ -24,7 +24,9 @@ public enum AuditPresence
 /// <param name="OnlyForOutcomes">Outcomes with which the field may appear, or null for all.</param>
 public sealed record AuditDetailField(
     AuditDetailFormat Format,
-    IReadOnlySet<AuditOutcome>? OnlyForOutcomes = null);
+    IReadOnlySet<AuditOutcome>? OnlyForOutcomes = null,
+    IReadOnlySet<AuditOutcome>? RequiredForOutcomes = null,
+    IReadOnlyDictionary<AuditOutcome, IReadOnlySet<string>>? AllowedValuesByOutcome = null);
 
 public enum AuditDetailFormat
 {

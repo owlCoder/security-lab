@@ -277,6 +277,9 @@ Cookie: SecurityLab.Session=<mfa-pending-session>
   (i briše brojač i lockout), opoziv `MfaPending` sesije (neopozvane, neistekle), nova `Active` sesija sa novim
   tokenom i handle-om (`StoreSessionCreator.Lifetime`) i audit zapis. Odgovor postavlja cookie nove sesije, pa
   cookie iz vremena pre drugog faktora posle toga dobija `401` (IDN-11, zaštita od session fixation).
+  CSRF token je vezan za sesiju (US-15, `CsrfSessionBinding`), pa odgovor izdaje i novi token za novu sesiju,
+  kao login. Token `MfaPending` sesije posle toga dobija `403 csrf_invalid`
+  (`Verification_ValidCode_IssuesACsrfTokenForTheNewSession_AndTheOldTokenIsRejected`).
   Paralelni zahtev sa istim kodom čeka zaključan red, ponovo proverava `WHERE` i ne menja ništa.
 
 ## 8. Testovi
@@ -292,7 +295,7 @@ US-17 negativni testovi pokrivaju:
 - neispravan Data Protection ciphertext;
 - odsustvo tajne u audit događajima.
 
-US-18 i audit testovi (`MfaServiceTests` i PostgreSQL testovi u `backend/Platform.Identity.Tests/Integration/Mfa/`) pokrivaju i:
+US-18 i audit testovi (unit testovi u `backend/Platform.Identity.Tests/Services/Mfa/` i PostgreSQL testovi u `backend/Platform.Identity.Tests/Integration/Mfa/`) pokrivaju i:
 
 - nova `Active` sesija posle uspeha, uz opozvanu pending sesiju i odbijen stari cookie
   (`Verification_ValidCode_*`);
@@ -337,3 +340,12 @@ Administratorsko otključavanje (IDN-05, `POST /api/admin/accounts/{id}/unlock`)
 (`lockout_end` i brojač u `identity.accounts`). `mfa_failed_attempts` i `mfa_locked_until` ostaju, pa nalog
 zaključan samo na MFA koraku dobija `409 account_not_locked` i čeka istek `Identity:Mfa:Lockout:LockoutMinutes`.
 Skidanje MFA lockout-a pri otključavanju i test u `AccountUnlockIntegrationTests` pripadaju IDN-05.
+
+Za `mfa/enroll` i `mfa/enroll/confirm` dovoljna je `Active` sesija; lozinka se ne traži ponovo (step-up).
+Ko ima ukraden session cookie može da uključi MFA sa svojim authenticator-om, a vlasnik pri sledećoj prijavi
+ne prolazi drugi faktor. Izlaz iz tog stanja su recovery kodovi (US-31) i administratorski MFA reset (US-32),
+koji nisu deo US-17. Step-up sa lozinkom, uz brojanje pogrešne lozinke u lockout (IDN-05) i novi razlog u
+Audit katalogu, opisan je u #252.
+
+Rok `MfaPending` sesije nije deo US-18: ovde je isti kao za `Active` sesiju (`StoreSessionCreator.Lifetime`).
+Poseban, kraći rok za `MfaPending` je kriterijum US-14 (#224).

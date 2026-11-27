@@ -113,13 +113,13 @@ The cookie token and its hash, passwords, and password hashes are not included i
 
 - IDN-06 mandatory MFA for selected groups (US-19) is not implemented: MFA is opt-in.
 - `SessionCheckMiddleware` validates the session but does not enforce authentication level itself; endpoint authorization is the central ACC-05 middleware (`RequireAccess`).
-- No explicit anti-CSRF token validation is implemented. SameSite Strict is configured on the cookie but should not be treated as a complete substitute for a CSRF control.
+- CSRF (SEC-03) is in US-15: every state-changing request needs a token bound to the session, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md).
 - The session lifetime is currently an eight-hour absolute lifetime; configurable lifetime and inactivity expiration are not implemented.
 - `ISessionManager.RevokeAllForUser` accepts `reason` but currently does not use or audit it.
 
 ## Test evidence and local verification
 
-Identity tests cover login, logout, credential checking, session validation and middleware behavior, identity mapping (including `MfaPending` being unauthenticated) and MFA (`MfaServiceTests`; the PostgreSQL tests in `Integration/Mfa/`: enrollment, verification, lockout, audit, writes racing a block or revocation, and the end-to-end flow). Tests are in `backend/Platform.Identity.Tests`.
+Identity tests cover login, logout, credential checking, session validation and middleware behavior, identity mapping (including `MfaPending` being unauthenticated) and MFA (unit tests of `MfaService` in `Services/Mfa/`: enroll, confirm, verify, lockout and audit; the PostgreSQL tests in `Integration/Mfa/`: enrollment, verification, lockout, audit, writes racing a block or revocation, and the end-to-end flow). Tests are in `backend/Platform.Identity.Tests`.
 
 From the repository root:
 
@@ -131,6 +131,5 @@ dotnet test backend\Platform.Identity.Tests\Platform.Identity.Tests.csproj
 ## Next steps
 
 1. Implement the mandatory MFA policy for selected groups (US-19).
-2. Add explicit CSRF controls where required by SEC-03.
-3. Align session lifetime and inactivity behavior with US-14.
-4. Keep this document and the contract docs synchronized with code and tests.
+2. Align session lifetime and inactivity behavior with US-14.
+3. Keep this document and the contract docs synchronized with code and tests.

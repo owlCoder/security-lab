@@ -28,6 +28,7 @@ using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 using Platform.LaboratoryPersistence.Infrastructure.Persistence;
 using Testcontainers.PostgreSql;
+using Platform.Identity.Testing;
 
 namespace Platform.Laboratories.IntegrationTests;
 
@@ -334,7 +335,7 @@ public sealed partial class RevisionHttpWorkflowTests
 
     private HttpClient Client(string token)
     {
-        var client = host.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+        var client = host.CreateCsrfClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
         client.DefaultRequestHeaders.Add("Cookie", $"{SessionCookie.Name}={token}");
         return client;
     }

@@ -1,9 +1,12 @@
-using System.Net;
 using System.Net.Http.Json;
+using System.Net;
+using Microsoft.AspNetCore.Mvc.Testing;
 using OtpNet;
 using Platform.Api.Contracts.Identity;
+using Platform.Api.Services.Identity;
 using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
+using Platform.Identity.Testing;
 using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Integration.Mfa;
@@ -97,6 +100,42 @@ public sealed class MfaVerificationIntegrationTests : MfaIntegrationTestBase
         // Assert
         Assert.That(me.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
         Assert.That(sessions.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    // US-15 and IDN-11: the CSRF token is bound to the session, and verify replaces the session, so verify issues
+    // a token for the new session. The token of the pending session is refused afterwards.
+    [Test]
+    [Category("US-18")]
+    [Category("US-15")]
+    public async Task Verification_ValidCode_IssuesACsrfTokenForTheNewSession_AndTheOldTokenIsRejected()
+    {
+        // Arrange
+        var secret = TotpHelpers.GenerateSecret();
+        var user = await UserTestData.AddAsync(Factory, "mfa-verify-csrf@platform.com", Password);
+        await MfaTestData.AddEnabledAsync(Factory, user.Id, secret);
+        var pending = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
+        using var browser = Factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        var pendingPair = await CsrfPair.FetchAsync(browser, pending.RawToken);
+        using var verifyRequest = new HttpRequestMessage(HttpMethod.Post, "/api/auth/mfa/verify")
+        {
+            Content = JsonContent.Create(new { Code = MfaTestData.CurrentCode(secret) })
+        };
+        pendingPair.ApplyTo(verifyRequest, pending.RawToken);
+
+        // Act
+        var verify = await browser.SendAsync(verifyRequest);
+        var activeToken = SessionTokenFrom(verify);
+        var activePair = pendingPair with { Token = ReadableCsrfTokenFrom(verify) };
+        var withNewToken = await EnrollWithAsync(browser, activeToken, activePair);
+        var withOldToken = await EnrollWithAsync(browser, activeToken, pendingPair);
+
+        // Assert
+        Assert.That(verify.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(activePair.Token, Is.Not.EqualTo(pendingPair.Token));
+        // MFA is already enabled, so a request that passes the CSRF check ends in 409.
+        Assert.That(withNewToken.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        Assert.That(withOldToken.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(await withOldToken.Content.ReadAsStringAsync(), Does.Contain(CsrfToken.InvalidCode));
     }
 
     [Test]
@@ -228,5 +267,20 @@ public sealed class MfaVerificationIntegrationTests : MfaIntegrationTestBase
         var response = await Client.PostAsJsonAsync("/api/auth/mfa/verify", new { Code = "123456" });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    private static string ReadableCsrfTokenFrom(HttpResponseMessage response)
+    {
+        var cookie = response.Headers.GetValues("Set-Cookie")
+            .Single(value => value.StartsWith(CsrfToken.ReadableCookieName + "=", StringComparison.Ordinal))
+            .Split(';')[0];
+        return Uri.UnescapeDataString(cookie[(cookie.IndexOf('=') + 1)..]);
+    }
+
+    private static async Task<HttpResponseMessage> EnrollWithAsync(HttpClient client, string sessionToken, CsrfPair pair)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/mfa/enroll");
+        pair.ApplyTo(request, sessionToken);
+        return await client.SendAsync(request);
     }
 }

@@ -18,7 +18,7 @@ Responses carry `Cache-Control: no-store`.
 1. `LogoutController` passes the cookie value to `LogoutAccount`.
 2. `LogoutAccount` calls `ISessionStore.RevokeByTokenAsync`, which sets `revoked_at` in `identity.sessions`. Only this session is revoked. Other sessions of the same user stay valid. An expired session is left unchanged.
 3. An audit event `auth.logout` is written to the Audit module (through `IdentityAuditProducer`) only when this request revoked the session, with the session's user as the actor and no resource (the catalog forbids one). `revoked_at` is a concurrency token, so of two logouts at the same time (double click, two tabs) only one succeeds and the first time is kept. The event never contains the token or its hash.
-4. The cookie is cleared with the same attributes it was set with (`SessionCookie.Options`).
+4. The cookie is cleared with the same attributes it was set with (`SessionCookie.Options`). Both CSRF cookies are removed too, because their token belonged to the ended session (US-15).
 
 The revocation does not use the request cancellation token, so a closed tab or a broken connection cannot leave the session valid.
 
@@ -27,7 +27,7 @@ The endpoint is `[AllowAnonymous]`, so logout without a valid session stays idem
 ## Known limitations
 
 - The check that the old cookie gets `401` was run by hand on a real database. An automated HTTP test is still missing (US-13).
-- No CSRF token (US-15) yet. Logout accepts only `POST` and the cookie is `SameSite=Strict`.
+- Logout needs no CSRF token: it is the documented exception of US-15, so a stale token never keeps a session alive. It accepts only `POST` and the cookie is `SameSite=Strict`. See [`IDN-02_CSRF.md`](./IDN-02_CSRF.md).
 - There is no logout button yet (US-08).
 
 ## Tests

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Platform.Access.AspNet;
@@ -39,6 +40,13 @@ public class AuthController(
             case LoginOutcome.Success:
                 // The token goes only into the cookie, never into the body.
                 Response.Cookies.Append(SessionCookie.Name, result.Session!.Token, SessionCookie.Options(result.Session.ExpiresAt));
+                // US-15: the CSRF token is bound to the session, so the old one stops working now. Issue one for
+                // the new session at once, so the next request does not start with a 403 and a retry.
+                if (HttpContext.RequestServices?.GetService<IAntiforgery>() is { } antiforgery)
+                {
+                    HttpContext.Items[CsrfSessionBinding.SessionOverrideKey] = result.Session.Token;
+                    CsrfToken.Issue(HttpContext, antiforgery);
+                }
                 return Ok(new LoginResponse(result.UserId!.Value, result.MfaRequired));
             case LoginOutcome.InvalidRequest:
                 return BadRequest(new { code = "invalid_request" });
@@ -47,6 +55,19 @@ public class AuthController(
             default:
                 return Unauthorized(new { code = "invalid_credentials" });
         }
+    }
+
+    // US-15: the frontend calls this when the app starts and after a 403 csrf_invalid. The request token is bound
+    // to the session cookie of this request (CsrfSessionBinding), returned and also put in a readable cookie.
+    [AllowAnonymous]
+    [RequireAccess(IdentityAccessActions.CsrfToken)]
+    [HttpGet("csrf")]
+    public IActionResult Csrf([FromServices] IAntiforgery antiforgery)
+    {
+        var token = CsrfToken.Issue(HttpContext, antiforgery);
+
+        Response.Headers.CacheControl = "no-store";
+        return Ok(new CsrfTokenResponse(token));
     }
 
     [AllowAnonymous]
@@ -60,6 +81,8 @@ public class AuthController(
 
         Response.Headers.CacheControl = "no-store";
         Response.Cookies.Delete(SessionCookie.Name, SessionCookie.Options(DateTimeOffset.UnixEpoch));
+        // US-15: the pair belonged to the ended session; the next user of this browser gets a new one.
+        CsrfToken.Clear(Response);
         return NoContent();
     }
 
@@ -120,6 +143,13 @@ public class AuthController(
         {
             // IDN-11: the pending session is revoked, so the cookie gets the token of the new active session.
             Response.Cookies.Append(SessionCookie.Name, session!.Token, SessionCookie.Options(session.ExpiresAt));
+            // US-15: the CSRF token is bound to the session, so the one of the pending session stops working now.
+            // Issue one for the new session at once, as Login does, so the next request does not get a 403.
+            if (HttpContext.RequestServices?.GetService<IAntiforgery>() is { } antiforgery)
+            {
+                HttpContext.Items[CsrfSessionBinding.SessionOverrideKey] = session.Token;
+                CsrfToken.Issue(HttpContext, antiforgery);
+            }
             return Ok();
         }
 

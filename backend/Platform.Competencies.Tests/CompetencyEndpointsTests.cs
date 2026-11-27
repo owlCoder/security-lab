@@ -33,6 +33,7 @@ using Platform.LabVisibility.Domain;
 using Platform.LabVisibility.Infrastructure.Membership;
 using AccountStatus = Platform.Identity.Enums.AccountStatus;
 using CourseRole = Platform.LabVisibility.Contracts.CourseRole;
+using Platform.Identity.Testing;
 
 namespace Platform.Competencies.Tests;
 
@@ -63,7 +64,7 @@ public sealed class CompetencyEndpointsTests
     public void AllCompetencyRoutes_RequireExactlyOneRegisteredEntryActionWithoutLegacyMarkers(string environment)
     {
         using var factory = new Prg04Factory(environment);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
             .Where(endpoint => endpoint.RoutePattern.RawText is { } route &&
@@ -104,7 +105,7 @@ public sealed class CompetencyEndpointsTests
     public async Task EntryAction_HasAuthenticatedScopeAndPolicyThatRejectsInvalidSubjectsAndRequests(string environment)
     {
         using var factory = new Prg04Factory(environment);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         var actions = factory.Services.GetRequiredService<IActionCatalog>();
         var policies = factory.Services.GetRequiredService<IAccessPolicyRegistry>();
         Assert.That(actions.TryGet(CompetencyLinkActions.Entry, out var action), Is.True);
@@ -138,7 +139,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory(environment, hideEntryPolicy: true);
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         int laboratoryReads = factory.Laboratories.ReadCalls;
         int contentReads = factory.PublicContent.ReadCalls;
         using var response = await Send(client, method, path, "teacher");
@@ -163,7 +164,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory(environment);
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var before = await Send(client, "GET", CompetencyEndpoints.CatalogPath, "teacher");
         Assert.That(before.StatusCode, Is.EqualTo(HttpStatusCode.OK));
 
@@ -200,7 +201,7 @@ public sealed class CompetencyEndpointsTests
     public async Task UnauthenticatedRequest_DeniesBeforeCompetencyStorage(string method, string? token)
     {
         using var factory = new Prg04Factory();
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, method, method == "GET" ? Links(LabId) : Link(LabId), token);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
@@ -216,7 +217,7 @@ public sealed class CompetencyEndpointsTests
     public async Task DevelopmentHeadersWithoutSession_DoNotAuthenticatePrg04(string method, bool catalog)
     {
         using var factory = new Prg04Factory("Development");
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var request = Request(method,
             catalog ? CompetencyEndpoints.CatalogPath : method == "GET" ? Links(LabId) : Link(LabId), token: null);
         request.Headers.Add("X-Test-User", $"{Teacher:D}:Teacher");
@@ -235,7 +236,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory(hideManagePolicy: true);
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, method, Link(LabId), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
@@ -250,7 +251,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory(environment);
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var catalogResponse = await Send(client, "GET", "/api/competencies", "teacher");
         using var linksResponse = await Send(client, "GET", Links(LabId), "teacher");
 
@@ -272,7 +273,7 @@ public sealed class CompetencyEndpointsTests
         using var factory = new Prg04Factory(environment);
         factory.Store.Seed(LabId, SecondCompetencyId);
         factory.Store.Seed(ForeignLabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
 
         using var first = await Send(client, "PUT", Link(LabId), "teacher");
         using var repeat = await Send(client, "PUT", Link(LabId), "teacher");
@@ -295,7 +296,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory();
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var read = await Send(client, "GET", Links(LabId), "student");
         using var denied = await Send(client, method, Link(LabId), "student");
 
@@ -313,7 +314,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory(hideManagePolicy: true);
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, "GET", Links(LabId), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -330,7 +331,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory();
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var firstRead = await Send(client, "GET", Links(LabId), "teacher");
         Assert.That(firstRead.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That((await firstRead.Content.ReadFromJsonAsync<LaboratoryCompetenciesResponse>())!.CanManage, Is.True);
@@ -350,7 +351,7 @@ public sealed class CompetencyEndpointsTests
     public async Task TwoCompetencies_CanBeAddedReadAndRemovedIndependentlyThroughHttp()
     {
         using var factory = new Prg04Factory();
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var first = await Send(client, "PUT", Link(LabId), "teacher");
         using var second = await Send(client, "PUT", Link(LabId, SecondCompetencyId), "teacher");
         using var read = await Send(client, "GET", Links(LabId), "student");
@@ -389,7 +390,7 @@ public sealed class CompetencyEndpointsTests
         if (scenario == "archived-laboratory")
             await factory.Laboratories.UpdateAsync(Laboratory.Rehydrate(
                 LabId, Course, "Archived lab", LabStatus.Archived, Teacher, DateTimeOffset.UtcNow));
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, "GET", Links(LabId), "student");
         using var missing = await Send(client, "GET", Links(MissingLabId), "student");
 
@@ -406,7 +407,7 @@ public sealed class CompetencyEndpointsTests
         using var factory = new Prg04Factory();
         factory.PublicContent.Content = null;
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, "GET", Links(LabId), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -426,7 +427,7 @@ public sealed class CompetencyEndpointsTests
         Guid targetLab = otherCourse ? ForeignLabId : OtherLabId;
         factory.Store.Seed(targetLab, CompetencyId);
         factory.Store.Seed(MissingLabId, CompetencyId); // Orphan data must not make the lab visible.
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         string existingPath = method == "GET" ? Links(targetLab) : Link(targetLab);
         string missingPath = method == "GET" ? Links(MissingLabId) : Link(MissingLabId);
         using var existing = await Send(client, method, existingPath, "teacher");
@@ -448,7 +449,7 @@ public sealed class CompetencyEndpointsTests
         using var factory = new Prg04Factory();
         factory.Membership.Set(Course, Teacher, CourseRole.Student);
         factory.Store.Seed(LabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, method, Link(LabId), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
@@ -463,7 +464,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory();
         factory.Store.Seed(LegacyLabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, method, method == "GET" ? Links(LegacyLabId) : Link(LegacyLabId), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
@@ -476,7 +477,7 @@ public sealed class CompetencyEndpointsTests
     public async Task UnknownCompetency_IsRejectedBeforeMutation(string method)
     {
         using var factory = new Prg04Factory();
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, method, Link(LabId, Guid.NewGuid()), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
@@ -491,7 +492,7 @@ public sealed class CompetencyEndpointsTests
     {
         using var factory = new Prg04Factory();
         factory.Store.Seed(ForeignLabId, CompetencyId);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         string path = Link(ForeignLabId) + $"?courseId={Course:D}&createdBy={Teacher:D}&userId={ForeignTeacher:D}";
         using var request = Request(method, path, "teacher");
         request.Headers.Add("X-Test-User", $"{ForeignTeacher:D}:Teacher");
@@ -507,7 +508,7 @@ public sealed class CompetencyEndpointsTests
     public async Task ChangingMembershipAfterSuccessfulEdit_IsCheckedOnTheNextRequest()
     {
         using var factory = new Prg04Factory();
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var first = await Send(client, "PUT", Link(LabId), "teacher");
         Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Created));
         factory.Membership.Set(Course, Teacher, CourseRole.None);
@@ -523,7 +524,7 @@ public sealed class CompetencyEndpointsTests
     public async Task AuthenticatedCaller_Gets503WhenCompetencyPersistenceIsNotConfigured()
     {
         using var factory = new Prg04Factory(includeCompetencyStores: false);
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, "GET", "/api/competencies", "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
@@ -534,7 +535,7 @@ public sealed class CompetencyEndpointsTests
     public async Task EmptyCompetencyId_IsRejectedWithoutMutation(string method)
     {
         using var factory = new Prg04Factory();
-        using var client = factory.CreateClient();
+        using var client = factory.CreateCsrfClient();
         using var response = await Send(client, method, Link(LabId, Guid.Empty), "teacher");
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));

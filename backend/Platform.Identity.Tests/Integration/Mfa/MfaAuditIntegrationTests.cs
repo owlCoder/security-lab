@@ -1,13 +1,16 @@
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Moq;
 using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration.Mfa;
 
@@ -24,7 +27,7 @@ public sealed class MfaAuditIntegrationTests : MfaIntegrationTestBase
         await MfaTestData.AddPendingAsync(Factory, user.Id, secret, DateTimeOffset.UtcNow.AddMinutes(5));
         var session = await SessionTestData.CreateAsync(Factory, user.Id);
         using var failing = WithUnavailableTransactionalAudit();
-        using var client = failing.CreateClient();
+        using var client = failing.CreateCsrfClient();
 
         var response = await PostWithSessionAsync(
             "/api/auth/mfa/enroll/confirm", session.RawToken, new { Code = MfaTestData.CurrentCode(secret) }, client);
@@ -45,7 +48,7 @@ public sealed class MfaAuditIntegrationTests : MfaIntegrationTestBase
         await MfaTestData.AddEnabledAsync(Factory, user.Id, secret);
         var session = await SessionTestData.CreateAsync(Factory, user.Id, AuthLevel.MfaPending);
         using var failing = WithUnavailableTransactionalAudit();
-        using var client = failing.CreateClient();
+        using var client = failing.CreateCsrfClient();
 
         var response = await PostWithSessionAsync(
             "/api/auth/mfa/verify", session.RawToken, new { Code = MfaTestData.CurrentCode(secret) }, client);
@@ -90,10 +93,18 @@ public sealed class MfaAuditIntegrationTests : MfaIntegrationTestBase
         }
     }
 
-    private static WebApplicationFactory<Program> WithUnavailableTransactionalAudit() =>
-        Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+    // The transactional Audit writer never records, so the change has no record and must not be committed.
+    private static WebApplicationFactory<Program> WithUnavailableTransactionalAudit()
+    {
+        var audit = new Mock<ITransactionalAuditWriter>(MockBehavior.Strict);
+        audit.Setup(writer => writer.WriteAsync(
+                It.IsAny<AuditEventDraft>(), It.IsAny<AuditContext>(), It.IsAny<DbTransaction>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AuditWriteResult.Unavailable());
+        return Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<ITransactionalAuditWriter>();
-            services.AddSingleton<ITransactionalAuditWriter, UnavailableTransactionalAuditWriter>();
+            services.AddSingleton(audit.Object);
         }));
+    }
 }
