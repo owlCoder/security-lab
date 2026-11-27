@@ -156,7 +156,12 @@ sa application name-om `SecurityLab` i `ITotpSecretProtector`.
 | `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu, a u Development-u i `.env` ili user-secrets; nikad u repozitorijumu (ADM-04) |
 
 Ključ na disku ne sadrži master key u čistom obliku, nego `encryptedSecret` šifrovan sertifikatom. Kopija
-`KeysPath`-a i baze bez PFX-a ne otvara tajne.
+`KeysPath`-a i baze bez PFX-a ne otvara tajne. To važi i za ključeve koji su već u `KeysPath`: ključ upisan pre
+nego što je podešen sertifikat (samo `KeysPath`, kako je bilo u #232) zaustavlja start, jer bi ga Data Protection
+inače koristio do isteka, oko 90 dana, umesto da napravi šifrovan.
+
+**Prelazak sa #232 (samo `KeysPath`).** Isprazniti `KeysPath` pre prvog starta sa sertifikatom. Tajne sačuvane
+starim ključem više se ne mogu pročitati, pa ti nalozi ponovo prolaze MFA enrollment.
 
 **Provera pri startu.** Van Development okruženja (`Production`, `Staging`, `Testing`) `KeysPath` i
 `CertificatePath` su obavezni. API se ne pokreće u ovim slučajevima, a poruka greške ne sadrži lozinku ni sadržaj
@@ -172,6 +177,7 @@ ključa:
 | `KeysPath` ne može da se napravi | `AddMfaKeyRing_KeysPathThatCannotBeCreated_Throws` |
 | `KeysPath` postoji, ali nije čitljiv ili upisiv | `AddMfaKeyRing_ExistingKeysPathWithoutReadAccess_Throws`, `..._WithoutWriteAccess_Throws` |
 | postojeći ključ (`*.xml`) nije čitljiv, npr. posle restore-a sa drugim vlasnikom fajlova | `AddMfaKeyRing_ExistingKeyFileWithoutReadAccess_Throws` |
+| postojeći ključ nije šifrovan sertifikatom (`masterKey` u čistom obliku) ili nije ispravan XML | `AddMfaKeyRing_KeyWrittenWithoutCertificate_Throws`, `AddMfaKeyRing_KeyFileThatIsNotXml_Throws` |
 
 Pozitivni slučajevi: `ApiHost_InProductionWithKeyRing_StartsAndWritesEncryptedKeys` (pravi host u `Production`-u
 sa ispravnim podešavanjem se pokreće i piše ključ u `KeysPath`),
@@ -185,10 +191,13 @@ sa ispravnim podešavanjem se pokreće i piše ključ u `KeysPath`),
 - U Development okruženju bez podešavanja koristi se podrazumevani lokalni key ring frameworka.
 - Data Protection loguje putanju fajla kad upisuje nov ključ (`FileSystemXmlRepository`, nivo Information).
   Putanja nije tajna, pa se taj log ne filtrira; ne sadrži sadržaj ključa ni lozinku.
-- Test hostovi koji rade kao `Production` ili `Testing` uključuju test key ring preko `UseMfaTestKeyRing()`
-  (`backend/TestShared/MfaTestKeyRing.cs`): direktorijum i self-signed PFX u temp folderu, jedan po test procesu,
-  obrisan na kraju procesa. Folder koji ostane posle prekinutog procesa briše sledeće pokretanje kad je stariji
-  od jednog dana.
+- Test hostovi ne podešavaju ništa. `backend/Directory.Build.props` ubacuje `backend/TestShared/MfaTestKeyRing.cs`
+  u svaki projekat čije ime se završava na `Tests`, a njegov `[ModuleInitializer]` jednom po test procesu, pre
+  bilo kog hosta, postavlja `Identity__DataProtection__*` environment varijable: direktorijum i self-signed PFX u
+  temp folderu, obrisane na kraju procesa. Folder koji ostane posle prekinutog procesa briše sledeće pokretanje
+  kad je stariji od jednog dana. Već postavljene varijable se ne menjaju. Zato i novi host drugog tima, u
+  `Production` ili `Testing` okruženju, radi bez izmena (`MfaKeyRingTests.TestProcess_HasTheSharedTestKeyRing`).
+  Test koji proverava start bez key ring-a gazi te varijable praznim vrednostima preko `UseSetting`.
 - Živa HTTPS demonstracija (`Platform.Coursework.Demo`, `LiveApiProcess`) pokreće pravi API kao `Production`
   proces, pa pravi sopstveni PFX i `KeysPath` u svom privatnom direktorijumu. Oni preživljavaju restart API-ja
   i brišu se zajedno sa tim direktorijumom.
