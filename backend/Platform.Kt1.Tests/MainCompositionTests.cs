@@ -54,11 +54,16 @@ public class MainCompositionTests
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Kt1-Demo", "1");
         Assert.That((await client.PostAsync("/api/kt1/session/admin", null)).StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        Assert.That((await client.PostAsJsonAsync("/api/admin/accounts", new
-        {
-            email = "integration@example.invalid",
-            password = "Synthetic!Password42"
-        })).StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+        // This target branch rejects the account endpoint's legacy metadata before
+        // identity resolution. Compare to the same endpoint without KT1 enabled:
+        // a synthetic cookie must not change that module's own current contract.
+        using var baseline = new Kt1Factory(enabled: false);
+        using var anonymous = baseline.CreateClient();
+        var input = new { email = "integration@example.invalid", password = "Synthetic!Password42" };
+        var expected = await anonymous.PostAsJsonAsync("/api/admin/accounts", input);
+        Assert.That(expected.StatusCode, Is.AnyOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden));
+        var actual = await client.PostAsJsonAsync("/api/admin/accounts", input);
+        Assert.That(actual.StatusCode, Is.EqualTo(expected.StatusCode));
     }
 
     [Test]

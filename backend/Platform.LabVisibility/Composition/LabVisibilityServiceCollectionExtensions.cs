@@ -1,9 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Platform.Access.Composition;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.Infrastructure.Catalog;
-using Platform.Access.Infrastructure.Policies;
 using Platform.LabVisibility.Application.EvaluatorKeys;
 using Platform.LabVisibility.Application.Preview;
 using Platform.LabVisibility.Application.StudentView;
@@ -12,6 +11,7 @@ using Platform.LabVisibility.Infrastructure.Auditing;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Persistence;
 using Platform.LabVisibility.Infrastructure.Policies;
+using Platform.LabVisibility.Infrastructure.Publication;
 
 namespace Platform.LabVisibility.Composition;
 
@@ -66,52 +66,61 @@ public static class LabVisibilityServiceCollectionExtensions
         // AUT-07: pregled pre objave (Cvetojević)
         services.AddScoped<PreviewStudentView>();
 
+        // KT2 ugovori (docs/contracts/LabVisibility-KT2.md):
+        // upis ključa (Gajić, kartica 5) i stanje objave od AUT-01/REV (stub do njihovog adaptera).
+        services.AddScoped<ISaveEvaluatorKey, SaveEvaluatorKey>();
+        services.AddSingleton<StubLabPublicationSource>();
+        services.AddSingleton<ILabPublicationSource>(
+            sp => sp.GetRequiredService<StubLabPublicationSource>());
+
         return services;
     }
 
-    public static IServiceProvider RegisterLabVisibilityAccess(
-        this IServiceProvider services)
+    // #185 (strogi ACC-05): katalog i politike se zamrzavaju u AddAccessControl(), pa se LabVisibility
+    // radnje prijavljuju pre toga. Istu metodu koriste Program.cs i testovi (kao AddRevisionAccessPolicies, #192).
+    public static IServiceCollection AddLabVisibilityAccess(
+        this IServiceCollection services)
     {
-        var catalog = services.GetRequiredService<InMemoryActionCatalog>();
+        // Ulazna radnja na HTTP rutama /student-view i /preview: middleware traži samo aktivnu sesiju.
+        services.AddAccessAction<LabVisibilityEntryPolicy>(
+            new ActionDefinition(
+                LabVisibilityActions.Entry,
+                ActionScope.Authenticated,
+                null,
+                false));
 
-        foreach (var action in LabVisibilityActions.All)
-        {
-            var scope = ActionScope.Authenticated;
-            string? resourceType = null;
-            var requiresResource = false;
+        // AUT-04: studentski prikaz objavljene laboratorije (Stojanović).
+        services.AddAccessAction<StudentViewPolicy>(
+            new ActionDefinition(
+                LabVisibilityActions.StudentView,
+                ActionScope.Course,
+                "lab",
+                false));
 
-            // lab.key.read, lab.student-view i lab.preview (AUT-07) nose resurs "lab" (labId iz rute).
-            if (action == LabVisibilityActions.KeyRead ||
-                action == LabVisibilityActions.StudentView ||
-                action == LabVisibilityActions.Preview)
-            {
-                scope = ActionScope.Course;
-                resourceType = "lab";
-                requiresResource = true;
-            }
+        // AUT-07: pregled pre objave samo za nastavnika kursa (Cvetojević).
+        services.AddAccessAction<LabPreviewPolicy>(
+            new ActionDefinition(
+                LabVisibilityActions.Preview,
+                ActionScope.Course,
+                "lab",
+                false));
 
-            catalog.Register(new ActionDefinition(
-                action,
-                scope,
-                resourceType,
-                requiresResource));
-        }
+        // AUT-04: evaluator ključ (Kovačević).
+        services.AddAccessAction<EvaluatorKeyPolicy>(
+            new ActionDefinition(
+                LabVisibilityActions.KeyRead,
+                ActionScope.Course,
+                "lab",
+                true));
 
-        var policies = services.GetRequiredService<InMemoryAccessPolicyRegistry>();
-
-        policies.Register(
-            LabVisibilityActions.KeyRead,
-            ActivatorUtilities.CreateInstance<EvaluatorKeyPolicy>(services));
-
-        policies.Register(
-            LabVisibilityActions.StudentView,
-            ActivatorUtilities.CreateInstance<StudentViewPolicy>(services));
-
-        // AUT-07: pregled pre objave samo za nastavnika kursa (Cvetojević)
-        policies.Register(
-            LabVisibilityActions.Preview,
-            ActivatorUtilities.CreateInstance<LabPreviewPolicy>(services));
+        // KT2: upis evaluator ključa (Gajić, kartica 5). Do tada politika odbija sve.
+        services.AddAccessAction<EvaluatorKeyWritePolicy>(
+            new ActionDefinition(
+                LabVisibilityActions.KeyWrite,
+                ActionScope.Course,
+                "lab",
+                true));
 
         return services;
     }
-}
+}

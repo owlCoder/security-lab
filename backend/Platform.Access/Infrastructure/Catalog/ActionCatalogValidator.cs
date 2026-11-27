@@ -16,7 +16,13 @@ internal static class ActionCatalogValidator
                 $"Action '{definition.Id}' has an invalid ActionId format.");
         }
 
-        if (definition.ResourceType is not null && !IsValidResourceType(definition.ResourceType))
+        if (definition.Scope == ActionScope.Unknown || !Enum.IsDefined(definition.Scope))
+        {
+            throw new ActionCatalogValidationException(
+                $"Action '{definition.Id}' has an invalid scope.");
+        }
+
+        if (definition.ResourceType is not null && !ResourceType.IsValid(definition.ResourceType))
         {
             throw new ActionCatalogValidationException(
                 $"Action '{definition.Id}' has an invalid resource type.");
@@ -77,11 +83,4 @@ internal static class ActionCatalogValidator
         }
     }
 
-    private static bool IsValidResourceType(string value) =>
-        value.Length is > 0 and <= 64 &&
-        value[0] is >= 'a' and <= 'z' &&
-        value.All(character =>
-            character is >= 'a' and <= 'z' ||
-            character is >= '0' and <= '9' ||
-            character == '-');
 }

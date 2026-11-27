@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Data.Common;
+using Laboratory = Platform.Api.Modules.Laboratories.Domain.Laboratory;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Api.Modules.Laboratories.Application;
@@ -22,23 +24,36 @@ public sealed class DraftRevisionService(
         if (labId == Guid.Empty || courseId == Guid.Empty)
             return ReviewService.Error(400, "invalid_input");
 
+        Laboratory? laboratory;
+        try
+        {
+            laboratory = await laboratories.GetByIdAsync(labId, ct);
+        }
+        catch (DbException)
+        {
+            return ReviewService.Error(503, "laboratory_unavailable");
+        }
+        catch (TimeoutException)
+        {
+            return ReviewService.Error(503, "laboratory_unavailable");
+        }
+        if (laboratory is null || laboratory.CreatedBy != actor ||
+            laboratory.CourseId == Guid.Empty || laboratory.CourseId != courseId)
+            return ReviewService.Error(404, "not_found");
+
         var decision = await access.DecideAsync(new AccessRequest(subject, CreateAction,
-            new ResourceRef("course", courseId.ToString("D")), traceId), ct);
+            new ResourceRef("course", laboratory.CourseId.ToString("D")), traceId), ct);
         if (decision.Outcome != AccessOutcome.Allow)
             return ReviewService.Error(403, "forbidden");
 
-        var laboratory = await laboratories.GetByIdAsync(labId, ct);
-        if (laboratory is null || laboratory.CreatedBy != actor)
-            return ReviewService.Error(404, "not_found");
-
         await using var db = await contexts.CreateDbContextAsync(ct);
-        if (!await db.CoursePublishPolicies.AnyAsync(value => value.CourseId == courseId, ct))
+        if (!await db.CoursePublishPolicies.AnyAsync(value => value.CourseId == laboratory.CourseId, ct))
             return ReviewService.Error(409, "policy_missing");
 
         var content = definition.Serialize();
         var hash = (RevisionContentHash.ComputationResult.Success)RevisionContentHash.Compute(content);
         var id = Guid.NewGuid();
-        var revision = (LabRevision.CreationResult.Success)LabRevision.Create(id, courseId, actor, hash.Value);
+        var revision = (LabRevision.CreationResult.Success)LabRevision.Create(id, laboratory.CourseId, actor, hash.Value);
         db.LabRevisions.Add(revision.Value);
         db.ReviewDefinitions.Add(new ReviewDefinition(id, labId, content, clock.GetUtcNow().ToUniversalTime()));
         await db.SaveChangesAsync(ct);

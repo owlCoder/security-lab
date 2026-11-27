@@ -70,7 +70,7 @@ flowchart LR
 
 The middleware places a `ValidateSession` in `HttpContext.Items`; `SessionIdentityContext` maps it to `CallerIdentity`. `IsAuthenticated` is true only for `Active`. Middleware accepts a valid `MfaPending` session as a validated session and does not apply endpoint-specific MFA policy.
 
-`Program.cs` registers a single `ISessionManager`, `SessionManager`. The older `StoreSessionManager` stub (no-op list/revocation) is no longer registered. `SessionManager.ValidateAsync` refuses a session whose account is not `Active`, so a blocked or archived account is refused on its very next request (IDN-03, SEC-03).
+`Program.cs` registers a single `ISessionManager`, `SessionManager`. The older `StoreSessionManager` stub (no-op list/revocation) has been deleted. `SessionManager.ValidateAsync` refuses a session whose account is not `Active`, so a blocked or archived account is refused on its very next request (IDN-03, SEC-03).
 
 ## Data flow and trust boundary
 
@@ -99,7 +99,6 @@ The cookie token and its hash, passwords, and password hashes are not included i
 
 - IDN-06 MFA policy, enrollment, verification, TOTP storage, and routing of `MfaPending` sessions to MFA-only endpoints are not implemented. Current successful login sessions are `Active`.
 - `SessionCheckMiddleware` validates the session but does not enforce authentication level or endpoint authorization. Consumers must check `IIdentityContext.Current` and `IsAuthenticated`; it is not a global default-deny authorization policy.
-- No explicit anti-CSRF token validation is implemented. SameSite Strict is configured on the cookie but should not be treated as a complete substitute for a CSRF control.
 - The session lifetime is currently an eight-hour absolute lifetime; configurable lifetime and inactivity expiration are not implemented.
 - `ISessionManager.RevokeAllForUser` accepts `reason` but currently does not use or audit it.
 - The IDN-03 account repository is in-memory; its account status changes are not persisted across application restarts.
@@ -120,6 +119,6 @@ dotnet test backend\Platform.Identity.Tests\Platform.Identity.Tests.csproj
 
 1. Confirm account-status persistence with IDN-03.
 2. Implement IDN-06 MFA policy, enrollment, verification, and endpoint restrictions before claiming MFA protection.
-3. Add explicit authorization/CSRF controls where required by ACC-05 and SEC-03.
+3. Add explicit authorization controls where required by ACC-05. CSRF (SEC-03) is done in US-15, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md).
 4. Align session lifetime and inactivity behavior with US-14.
 5. Keep this document and the contract docs synchronized with code and tests.

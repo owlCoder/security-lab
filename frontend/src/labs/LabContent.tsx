@@ -11,6 +11,7 @@ export default function LabContent({ lab }: LabContentProps) {
     <article>
       <h2>{lab.title}</h2>
       <p>{lab.goal}</p>
+      <a href={`/laboratories/${encodeURIComponent(lab.labId)}/competencies`}>Prikaži kompetencije laboratorije</a>
 
       {tasks.length === 0 && <p>Laboratorija trenutno nema zadataka.</p>}
 

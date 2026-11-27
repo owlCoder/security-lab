@@ -2,12 +2,14 @@
 using Platform.Api.Services.Identity;
 using Platform.LabVisibility.Application.StudentView;
 using Platform.Access.AspNet;
+using Platform.LabVisibility.Contracts;
 
 namespace Platform.Api.Controllers.LabVisibility;
 
 [ApiController]
 [Route("api/labs")]
-[DelegatedAuthorization]
+// #185: middleware proverava aktivnu sesiju; GetStudentLabView zatim pita StudentViewPolicy.
+[RequireAccess(LabVisibilityActions.Entry)]
 public sealed class StudentLabViewController(LabCaller labCaller, GetStudentLabView getStudentLabView) : ControllerBase
 {
     [HttpGet("{id:guid}/student-view")]

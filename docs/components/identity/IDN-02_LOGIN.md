@@ -12,8 +12,9 @@
 | Wrong password, unknown e-mail, account without password, blocked or archived account | `401` | `{ "code": "invalid_credentials" }` (identical for all of them) | none |
 | Missing, empty or too long input (e-mail over 320, password over 128 characters), or not valid JSON | `400` | `{ "code": "invalid_request" }` (invalid JSON gets the standard ASP.NET problem details) | none |
 | Session could not be stored (database error) | `503` | `{ "code": "login_unavailable" }` | none |
+| No valid CSRF token in `X-CSRF-TOKEN` (US-15, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md)) | `403` | `{ "code": "csrf_invalid" }` | none |
 
-Cookie `SecurityLab.Session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, expires with the session. The session token is **never** in the response body. Responses carry `Cache-Control: no-store`.
+Cookie `SecurityLab.Session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, expires with the session. The session token is **never** in the response body. A successful login also sets a new readable CSRF token `__Host-SecurityLab.CsrfToken` for the new session, because the CSRF token is bound to the session (US-15). Responses carry `Cache-Control: no-store`.
 
 ```
 curl -i -X POST https://localhost:5080/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"student@example.com\",\"password\":\"<password>\"}"
@@ -38,7 +39,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 | Story | What it needs from this change |
 |-|-|
 | US-03 session store | Done. `StoreSessionCreator` connects login to `ISessionStore`. The two level enums have different numeric values, so `StoreSessionCreator` maps them by name. |
-| US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions; `StoreSessionManager.ValidateAsync` refuses them. |
+| US-05 logout, US-06 session check | Use `SessionCookie.Name` and `SessionCookie.Options(...)` so the cookie name and attributes stay in one place. Logout must clear the cookie with the same attributes and revoke with `ISessionStore.RevokeByTokenAsync`. `ISessionStore.FindByTokenAsync` also returns revoked and expired sessions; `SessionManager.ValidateAsync` refuses them. |
 | US-07, US-08 frontend | Send the request with credentials included. Read only the status code and `code`; show one generic message for `401`. |
 | US-09 seed users | Done. `DevelopmentAccountSeeder` seeds four accounts into `identity.accounts` with a BCrypt hash and lower-case e-mails (see [`DEVELOPMENT.md`](../../DEVELOPMENT.md)). |
 | IDN-03 | Done. Login reads the status from `identity.accounts`, and `PUT /api/admin/accounts/{id}/status` writes to the same table (`EfAccountStatusStore`), so a blocked or archived account cannot log in. Blocking also revokes its sessions in the same transaction. See [`IDN-03_ACCOUNT_STATUS.md`](../../IDN-03_ACCOUNT_STATUS.md). |
@@ -46,7 +47,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 
 ## Known limitations
 
-- No CSRF token (US-15) yet. Per-account lockout (IDN-05) is in `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md).
+- Per-account lockout (IDN-05) is in `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md).
 - No MFA: every successful login is `Active` until an MFA policy (IDN-06, US-12) exists.
 - No registration (IDN-01): accounts exist only through seeding or direct database work.
 - The login does not revoke a session that was sent with the request.

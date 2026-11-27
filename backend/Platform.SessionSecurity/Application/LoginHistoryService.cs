@@ -16,12 +16,6 @@ namespace Platform.SessionSecurity.Application;
 public sealed class LoginHistoryService(ILoginHistorySource source, TimeProvider timeProvider)
     : ISearchLoginHistoryUseCase
 {
-    private readonly ILoginHistorySource _source =
-        source ?? throw new ArgumentNullException(nameof(source));
-
-    private readonly TimeProvider _timeProvider =
-        timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
-
     public async ValueTask<LoginHistoryResult> SearchAsync(
         AuthenticatedSubject? subject,
         SearchLoginHistoryQuery? query,
@@ -38,14 +32,14 @@ public sealed class LoginHistoryService(ILoginHistorySource source, TimeProvider
         }
 
         var validation = LoginHistoryQueryValidator.Validate(
-            query.FromUtc, query.ToUtc, query.Outcome, query.Page, query.PageSize, _timeProvider.GetUtcNow());
+            query.FromUtc, query.ToUtc, query.Outcome, query.Page, query.PageSize, timeProvider.GetUtcNow());
 
         if (validation.Window is not { } window)
         {
             return LoginHistoryResult.Rejected(validation.Code);
         }
 
-        var events = await _source.FindAsync(
+        var events = await source.FindAsync(
             subject.SubjectId,
             window.FromUtc,
             window.ToUtc,

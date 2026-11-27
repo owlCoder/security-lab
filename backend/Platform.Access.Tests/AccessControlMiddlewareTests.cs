@@ -6,9 +6,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using Platform.Access.AspNet;
+using Platform.Access.Application.Options;
 using Platform.Access.Contracts;
+using Platform.Access.Domain.Constants;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 
@@ -18,6 +21,28 @@ namespace Platform.Access.Tests.AspNet;
 [Property("RequirementId", "ACC-05")]
 public class AccessControlMiddlewareTests
 {
+    private sealed record CapturedLog(LogLevel Level, EventId EventId, string Message);
+
+    private sealed class CaptureLoggerProvider(List<CapturedLog> entries) : ILoggerProvider
+    {
+        private sealed class CaptureLogger(List<CapturedLog> logs) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel,
+                EventId eventId,
+                TState state,
+                Exception? exception,
+                Func<TState, Exception?, string> formatter) =>
+                logs.Add(new CapturedLog(logLevel, eventId, formatter(state, exception)));
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CaptureLogger(entries);
+        public void Dispose() { }
+    }
+
     private sealed class FakeDecision : IAccessDecision
     {
         public Func<AccessRequest, CancellationToken, ValueTask<AccessDecision?>> Handler { get; set; } =
@@ -41,11 +66,45 @@ public class AccessControlMiddlewareTests
             Throw ? throw new InvalidOperationException("boom") : new(Subject);
     }
 
+    private sealed class FakeAuditWriter : IAccessAuditWriter
+    {
+        public List<(AccessRequest Request, AccessDecision Decision)> Writes { get; } = new();
+        public bool BlockUntilCancelled { get; set; }
+        public TaskCompletionSource WriteStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask WriteAsync(
+            AccessRequest request,
+            AccessDecision decision,
+            CancellationToken cancellationToken = default)
+        {
+            Writes.Add((request, decision));
+            WriteStarted.TrySetResult();
+            if (!BlockUntilCancelled)
+            {
+                return;
+            }
+
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationObserved.TrySetResult();
+                throw;
+            }
+        }
+    }
+
     private FakeDecision _decision = null!;
     private FakeSubjects _subjects = null!;
+    private FakeAuditWriter _audit = null!;
+    private List<CapturedLog> _logs = null!;
     private int _handlerCalls;
     private WebApplication _app = null!;
     private HttpClient _client = null!;
+    private CancellationTokenSource _requestAborted = null!;
 
     private static ValueTask<AccessDecision?> Allow(AccessRequest r) =>
         new(AccessDecision.Allow("test-policy", r.CorrelationId));
@@ -55,23 +114,42 @@ public class AccessControlMiddlewareTests
     {
         _decision = new FakeDecision();
         _subjects = new FakeSubjects();
+        _audit = new FakeAuditWriter();
+        _logs = new List<CapturedLog>();
         _handlerCalls = 0;
+        _requestAborted = new CancellationTokenSource();
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Production });
         builder.WebHost.UseTestServer();
+        builder.Logging.AddProvider(new CaptureLoggerProvider(_logs));
+        builder.Services.AddSingleton(new AccessDecisionOptions { AuditTimeout = TimeSpan.FromMilliseconds(100) });
         builder.Services.AddSingleton<IAccessDecision>(_decision);
         builder.Services.AddSingleton<IAccessSubjectProvider>(_subjects);
+        builder.Services.AddSingleton<IAccessAuditWriter>(_audit);
 
         _app = builder.Build();
         _app.UseRouting();
+        _app.Use(async (context, next) =>
+        {
+            if (context.Request.Path == "/client-abort")
+            {
+                context.RequestAborted = _requestAborted.Token;
+            }
+
+            await next();
+        });
         _app.UseAccessControl();
 
         IResult Handler() { _handlerCalls++; return Results.Ok("handler"); }
         IResult HandlerId(string id) { _handlerCalls++; return Results.Ok(id); }
 
-        _app.MapGet("/public", Handler).AllowPublic();
+        _app.MapGet("/public", Handler).RequireAccess(AccessActions.PublicInfoRead.Id);
         _app.MapGet("/forgotten", Handler);                                   // no metadata
-        _app.MapGet("/both", Handler).AllowPublic().RequireAccess("lab.read", "laboratory", "id");
+        _app.MapGet("/client-abort", Handler).RequireAccess("public.info.read");
+        _app.MapGet("/unknown-action", Handler).RequireAccess("unknown.action");
+        _app.MapGet("/duplicate", Handler)
+            .RequireAccess("public.info.read")
+            .RequireAccess("public.info.read");
         _app.MapGet("/labs/{id}", HandlerId).RequireAccess("lab.read", "laboratory", "id");
         _app.MapGet("/noresource", Handler).RequireAccess("public.info.read");
 
@@ -87,6 +165,7 @@ public class AccessControlMiddlewareTests
     {
         _client.Dispose();
         await _app.DisposeAsync();
+        _requestAborted.Dispose();
     }
 
     private static string Id() => Guid.NewGuid().ToString("D");
@@ -108,11 +187,15 @@ public class AccessControlMiddlewareTests
     }
 
     [Test]
-    public async Task ACC05_Public_endpoint_passes_without_calling_engine()
+    public async Task ACC05_Public_action_uses_access_middleware()
     {
+        _decision.Handler = (r, _) => Allow(r);
+
         var res = await _client.GetAsync("/public");
+
         Assert.That(res.StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        Assert.That(_decision.Calls, Is.Empty);
+        Assert.That(_handlerCalls, Is.EqualTo(1));
+        Assert.That(_decision.Calls.Single().Action, Is.EqualTo(AccessActions.PublicInfoRead.Id));
     }
 
     [Test]
@@ -177,12 +260,75 @@ public class AccessControlMiddlewareTests
     }
 
     [Test]
-    public async Task ACC05_Contradictory_metadata_is_denied()
+    public async Task ACC05_Audit_writer_timeout_does_not_delay_403()
     {
-        _decision.Handler = (r, _) => Allow(r);
-        var res = await _client.GetAsync($"/both?id={Id()}");
+        _audit.BlockUntilCancelled = true;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var response = await _client.GetAsync("/forgotten").WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        await _audit.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.That(_audit.Writes, Has.Count.EqualTo(1));
+        Assert.That(stopwatch.Elapsed, Is.LessThan(TimeSpan.FromSeconds(2)));
+        var alarm = _logs.Single(log => log.EventId == AccessAuditEventIds.Lost);
+        Assert.That(alarm.Level, Is.EqualTo(LogLevel.Error));
+        Assert.That(alarm.Message, Does.Contain("Status: timeout"));
+    }
+
+    [Test]
+    public async Task ACC05_RequestAbortedDoesNotCancelAuditBeforeIndependentTimeout()
+    {
+        _audit.BlockUntilCancelled = true;
+        _decision.Handler = (_, _) => throw new InvalidOperationException("decision failure");
+        var request = _client.GetAsync("/client-abort");
+
+        await _audit.WriteStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        _requestAborted.Cancel();
+        await Task.Delay(TimeSpan.FromMilliseconds(25));
+
+        Assert.That(_audit.CancellationObserved.Task.IsCompleted, Is.False);
+        await _audit.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.That(stopwatch.Elapsed, Is.GreaterThanOrEqualTo(TimeSpan.FromMilliseconds(60)));
+        Assert.That(_logs.Count(log => log.EventId == AccessAuditEventIds.Lost), Is.EqualTo(1));
+
+        try
+        {
+            using var response = await request;
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        }
+        catch (OperationCanceledException)
+        {
+            // A disconnected request cannot receive the 403, but its audit write must run to timeout.
+        }
+        catch (HttpRequestException)
+        {
+            // TestServer may surface the explicitly cancelled RequestAborted token as a disconnected response.
+        }
+    }
+
+    [Test]
+    public async Task ACC05_Unknown_action_without_policy_is_denied()
+    {
+        var res = await _client.GetAsync("/unknown-action");
+
         Assert.That(res.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         Assert.That(_handlerCalls, Is.Zero);
+        Assert.That(_decision.Calls.Single().Action, Is.EqualTo("unknown.action"));
+    }
+
+    [Test]
+    public async Task ACC05_Multiple_requirements_are_denied_and_audited()
+    {
+        _decision.Handler = (r, _) => Allow(r);
+
+        var res = await _client.GetAsync("/duplicate");
+
+        Assert.That(res.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+        Assert.That(_handlerCalls, Is.Zero);
+        Assert.That(_decision.Calls, Is.Empty);
+        Assert.That(_audit.Writes.Single().Decision.DenialReason, Is.EqualTo(AccessDenialReason.PolicyError));
     }
 
     [Test]

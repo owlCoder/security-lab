@@ -54,8 +54,7 @@ public sealed class Laboratory
         Guid id, Guid courseId, string title, LabStatus status, Guid createdBy, DateTimeOffset createdAt) =>
         new(id, RequireCourse(courseId), title, status, createdBy, createdAt);
 
-    // PRIVREMENO (LAB-03): skladiste Tima 20 jos nema kolonu CourseId (vidi docs/components/LAB-03.md).
-    // Ovako ucitana laboratorija nema kurs (Guid.Empty), pa je provera pri otvaranju odbija.
+    // Legacy stored rows may have an unknown course. Resource checks must reject them.
     public static Laboratory Rehydrate(
         Guid id, string title, LabStatus status, Guid createdBy, DateTimeOffset createdAt) =>
         new(id, Guid.Empty, title, status, createdBy, createdAt);

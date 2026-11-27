@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -16,7 +17,7 @@ public abstract class IntegrationTestBase
     public void BaseClassSetup()
     {
         Factory = new CustomWebApplicationFactory<Program>();
-        Client = Factory.CreateClient();
+        Client = Factory.CreateCsrfClient();
     }
 
     [OneTimeTearDown]

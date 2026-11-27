@@ -15,7 +15,7 @@ public sealed class PostgresLaboratoryRepository(ILaboratoryStore store) : ILabo
         try
         {
             await store.AddAsync(new StoredLaboratory(laboratory.Id, laboratory.Title,
-                laboratory.Status.ToString(), laboratory.CreatedBy, laboratory.CreatedAt), ct);
+                laboratory.Status.ToString(), laboratory.CreatedBy, laboratory.CreatedAt, Course(laboratory)), ct);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
         {
@@ -33,7 +33,7 @@ public sealed class PostgresLaboratoryRepository(ILaboratoryStore store) : ILabo
     {
         ArgumentNullException.ThrowIfNull(laboratory);
         if (!await store.UpdateAsync(new StoredLaboratory(laboratory.Id, laboratory.Title,
-            laboratory.Status.ToString(), laboratory.CreatedBy, laboratory.CreatedAt), ct))
+            laboratory.Status.ToString(), laboratory.CreatedBy, laboratory.CreatedAt, Course(laboratory)), ct))
             throw new LaboratoryNotFoundException(laboratory.Id);
     }
 
@@ -50,5 +50,10 @@ public sealed class PostgresLaboratoryRepository(ILaboratoryStore store) : ILabo
         .Select(x => new LabRevision(x.Id, x.LaboratoryId, x.Number)).ToList();
 
     private static Laboratory ToDomain(StoredLaboratory row) =>
-        Laboratory.Rehydrate(row.Id, row.Title, Enum.Parse<LabStatus>(row.Status), row.CreatedBy, row.CreatedAt);
+        row.CourseId is Guid course && course != Guid.Empty
+            ? Laboratory.Rehydrate(row.Id, course, row.Title, Enum.Parse<LabStatus>(row.Status), row.CreatedBy, row.CreatedAt)
+            : Laboratory.Rehydrate(row.Id, row.Title, Enum.Parse<LabStatus>(row.Status), row.CreatedBy, row.CreatedAt);
+
+    private static Guid? Course(Laboratory laboratory) =>
+        laboratory.CourseId == Guid.Empty ? null : laboratory.CourseId;
 }

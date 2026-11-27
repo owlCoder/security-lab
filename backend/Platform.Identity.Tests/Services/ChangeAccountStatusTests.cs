@@ -91,6 +91,10 @@ public class ChangeAccountStatusTests
                 return Task.FromResult(store.ActiveSessions.GetValueOrDefault(account.Id));
             }
 
+            // IDN-05 unlock is covered by UnlockAccountTests; a status change never clears a lockout.
+            public Task<DateTimeOffset?> ClearLockoutAsync(UserAccount account, DateTimeOffset now, CancellationToken ct = default) =>
+                throw new NotSupportedException();
+
             public Task CommitAsync(CancellationToken ct = default)
             {
                 foreach (var (id, status) in _pendingStatus) store.Accounts[id].Status = status;
@@ -342,5 +346,32 @@ public class ChangeAccountStatusTests
         await sut.ExecuteAsync(StudentId, "BLOCKED");
 
         Assert.That(store.Audit.Single().Context.CorrelationId, Does.Match("^[A-Za-z0-9._-]{1,64}$"));
+    }
+
+    // IDN-07: sessions of other users and of a reactivated account (ported to the transactional store fake).
+    [Test]
+    public async Task BlockingAccount_DoesNotAffectOtherUsersSessions()
+    {
+        var (sut, store, _) = Build(Admin);
+        store.ActiveSessions[AdminId] = 2;
+
+        await sut.ExecuteAsync(StudentId, "BLOCKED");
+
+        Assert.That(store.ActiveSessions[StudentId], Is.Zero);
+        Assert.That(store.ActiveSessions[AdminId], Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task ReactivatingAccount_DoesNotRestorePreviouslyRevokedSessions()
+    {
+        var (sut, store, _) = Build(Admin);
+
+        await sut.ExecuteAsync(StudentId, "BLOCKED");
+        Assert.That(store.ActiveSessions[StudentId], Is.Zero);
+
+        await sut.ExecuteAsync(StudentId, "ACTIVE");
+
+        Assert.That(store.StatusOf(StudentId), Is.EqualTo(AccountStatus.Active));
+        Assert.That(store.ActiveSessions[StudentId], Is.Zero);
     }
 }

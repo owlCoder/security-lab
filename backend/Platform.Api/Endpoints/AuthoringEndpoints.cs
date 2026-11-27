@@ -36,11 +36,8 @@ public static class AuthoringEndpoints
 {
     public static IEndpointRouteBuilder MapAuthoringEndpoints(this IEndpointRouteBuilder app)
     {
-        // Both handlers call AuthorizeAsync and the authoring service rechecks access.
-        app.MapGet("/api/authoring/templates", ListTemplatesAsync)
-            .DelegatesToLegacyAuthorization();
-        app.MapPost("/api/authoring/templates/{templateId:guid}/drafts", CopyTemplateAsync)
-            .DelegatesToLegacyAuthorization();
+        app.MapGet("/api/authoring/templates", ListTemplatesAsync).RequireAccess(AuthoringActions.TemplateList);
+        app.MapPost("/api/authoring/templates/{templateId:guid}/drafts", CopyTemplateAsync).RequireAccess(AuthoringActions.TemplateCopy, AuthoringActions.TemplateResourceType, "templateId");
         return app;
     }
 

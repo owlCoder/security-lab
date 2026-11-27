@@ -47,6 +47,6 @@ public static class Team21SessionAccessExtensions
         app.UseWhen(context => !IsTeam21Endpoint(context),
             branch => branch.UseMiddleware<SessionCheckMiddleware>());
 
-    private static bool IsTeam21Endpoint(HttpContext context) =>
+    public static bool IsTeam21Endpoint(HttpContext context) =>
         context.GetEndpoint()?.Metadata.GetMetadata<Team21SessionRequiredMetadata>() is not null;
 }

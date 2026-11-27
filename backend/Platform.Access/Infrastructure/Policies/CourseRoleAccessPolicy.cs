@@ -9,8 +9,10 @@ public sealed class CourseRoleAccessPolicy(
     IMembershipReader membershipReader,
     IResourceDescriptorResolver resourceDescriptorResolver) : IAccessPolicy
 {
-    public string Id => $"course-role:{definition.Action.Id}";
-    public string Version => "1.0";
+    private readonly string policyId = $"course-role.{definition.Action.Id}";
+
+    public string Id => policyId;
+    public string Version => "v1";
 
     public async ValueTask<bool> EvaluateAsync(
         AccessRequest request,
@@ -75,8 +77,7 @@ public sealed class CourseRoleAccessPolicy(
         {
             return definition.AllowAssistantDelegation &&
                    membership.DelegatedActions is not null &&
-                   membership.DelegatedActions.Any(action =>
-                       string.Equals(action, definition.Action.Id, StringComparison.Ordinal));
+                   membership.DelegatedActions.Contains(definition.Action.Id);
         }
 
         return definition.AllowedRoles.Contains(membership.Role);

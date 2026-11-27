@@ -2,6 +2,7 @@ import { useState } from 'react'
 import TestUserPicker, { TEST_USERS } from './TestUserPicker'
 import CreateLabForm from './CreateLabForm'
 import LabView from './LabView'
+import LabSearch from './LabSearch'
 import './labs.css'
 
 // LAB-07 frontend (tim 14): kreiranje laboratorije, prikaz po jeziku i prikaz grešaka.
@@ -27,6 +28,7 @@ export default function LabsSection() {
       <div className="labs-grid">
         <div className="labs-panel"><CreateLabForm user={user} /></div>
         <div className="labs-panel"><LabView user={user} /></div>
+        <div className="labs-panel labs-panel-wide"><LabSearch user={user} /></div>
       </div>
     </section>
   )

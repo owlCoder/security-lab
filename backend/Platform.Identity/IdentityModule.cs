@@ -33,6 +33,7 @@ public static class IdentityModule
         services.AddScoped<IAccountStatusReader, EfAccountStatusReader>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
+        services.AddScoped<IExternalIdentityLinker, ExternalIdentityLinker>();
 
         return services;
     }

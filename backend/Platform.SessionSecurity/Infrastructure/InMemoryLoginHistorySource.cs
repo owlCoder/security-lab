@@ -9,22 +9,9 @@ namespace Platform.SessionSecurity.Infrastructure;
 /// immutable snapshot of synthetic events. Like a database query, it filters by subject, time
 /// range (both bounds inclusive) and outcome, orders newest first (stable) and returns one page.
 /// </summary>
-public sealed class InMemoryLoginHistorySource : ILoginHistorySource
+public sealed class InMemoryLoginHistorySource(IEnumerable<LoginEvent> events) : ILoginHistorySource
 {
-    private readonly IReadOnlyList<LoginEvent> _events;
-
-    public InMemoryLoginHistorySource(IEnumerable<LoginEvent> events)
-    {
-        ArgumentNullException.ThrowIfNull(events);
-
-        var snapshot = events.ToArray();
-        if (snapshot.Any(loginEvent => loginEvent is null))
-        {
-            throw new ArgumentException("Login events must not contain null.", nameof(events));
-        }
-
-        _events = snapshot;
-    }
+    private readonly IReadOnlyList<LoginEvent> _events = CreateSnapshot(events);
 
     public ValueTask<IReadOnlyList<LoginEvent>> FindAsync(
         string subjectId,
@@ -50,6 +37,19 @@ public sealed class InMemoryLoginHistorySource : ILoginHistorySource
             .ToArray();
 
         return ValueTask.FromResult(page);
+    }
+
+    private static LoginEvent[] CreateSnapshot(IEnumerable<LoginEvent> events)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+
+        var snapshot = events.ToArray();
+        if (snapshot.Any(loginEvent => loginEvent is null))
+        {
+            throw new ArgumentException("Login events must not contain null.", nameof(events));
+        }
+
+        return snapshot;
     }
 
     private static bool MatchesOutcome(LoginEvent loginEvent, LoginOutcomeFilter? outcome) => outcome switch

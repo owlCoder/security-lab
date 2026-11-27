@@ -1,3 +1,4 @@
+using Platform.Identity.Testing;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -42,7 +43,8 @@ public class SessionCurrentActorHostIntegrationTests
         _world = new SessionWorld();
         await _world.SeedAsync();
         _factory = new SessionHostFactory(_world);
-        _client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        // Main's CSRF check (US-15) needs a token on POST/DELETE; the helper fetches one per session.
+        _client = _factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
         {
             HandleCookies = false,
             BaseAddress = new Uri("https://localhost")

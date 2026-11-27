@@ -1,3 +1,4 @@
+using Platform.Access.Application.Options;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -45,9 +46,12 @@ public class Team21SessionAccessPipelineTests
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
         builder.Services.AddHttpContextAccessor();
+        // ACC-05 requires policies to be registered before AddAccessControl(). This host registers only
+        // Team 21 policies, so the full-catalog coverage check is off, as in ACC-05's own minimal hosts.
+        builder.Services.AddSingleton(new AccessConfigurationOptions { RequirePolicyCoverage = false });
+        builder.Services.AddTeam21AccessPolicies();
         builder.Services.AddAccessControl();
         builder.Services.AddAccessAspNet();
-        builder.Services.AddTeam21AccessPolicies();
         builder.Services.AddScoped<IIdentityContext, SessionIdentityContext>();
         builder.Services.AddScoped<ICurrentActor, SessionCurrentActor>();
         builder.Services.AddSingleton<ISessionManager>(_sessions);

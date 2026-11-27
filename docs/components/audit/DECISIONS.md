@@ -17,17 +17,18 @@ They can still change through review.
 | A4 | Details are an allowlist per event type, string values only, at most 20 keys and 2048 bytes; secret-like key names are rejected as an extra check. | The system cannot reliably detect every secret in free text, so free text is not accepted (AUD-03). | PR #42 |
 | A5 | The catalog and draft validation belong to S-02; the writer (S-06) calls `AuditDraftValidator` before storing. | Avoids two validators for the same rules. Proposed in PR #42; member 3 to confirm. | PR #42 |
 | A6 | `AuditEvent` is an immutable domain record with its own invariants, independent of the validator. A retry with the same `EventId` and content is not a conflict; the time is not compared. | Defence in depth (ADM-07); supports idempotent retries. | S-03 |
+| A7 | Exception to A1: `IAuditContextProvider` is a public application integration port so the composition host can supply trusted server identity and correlation state without making the writer implementation public. `Platform.Identity.Tests` is a test-only friend assembly so its PostgreSQL integration test can exercise internal Audit persistence; production consumers still use only public contracts and composition entry points. | Keeps the runtime boundary explicit while avoiding public persistence types solely for cross-module integration testing. | PR #113; owner review pending |
 
 ## Open decisions from the team plan (v2.2)
 
 | # | Question | Owner | Target | Temporary rule |
 |-|-|-|-|-|
 | D1 | Identity and membership sources; owners of AUD-02..05; does Identity switch to the Audit contract or keep its own `IAuditWriter` behind an adapter? | Member 9 | 03.11 | Only test adapters until confirmed. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-07, S11-08, S11-10. |
-| D2 | Access DI lifetimes, explicit replacement of `NullAccessAuditWriter`, behaviour when the audit write fails. | Members 1, 5, 9 with Team 3 | 03.11 | No claim of a finished Access integration. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-01 to S11-05. |
-| D3 | Shared transaction or transactional outbox for privileged changes; meaning of each outcome per producer. | Members 2, 3, 9 with producers | before S-12 | Demo producer only; no real committed change without a guaranteed audit record. Proposal: one transaction for KT1, [INTEGRATION.md](INTEGRATION.md) S11-06. |
+| D2 | Access DI lifetimes, explicit replacement of `NullAccessAuditWriter`, behaviour when the audit write fails. | Members 1, 5, 9 with Team 3 | 03.11 | Direction proposed by Team 3: one central access audit writer in the host (see [D2: central access audit](#d2-central-access-audit-team-3-proposed)). Accepted only when their pull request is merged with Team 3 and member 1 confirmation; until then no claim of a finished Access integration. Earlier proposal: [INTEGRATION.md](INTEGRATION.md) S11-01 to S11-05. |
+| D3 | Shared transaction or transactional outbox for privileged changes; meaning of each outcome per producer. | Members 2, 3, 9 with producers | per producer | IDN-03 uses one PostgreSQL transaction for status, session revocation and Audit (PR #148, S-16 proof). Other privileged producers still require their own agreed transaction or outbox; see [INTEGRATION.md](INTEGRATION.md) S11-06. |
 | D4 | Global or administrator view of events; events without a course; which fields a teacher sees. | Members 5, 7, 9 with the assistant | before S-14 | Only the course view; no automatic global access. |
 | D5 | Query limits and behaviour when writing `audit.events.viewed` fails. | Members 4, 5, 6 | before S-14 | Proposed in S-07 (see [Query limits](#d5-query-limits-proposal-s-07)); 503 before any data is sent if the viewed event cannot be written. |
-| D6 | Audit volume of Deny decisions and load on the database. | Member 9 with Team 3 | before S-13 | No silent sampling of mandatory records; measure and alarm on loss. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-04, S11-07. |
+| D6 | Audit volume of Deny decisions and load on the database. | Member 9 with Team 3 | before S-13 | No silent sampling of mandatory records; measure and alarm on loss. Proposal: [INTEGRATION.md](INTEGRATION.md) S11-04, S11-07. PR #197 removes Access aggregation: every Deny is its own record and a lost record raises `access.audit.lost` (see [D2](#d2-central-access-audit-team-3-proposed)). Accepted only with member 9 confirmation. |
 | D7 | KT1 and KT2 dates and team capacity. | Member 1 | 03.11 | 09–10.11 is a working assumption. Everyone re-estimates the stories. |
 | D8 | Retention, restore and extra integrity protection. | Members 2, 7, 9 with ADM owners | KT2 | No public delete; stronger protection only with a justified design. |
 
@@ -39,9 +40,52 @@ They can still change through review.
 | D10 | Three interfaces named `IIdentityContext` now exist (`Platform.Api.Services.Identity`, `Platform.Identity.Contracts`, and the reference contract in the spec). Which one gives the current caller for the audit actor? | `Platform.Api`, `Platform.Identity` | Members 3 and 9 with Identity teams | The writer's context adapter is not built until this is answered. |
 | D11 | `Platform.Identity.Tests` is not in `SecurityLab.slnx`, so its tests do not run locally or in CI. | `backend/SecurityLab.slnx` | Identity team; member 1 for CI | Reported only; the Audit component does not change another team's project. |
 | D12 | `ChangeAccountStatus` writes a free-text administrator reason into its audit detail, which conflicts with AUD-03. Proposed: a reason code. | `Platform.Api` | Member 9 with Team 2 | Same as open question 1 in CONTRACTS.md. |
-| D13 | `DefaultDenyAccessDecision` calls the audit writer outside any `try`/`catch`, so a writer exception replaces the computed decision. | `Platform.Access` | Member 9 with Team 3 | Forwarder not connected; proposal in INTEGRATION.md S11-04. |
+| D13 | `DefaultDenyAccessDecision` calls the audit writer outside any `try`/`catch`, so a writer exception replaces the computed decision. | `Platform.Access` | Member 9 with Team 3 | Resolved in PR #197: the engine catches the failure, keeps the decision and raises `access.audit.lost`. |
 | D14 | Resolved in current code: Access returns `PolicyDenied` when a policy returns false and `PolicyError` on evaluation failure. | `Platform.Access` and REV-05 audit adapter | Member 9 with Team 3 | REV-05 preserves `policy_denied` separately; Audit accepts both codes. The revoked-grant HTTP test checks the stored reason (2026-11-06). |
-| D15 | `SubjectRef.Id` is a free string, while the audit actor ID is an account GUID. | `Platform.Access` | Member 9 with Team 3 | The forwarder records nothing for a non-GUID subject and raises an alarm (S11-05). |
+| D15 | `SubjectRef.Id` is a free string, while the audit actor ID is an account GUID. | `Platform.Access` | Member 9 with Team 3 | The forwarder records nothing for a non-GUID subject and raises an alarm (S11-05). Done this way in PR #197 (`CentralAccessAuditWriter`, status `invalid_subject_id`). |
+
+## D2: central access audit (Team 3, proposed)
+
+Team 3 implements D2 in [PR #197](https://github.com/owlCoder/security-lab/pull/197)
+(`feature/ACC-05-deny-action-by-default`, head `8d73858`, 2026-11-16). It is not on `main`, so D2
+stays open until that pull request is merged.
+
+| Area | What Team 3 does |
+|-|-|
+| Where `access.denied` is written | `CentralAccessAuditWriter` and `AccessDeniedAuditMapper` in `Platform.Api/Security/AccessAudit`, registered once by `AddCentralAccessAudit()` before `AddAccessControl()`. The host owns it, so `Platform.Access` keeps no reference to `Platform.Audit`. |
+| What is written | Only Deny decisions, as `access.denied` through `ITrustedAuditWriter`, in a new DI scope per write (singleton writer, scoped Audit writer). Allow decisions are not written. Denials made by the middleware itself (missing or legacy metadata, subject failure) are written with reason `policy_error`. A `course` resource with a GUID sets `CourseId`, so the course view (AUD-06) shows the denial. |
+| Correlation | `AccessControlMiddleware` uses `HttpContext.TraceIdentifier`, which the S-10 middleware sets to a server-generated correlation ID (also returned in `X-Correlation-ID`). The record takes the ID from the decision (`CreateContext(request, decision)`), so the decision log and the record match. |
+| Subject that is not an account GUID | No record and an alarm with status `invalid_subject_id`; the actor is never invented (D15). |
+| Audit write failure | A result other than `Recorded`, a timeout or an exception is logged with `LogError` and event ID 6102 `access.audit.lost`, with only the event type, status and correlation ID. The decision is not changed. |
+| Old audit chain | The `Resilient`/`Filtering`/`Aggregating`/`Logger` chain is removed; without the central writer, `AddAccessControl()` falls back to a logging writer. `Platform.Api` is the only host that calls `AddAccessControl()`, and a host test checks that it resolves `CentralAccessAuditWriter`, so the fallback is used only by tests. |
+| Composition rules | Every action and policy is registered before `AddAccessControl()`; registering later is a startup error. `[DelegatedAuthorization]` and `DelegatesToLegacyAuthorization()` are obsolete and the middleware denies such endpoints (403). |
+
+What replaces the removed Access audit chain:
+
+| Removed from Access | After #197 | Tests |
+|-|-|-|
+| `AuditValueSanitizer`, `AuditIdentifier`, `AccessAuditRecordFactory` | Audit rejects instead of rewriting: an allowlist per event type, details without control characters and in a strict format, secret-like keys rejected, and the rejected value is never echoed. The mapper leaves out an invalid `action`, `policyId` or `policyVersion`. | `AuditDraftValidatorTests`, `AuditWriterTests`, `PlatformApi_AuditOmitsCrLfAndLogsOnlySafeFailureFields` |
+| `FilteringAccessAuditWriter` | `CentralAccessAuditWriter` writes only Deny. | `Allow_IsNotWritten` |
+| `AggregatingAccessAuditSink` | Removed on purpose: every Deny is its own record, nothing is merged or sampled (D6). | `ManyIdenticalDenials_AreEachStoredAsOwnRecord_AndNoneIsLostWhenTheHostStops` (100 identical denials, 100 records) |
+| `AccessAuditFlushService` | Nothing to flush: the write is awaited inside the request, and `Recorded` is returned only after the INSERT. Stopping the host right after a burst of denials loses no record. | `EachDenial_IsStoredBeforeItsResponseIsReturned` and the test above |
+| `ResilientAccessAuditWriter` | The caller bounds the write with `AccessDecisionOptions.AuditTimeout` in the engine and in the middleware. When Audit is down, every denial is still a 403 and raises one alarm. | `ACC05_Audit_writer_timeout_does_not_delay_403`, `AuditStoreDown_EveryDenialIsStill403_AndRaisesExactlyOneLostAlarm` |
+
+Consequences for the Audit component:
+
+- **S-13.** The S-13 forwarder ([PR #151](https://github.com/owlCoder/security-lab/pull/151)) and the central
+  writer do the same job. Both registered together would store every Deny twice, so #151 is not
+  merged and S-13 follows the central writer.
+- **Audit tests.** The Audit tests register `AddAudit()` before `AddAccessControl()`, and the Testing probe
+  endpoints declare `RequireAccess("audit.events.read")` on a synthetic probe course instead of
+  `[DelegatedAuthorization]`. Both work on the current `main` and on the Team 3 branch.
+
+Resolved in #197: the course of the denied resource (`047fe2d`), the non-GUID subject (D15) and
+the alarm on lost records (`3b3c6d8`). Still to agree with Team 3 before D2 and D6 are accepted:
+
+| Point | Our contract | PR #197 now | Owner |
+|-|-|-|-|
+| Timeout of the audit write | A denial is written with its own short timeout and is not cancelled when the client disconnects ([INTEGRATION.md](INTEGRATION.md) S11-04, point 5). | Engine: `CancellationToken.None`, and the timeout only stops waiting, so a slow write keeps its scope and connection after the 403. Middleware: the token is linked to `RequestAborted`, so a client that disconnects cancels the write without an alarm. Proposal: one `CancellationTokenSource(AuditTimeout)` that is not linked to the request, in both places. | Team 3, member 9 |
+| Volume (D6) | Measure before any filtering. | Every Deny is written; tested with 100 identical denials, production volume not measured yet. | Team 3, member 9 |
 
 ## D5 query limits (proposal, S-07)
 
@@ -137,3 +181,5 @@ their own stories at the team sync; the new value is entered in Tapiz and here.
 | 2026-11-03 | Links to the S-11 proposals; new questions D13 to D15 (S-11) |
 | 2026-11-05 | D5 query limits proposal and S-07 course query (S-07) |
 | 2026-11-09 | KT1 minimum state updated; link to the component document (S-20) |
+| 2026-11-12 | D2: Team 3 central access audit (proposed, not merged); Audit tests aligned with the ACC-05 composition rules (S-11) |
+| 2026-11-17 | D2 updated to PR #197 (`8d73858`): what replaces the removed Access audit chain, with tests; D13 and D15 done in #197; open point on the audit write timeout (AUD-01) |
