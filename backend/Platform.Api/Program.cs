@@ -54,8 +54,6 @@ using Platform.LabVisibility.Infrastructure.Persistence;
 using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Infrastructure;
 
-// Oba modula imaju IAccessDecision, zato koristimo alias.
-using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
 using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 
@@ -170,7 +168,7 @@ builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
 builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
-builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
+builder.Services.AddSingleton<IAccountAdministrationDecision, AdminOnlyAccountAdministrationDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
 // IDN-05: administrator unlock (account.unlock, registered by REV-05), same store and transaction as IDN-03.
 builder.Services.AddScoped<UnlockAccount>();

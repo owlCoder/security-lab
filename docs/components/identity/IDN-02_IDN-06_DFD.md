@@ -203,7 +203,7 @@ The phone (E2) is outside all boundaries. The TOTP secret would leave the server
 
 ## Security requirements
 
-- Server-side access checks: every request to an endpoint without `[AllowAnonymous]` goes through P3 and gets `401` without a valid session. Administrator-only actions are decided on the server (`AdminOnlyAccessDecision`, `CreateAccountPolicy`). Endpoints without an explicit policy are denied by default (ACC-05).
+- Server-side access checks: every request to an endpoint without `[AllowAnonymous]` goes through P3 and gets `401` without a valid session. Administrator-only actions are decided on the server (`AdminOnlyAccountAdministrationDecision`, `CreateAccountPolicy`). Endpoints without an explicit policy are denied by default (ACC-05).
 - Input validation and sensitive data: length limits and generic error messages on login, no secrets in logs or API responses (SEC-02, AUD-03).
 - Negative scenarios: see [Negative flows](#negative-flows). Unit tests exist for `LoginService`, `LogoutService`, `SessionStore`, `StoreSessionCreator`, `SessionManager`, `SessionCheckMiddleware`, `DevelopmentAccountSeeder` and `TestUsers`. HTTP-level tests are planned in US-13, US-24 and US-25.
 
@@ -221,7 +221,7 @@ These are the places where the code and the intended single data model differ. T
 
 Present in the repository now:
 
-- Contracts: `IIdentityContext` (`CallerIdentity`), `ISessionManager`, `IAuditWriter`, `IAccessDecision`, `AuthenticationLevel` (`None`, `MfaPending`, `Active`).
+- Contracts: `IIdentityContext` (`CallerIdentity`), `ISessionManager`, `IAuditWriter`, `IAccountAdministrationDecision`, `AuthenticationLevel` (`None`, `MfaPending`, `Active`).
 - Identity module: `backend/Platform.Identity` with `PlatformIdentityDbContext` (`identity.accounts`, `identity.sessions`), `AddIdentityModule(configuration)`, BCrypt `IPasswordHasher`, `ICredentialVerifier`, `ISessionStore`, migrations `InitialIdentity`, `AddAccountPasswordHash`, `AddSessions`, `AddAccountRole`.
 - US-04 login: `POST /api/auth/login` (`AuthController`, `LoginService`), cookie `SecurityLab.Session`. Details in [`IDN-02_LOGIN.md`](./IDN-02_LOGIN.md).
 - US-03 session store: `identity.sessions`, `SessionStore`, `StoreSessionCreator`.

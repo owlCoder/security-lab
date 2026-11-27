@@ -165,7 +165,7 @@ public class UnlockAccountTests
         var audit = new FakeAudit();
         var sut = new UnlockAccount(
             new FakeIdentity(caller),
-            new AdminOnlyAccessDecision(new FakeAdmins(AdminId)),
+            new AdminOnlyAccountAdministrationDecision(new FakeAdmins(AdminId)),
             store, audit, new FakeCorrelation(correlationId),
             new FixedClock(Now),
             NullLogger<UnlockAccount>.Instance);

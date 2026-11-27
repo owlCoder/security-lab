@@ -34,7 +34,7 @@ flowchart LR
   AC -->|account.unlock| P[RevisionActionPolicy -> RevisionPermissions -> IAdminDirectory]
   AC -->|allowed| CT[AdminAccountsController.Unlock]
   CT --> UC[UnlockAccount]
-  UC -->|second-line check| AD[AdminOnlyAccessDecision -> IAdminDirectory]
+  UC -->|second-line check| AD[AdminOnlyAccountAdministrationDecision -> IAdminDirectory]
   UC --> ST[EfAccountStatusStore]
   ST --> D[(identity.accounts: failed_login_count, lockout_end)]
   UC -->|same transaction| AU[ITransactionalAuditWriter]
@@ -87,7 +87,7 @@ Rules:
 - `unlocked: true` means only that the lockout was cleared. It does **not** mean that the user can log in: the unlock does not look at `status`, so a locked account that is also Blocked or Archived gets the same 200, keeps its status, and its login is still refused with the same generic 401. The response does not carry the status. An administrator who wants to restore access must check the status too and, if needed, change it with IDN-03 (`PUT /api/admin/accounts/{id}/status`).
 - "Not locked" returns 409 instead of an idempotent 200. This matches IDN-03 (`invalid_transition`), so the administrator sees that nothing changed.
 - Self-unlock is refused, as in IDN-03. Otherwise an administrator whose account is under a guessing attack could reopen the guess budget from an existing session.
-- `UnlockAccount` repeats the admin check as a second line (`IAccessDecision.CanUnlockAccount`). If that line ever refuses, the answer is `401 unauthenticated` or `403 forbidden` with a Denied `account.unlocked` record (`reasonCode` `unauthenticated` or `not_administrator`).
+- `UnlockAccount` repeats the admin check as a second line (`IAccountAdministrationDecision.CanUnlockAccount`). If that line ever refuses, the answer is `401 unauthenticated` or `403 forbidden` with a Denied `account.unlocked` record (`reasonCode` `unauthenticated` or `not_administrator`).
 - The row lock from `FindForUpdateAsync` serializes administrator writes to the account (unlock, IDN-03 status change). It does **not** hold back logins during an unlock: the committed row is still locked, and the login `UPDATE`s (`ReserveAttemptAsync`, `LockIfLimitReachedAsync`, `TryClearFailuresAsync`) match only unlocked rows, so in PostgreSQL READ COMMITTED they skip the row without waiting and charge nothing. Such an in-flight login can then read the account after the unlock commits and see it unlocked. In-flight logins are therefore handled by the charge check: `ReserveAttemptAsync` returns whether it charged the attempt, and `CredentialVerifier` treats an attempt that was not charged as locked, whatever the password. Otherwise every login in flight during an unlock would be a free guess (lockout rule 2: only a charged attempt may use the password result).
 - An attempt that sets the lockout itself is not charged either. When interrupted requests have left the counter at `MaxFailedAccessAttempts`, the next attempt finds the account unlocked, so its `UPDATE` does match the row, but it only sets `lockout_end` and restarts the counter. An unlock can then clear that lockout before the attempt reads the account. `ReserveAttemptAsync` therefore reports a charge only when the counter it wrote is above 0 (`UPDATE … RETURNING failed_login_count`), not whenever a row was updated. It is still the same single statement on every path, unknown e-mails included, so the timing stays as it was.
 - After an unlock the counter is 0, so a full run of `MaxFailedAccessAttempts` failures is needed before the account locks again.
@@ -147,7 +147,7 @@ Rules:
 
 - **Changed files:**
   - `Platform.Identity`: `UserAccount.ClearLockout()`; `ICredentialStore.ReserveAttemptAsync` returns whether it charged the attempt (`EfCredentialStore`, `UPDATE … RETURNING`), and `CredentialVerifier` refuses an uncharged attempt.
-  - `Platform.Api`: `IAccountStatusUnitOfWork.ClearLockoutAsync` and `EfAccountStatusStore`, `IAccessDecision.CanUnlockAccount` and `AdminOnlyAccessDecision`, `UnlockAccountOutcome`, `UnlockAccount`, `AdminAccountsController.Unlock`, `IdentityAccessActions.AccountUnlock`, `Program.cs` (registration).
+  - `Platform.Api`: `IAccountStatusUnitOfWork.ClearLockoutAsync` and `EfAccountStatusStore`, `IAccountAdministrationDecision.CanUnlockAccount` and `AdminOnlyAccountAdministrationDecision`, `UnlockAccountOutcome`, `UnlockAccount`, `AdminAccountsController.Unlock`, `IdentityAccessActions.AccountUnlock`, `Program.cs` (registration).
   - `Platform.Audit`: `AuditEventTypes.AccountUnlocked`, the `account.unlocked` schema in `AuditEventCatalog`.
   - Tests: `UnlockAccountTests`, `AccountUnlockIntegrationTests`, the in-flight unlock tests and the charge report test in `AccountLockoutTests`, the uncharged-attempt test in `PasswordAndCredentialTests`, a test case in `RevisionEndpointMetadataTests`, an example in `AuditDraftExamples`, the `account.unlocked` negative tests in `AuditDraftValidatorTests`.
   - No migration: the columns come from `AddAccountLockout`.
