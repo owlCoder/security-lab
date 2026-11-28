@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Antiforgery;
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
+using Team21.Acc.Core.Interfaces;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Platform.Api.Modules.Team21.Integration;
 using Platform.Api.Security.AccessAudit;
 using Platform.Api.Security.AccessPolicies;
 using Platform.Api.Security.IdentityAccess;
@@ -189,6 +192,8 @@ builder.Services.AddIdentitySessionAccess();
 builder.Services.AddSessionSecurity();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
+builder.Services.Replace(
+    ServiceDescriptor.Scoped<ICurrentActor, SessionCurrentActor>());
 
 
 builder.Services.AddScoped<LabCaller>();
@@ -257,6 +262,7 @@ builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
 
 builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
+builder.Services.AddTeam21SessionAccess();
 if (kt1Enabled) builder.Services.AddKt1RequestIdentity();
 if (attemptsEnabled) builder.Services.AddAttemptResourceResolution();
 
@@ -284,7 +290,8 @@ app.UseWhen(
     routes => routes.UseMiddleware<SessionCheckMiddleware>());
 // AUT-06: Authoring uses the validated session to identify the caller.
 app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
-
+// Team 21 (ACC-01/ACC-06) routes validate the real session before ACC-05 checks access.
+app.UseTeam21SessionBeforeAccess();
 app.UseAccessControl();
 if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
@@ -360,7 +367,8 @@ app.MapGet("/api/health", () => Results.Ok(new
 // Downstream handlers read the validated session from HttpContext.Items.
 app.UseWhen(
     context => !AuthoringAccessSubjectProvider.AppliesTo(context)
-                && !AdministrationRequestIdentity.AppliesTo(context),
+                && !AdministrationRequestIdentity.AppliesTo(context)
+                && !Team21SessionAccessExtensions.IsTeam21Endpoint(context),
     otherRoutes => otherRoutes.UseMiddleware<SessionCheckMiddleware>());
 
 app.MapControllers();
