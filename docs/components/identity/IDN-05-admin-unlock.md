@@ -147,7 +147,7 @@ Rules:
 
 - **Changed files:**
   - `Platform.Identity`: `UserAccount.ClearLockout()`; `ICredentialStore.ReserveAttemptAsync` returns whether it charged the attempt (`EfCredentialStore`, `UPDATE … RETURNING`), and `CredentialVerifier` refuses an uncharged attempt.
-  - `Platform.Api`: `IAccountStatusUnitOfWork.ClearLockoutAsync` and `EfAccountStatusStore`, `IAccountAdministrationDecision.CanUnlockAccount` and `AdminOnlyAccountAdministrationDecision`, `UnlockAccountOutcome`, `UnlockAccount`, `AdminAccountsController.Unlock`, `IdentityAccessActions.AccountUnlock`, `Program.cs` (registration).
+  - `Platform.Api`: `IAccountStatusUnitOfWork.ClearLockoutAsync` and `EfAccountStatusStore`, `IAccessDecision.CanUnlockAccount` and `AdminOnlyAccessDecision` (renamed to `IAccountAdministrationDecision` and `AdminOnlyAccountAdministrationDecision` in #265), `UnlockAccountOutcome`, `UnlockAccount`, `AdminAccountsController.Unlock`, `IdentityAccessActions.AccountUnlock`, `Program.cs` (registration).
   - `Platform.Audit`: `AuditEventTypes.AccountUnlocked`, the `account.unlocked` schema in `AuditEventCatalog`.
   - Tests: `UnlockAccountTests`, `AccountUnlockIntegrationTests`, the in-flight unlock tests and the charge report test in `AccountLockoutTests`, the uncharged-attempt test in `PasswordAndCredentialTests`, a test case in `RevisionEndpointMetadataTests`, an example in `AuditDraftExamples`, the `account.unlocked` negative tests in `AuditDraftValidatorTests`.
   - No migration: the columns come from `AddAccountLockout`.
