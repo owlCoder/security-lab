@@ -80,7 +80,7 @@ public abstract class MfaServiceTestBase
         new(_credentials.Object, _sessions.Object,
             new IdentityAuditProducer(
                 _trustedAudit.Object, _transactionalAudit.Object, NullLogger<IdentityAuditProducer>.Instance),
-            _clock.Object, _protector, Options.Create(lockout), NullLogger<MfaService>.Instance);
+            _clock.Object, _protector, Microsoft.Extensions.Options.Options.Create(lockout), NullLogger<MfaService>.Instance);
 
     /// <summary>Both Audit writers record every write in <see cref="_auditWrites"/> and return these results.</summary>
     protected void SetupAuditResults(AuditWriteResult? trusted = null, AuditWriteResult? transactional = null)

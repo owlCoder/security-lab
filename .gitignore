@@ -17,3 +17,8 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# US-22: Data Protection key ring certificates and private keys never go into the repository.
+*.pfx
+*.p12
+*.key

@@ -40,6 +40,7 @@ using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Identity.Composition;
 using Platform.Competencies.Composition;
 using Platform.Authoring.Application;
 using Platform.Identity;
@@ -94,6 +95,8 @@ builder.Services.AddIdentityModule();
 
 // IDN-02: prijava, odjava i sesije
 builder.Services.AddIdentityModule(builder.Configuration);
+// IDN-06: trajan i sertifikatom šifrovan key ring za TOTP tajne; van Development-a start pada bez njega.
+builder.Services.AddMfaKeyRing(builder.Configuration, builder.Environment);
 
 if (builder.Environment.IsDevelopment())
 {
