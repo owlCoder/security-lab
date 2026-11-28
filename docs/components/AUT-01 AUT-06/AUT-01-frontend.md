@@ -108,7 +108,7 @@ Everything from the browser is untrusted. The client sends only the three fields
 
 ## Evidence of work
 
-- **Changed files / commit / pull request:** branch `feature/AUT-01-drafts-api`. Files: `frontend/src/api/drafts.ts`, `frontend/src/api/localDraftsGateway.ts`, `frontend/src/components/drafts/` (`useDrafts.ts`, `CreateDraftForm.tsx`, `DraftTypes.ts`), `frontend/src/pages/DraftsPage.tsx`, `frontend/src/pages/DraftsRoute.tsx`, the route in `frontend/src/App.tsx`, tests, `frontend/README.md`. Pull request: [add link].
+- **Changed files / commit / pull request:** branch `feature/AUT-01-drafts-api`. Files: `frontend/src/api/drafts.ts`, `frontend/src/api/localDraftsGateway.ts`, `frontend/src/components/drafts/` (`useDrafts.ts`, `CreateDraftForm.tsx`, `DraftTypes.ts`), `frontend/src/pages/DraftsPage.tsx`, `frontend/src/pages/DraftsRoute.tsx`, the route in `frontend/src/App.tsx`, tests, `frontend/README.md`. Pull request: https://github.com/owlCoder/security-lab/pull/277.
 - **Run instructions:** [AUT-01 frontend KT2 demonstration](AUT-01-frontend-KT2-DEMO.md) and `frontend/README.md`.
 - **Tests and results:** 68 test cases for this component: data access layer 24, demo gateway 4, form 12, page 16, route and source selection 3, demo mode 4, list 5. The whole frontend run: 26 test files, 241 tests, all passed. `npm run build` passes. Date of the run: [add date].
 - **Next steps:** connect the server mode to the real draft routes when the authoring API exposes them and confirm the status names; add a separate read and an edit flow; send the CSRF token once the platform requires it; remove the demo mode and its development-only route.
