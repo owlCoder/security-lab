@@ -124,7 +124,7 @@ public static class OidcFederationExtensions
             "oidc_access_denied",
             http.TraceIdentifier,
             null,
-            CancellationToken.None);
+            cancellationToken: CancellationToken.None);
 
         http.Response.Headers.CacheControl = "no-store";
 
@@ -145,7 +145,8 @@ public static class OidcFederationExtensions
 
         // Bad state, nonce, signature, a cancelled login... Only the exception type is logged, never tokens.
         logger.LogWarning("OIDC login failed: {FailureType}", context.Failure?.GetType().Name);
-        await audit.LoginFailedAsync("oidc_remote_failure", http.TraceIdentifier, null, CancellationToken.None);
+        await audit.LoginFailedAsync(
+            "oidc_remote_failure", http.TraceIdentifier, null, cancellationToken: CancellationToken.None);
 
         http.Response.Headers.CacheControl = "no-store";
         http.Response.Redirect(GetRedirectUrl(http, settings.FailureRedirect));

@@ -195,7 +195,7 @@ rejected backup code or an attempt-limit denial.
 
 | Event type | Producer (requirement) | Outcomes | Actor | Course | Resource | Allowed details |
 |-|-|-|-|-|-|-|
-| `auth.login` | Identity (IDN-02) | Success, Failure | Success: `User`. Failure: `Anonymous`, or `User` when the credentials were valid but the account is not active | forbidden | optional `Account` (the account that logged in) | `reasonCode` |
+| `auth.login` | Identity (IDN-02) | Success, Failure | Success: `User`. Failure: `Anonymous`, or `User` when the credentials were valid but the account is not active | forbidden | optional `Account` (the account that logged in) | `reasonCode`, `sourceAddress` |
 | `auth.logout` | Identity (IDN-02) | Success | `User` | forbidden | none | none |
 | `auth.login.throttled` | Identity (IDN-05) | Denied | `Anonymous` | forbidden | none | none |
 | `auth.mfa.throttled` | Identity (IDN-05, SEC-04 HTTP limit) | Denied | `Anonymous` | forbidden | none | none |
@@ -205,6 +205,7 @@ rejected backup code or an attempt-limit denial.
 | `auth.session.revoked` | Identity (IDN-07) | Success, Failure | `User` | forbidden | `Account` (required) | `revocationCause` (`user_request`, `mfa_attempts_exceeded`), `revokedHandle` (optional), `reasonCode` (Failure only, free Code) |
 | `account.status.changed` | Identity (IDN-03), Admin (ADM-01) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `oldStatus`, `newStatus`, `reasonCode` |
 | `account.unlocked` | Identity (IDN-05, administrator unlock) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `lockoutEnd`, optional `lockoutKind` = `password`, `mfa`, `both` (both fields Success only), `reasonCode` |
+| `session.rotated` | Session security, Team 09 (IDN-11) | Success, Denied, Failure | `User` | forbidden | `Account` (required) | `trigger`, `reasonCode` |
 | `course.member.role.changed` | Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
 | `course.delegation.granted` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
 | `course.delegation.revoked` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
@@ -240,6 +241,8 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 | `filterOutcome` | one of `success`, `denied`, `failure` |
 | `filterFrom`, `filterTo`, `lockoutEnd` | UTC timestamp, ISO 8601, ending with `Z` |
 | `resultCount` | integer from 0 to 100000 |
+| `trigger` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `login`, `mfa_completed`, `reauth_for_sensitive_change`, `role_changed` |
+| `sourceAddress` | plain IPv4 (dotted decimal) or IPv6 address, at most 45 characters, only `[0-9a-fA-F.:]` (no zone id, brackets or port); the producer normalizes the address and omits the detail when it is not valid (IDN-22) |
 
 ## Limits
 

@@ -32,7 +32,12 @@ public class AuthController(
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest body, CancellationToken ct)
     {
-        var result = await _login.ExecuteAsync(body.Email, body.Password, HttpContext.TraceIdentifier, ct);
+        var result = await _login.ExecuteAsync(
+            body.Email,
+            body.Password,
+            HttpContext.TraceIdentifier,
+            HttpContext.Connection.RemoteIpAddress?.ToString(), // IDN-22: recorded only in the auth.login audit event.
+            ct);
         Response.Headers.CacheControl = "no-store";
 
         switch (result.Outcome)
