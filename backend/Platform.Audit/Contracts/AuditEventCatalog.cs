@@ -177,7 +177,7 @@ public static class AuditEventCatalog
                 ("reasonCode", ReasonCode))),
 
         // IDN-06: administrator MFA reset. resetReason is a code from a fixed list, never free text.
-        // mfaWasEnabled is "true" or "false" (Code format). sessionsRevoked is how many sessions were revoked.
+        // mfaWasEnabled is "true" or "false" (Code format).
         new AuditEventSchema(
             AuditEventTypes.AccountMfaReset,
             PrivilegedChange,
@@ -190,9 +190,6 @@ public static class AuditEventCatalog
                     new[] { AuditOutcome.Success }.ToFrozenSet())),
                 ("mfaWasEnabled", new AuditDetailField(
                     AuditDetailFormat.Code,
-                    new[] { AuditOutcome.Success }.ToFrozenSet())),
-                ("sessionsRevoked", new AuditDetailField(
-                    AuditDetailFormat.Count,
                     new[] { AuditOutcome.Success }.ToFrozenSet())),
                 ("reasonCode", ReasonCode))),
 

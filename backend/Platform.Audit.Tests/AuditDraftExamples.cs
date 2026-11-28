@@ -88,6 +88,16 @@ internal static class AuditDraftExamples
 
         yield return (
             new AuditEventDraft(
+                AuditEventTypes.AccountMfaReset,
+                AuditOutcome.Success,
+                Resource: TargetAccount,
+                Details: Details(
+                    ("resetReason", "lost_device"), 
+                    ("mfaWasEnabled", "true"))),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
                 AuditEventTypes.AuthSessionRevoked,
                 AuditOutcome.Success,
                 Resource: TargetAccount,
