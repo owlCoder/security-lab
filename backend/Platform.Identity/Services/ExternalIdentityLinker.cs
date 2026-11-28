@@ -31,7 +31,7 @@ internal sealed class ExternalIdentityLinker(
         {
             existing.RecordLogin(now);
             await db.SaveChangesAsync(ct);
-            return FederatedLoginResult.Existing(existing.AccountId);
+            return FederatedLoginResult.Existing(existing.AccountId, await RoleOfAsync(existing.AccountId, ct));
         }
 
         // 2. First login: an unverified e-mail must not give access to someone else's account.
@@ -60,7 +60,7 @@ internal sealed class ExternalIdentityLinker(
         {
             // A concurrent first login of this same identity may have linked it after the lookup above.
             return linkedSubject == identity.Subject
-                ? FederatedLoginResult.Existing(accountId.Value)
+                ? FederatedLoginResult.Existing(accountId.Value, await RoleOfAsync(accountId.Value, ct))
                 : FederatedLoginResult.Refused(FederatedLoginOutcome.AccountAlreadyLinked);
         }
 
@@ -71,7 +71,7 @@ internal sealed class ExternalIdentityLinker(
         try
         {
             await db.SaveChangesAsync(ct);
-            return FederatedLoginResult.New(accountId.Value);
+            return FederatedLoginResult.New(accountId.Value, await RoleOfAsync(accountId.Value, ct));
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
@@ -81,10 +81,17 @@ internal sealed class ExternalIdentityLinker(
             // return its account; otherwise another identity of this issuer owns the account.
             var winner = await FindLinkAsync(identity.Issuer, identity.Subject, ct);
             return winner is not null
-                ? FederatedLoginResult.Existing(winner.AccountId)
+                ? FederatedLoginResult.Existing(winner.AccountId, await RoleOfAsync(winner.AccountId, ct))
                 : FederatedLoginResult.Refused(FederatedLoginOutcome.AccountAlreadyLinked);
         }
     }
+
+    private Task<AccountRole> RoleOfAsync(Guid accountId, CancellationToken ct) =>
+        db.Accounts
+            .AsNoTracking()
+            .Where(account => account.Id == accountId)
+            .Select(account => account.Role)
+            .SingleAsync(ct);
 
     private Task<ExternalLogin?> FindLinkAsync(string issuer, string subject, CancellationToken ct) =>
         db.ExternalLogins.SingleOrDefaultAsync(login => login.Issuer == issuer && login.Subject == subject, ct);

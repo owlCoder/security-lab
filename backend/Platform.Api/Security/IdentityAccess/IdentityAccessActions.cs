@@ -35,6 +35,8 @@ public static class IdentityAccessActions
     /// <c>MfaPending</c> session, which gives no Access subject. <c>MfaService</c> validates that session itself.
     /// </summary>
     public const string MfaVerify = "identity.mfa.verify";
+    public const string MfaEnrollRequired = "identity.mfa.enroll.required";
+    public const string MfaEnrollRequiredConfirm = "identity.mfa.enroll.required.confirm";
 
     /// <summary>
     /// IDN-03: central catalog action (System scope, privileged). A constant, because attributes need one;

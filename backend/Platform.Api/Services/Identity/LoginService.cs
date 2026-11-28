@@ -19,7 +19,8 @@ internal sealed class LoginService(
     ISessionCreator sessions,
     ISessionManager sessionManager,
     IMfaCredentialsStore mfaCredentials,
-    IdentityAuditProducer audit) : ILoginService
+    IdentityAuditProducer audit,
+    IMfaPolicy mfa) : ILoginService
 {
     public async Task<LoginResult> ExecuteAsync(
         string? email, string? password, string correlationId, CancellationToken ct = default)
@@ -68,7 +69,12 @@ internal sealed class LoginService(
                 actorConfirmed: true);
         }
 
-        var authenticationLevel = mfaEnabled ? AuthenticationLevel.MfaPending : AuthenticationLevel.Active;
+        // US-19: the role requires MFA, but the account has none yet, so it must enroll before anything else.
+        var enrollmentRequired = !mfaEnabled && mfa.IsRequiredFor(check.Role);
+
+        var authenticationLevel = mfaEnabled || enrollmentRequired
+            ? AuthenticationLevel.MfaPending
+            : AuthenticationLevel.Active;
 
         IssuedSession? session;
         try
@@ -112,7 +118,8 @@ internal sealed class LoginService(
         }
 
         return new LoginResult(
-            LoginOutcome.Success, check.AccountId, session, authenticationLevel == AuthenticationLevel.MfaPending);
+            LoginOutcome.Success, check.AccountId, session, authenticationLevel == AuthenticationLevel.MfaPending,
+            enrollmentRequired);
     }
 
     private static bool IsAcceptable(string? email, string? password) =>

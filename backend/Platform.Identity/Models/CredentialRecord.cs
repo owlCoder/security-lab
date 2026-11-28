@@ -7,4 +7,5 @@ public sealed record CredentialRecord(
     AccountStatus Status,
     string? PasswordHash,
     int FailedLoginCount = 0,
-    DateTimeOffset? LockoutEnd = null);
+    DateTimeOffset? LockoutEnd = null,
+    AccountRole Role = default);

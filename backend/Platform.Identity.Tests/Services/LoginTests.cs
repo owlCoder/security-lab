@@ -39,6 +39,7 @@ public class LoginTests
     private Mock<ISessionCreator> _sessions = null!;
     private Mock<ISessionManager> _sessionManager = null!;
     private Mock<IMfaCredentialsStore> _mfaCredentials = null!;
+    private Mock<IMfaPolicy> _mfaPolicy = null!;
     private Mock<ITrustedAuditWriter> _audit = null!;
     private List<(AuditEventDraft Draft, AuditContext Context)> _events = null!;
     private LoginService _login = null!;
@@ -50,6 +51,7 @@ public class LoginTests
         _sessions = new Mock<ISessionCreator>();
         _sessionManager = new Mock<ISessionManager>();
         _mfaCredentials = new Mock<IMfaCredentialsStore>();
+        _mfaPolicy = new Mock<IMfaPolicy>();
         _sessionManager.Setup(manager => manager.RevokeSession(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
@@ -69,12 +71,13 @@ public class LoginTests
         GivenCredentials(CredentialResult.Invalid);
         GivenSession(new IssuedSession(Token, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(8)));
 
-        _login = new LoginService(
+             _login = new LoginService(
             _verifier.Object,
             _sessions.Object,
             _sessionManager.Object,
             _mfaCredentials.Object,
-            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance),
+            _mfaPolicy.Object);
     }
 
     private void GivenCredentials(CredentialResult result) =>
@@ -126,6 +129,50 @@ public class LoginTests
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
         _sessions.Verify(store => store.CreateAsync(
             id, AuthenticationLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task ValidCredentials_WithRoleRequiringMfa_CreatesMfaPendingSession()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active, Role: AccountRole.Teacher));
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Teacher)).Returns(true);
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-mfa-pending");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _sessions.Verify(store => store.CreateAsync(
+            id, AuthenticationLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.That(result.MfaEnrollmentRequired, Is.True);
+    }
+
+    [Test]
+    public async Task ValidCredentials_WithRoleRequiringMfa_AndMfaEnabled_DoesNotRequireEnrollment()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active, Role: AccountRole.Teacher));
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Teacher)).Returns(true);
+        _mfaCredentials.Setup(store => store.GetAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MfaCredentials(id) { MfaEnabled = true });
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-role-mfa-enabled");
+
+        Assert.That(result.MfaRequired, Is.True);
+        Assert.That(result.MfaEnrollmentRequired, Is.False);
+    }
+
+    [Test]
+    public async Task ValidCredentials_WithRoleNotRequiringMfa_CreatesActiveSession()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(true, id, AccountStatus.Active, Role: AccountRole.Student));
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Student)).Returns(false);
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-mfa-pending");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _sessions.Verify(store => store.CreateAsync(
+            id, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Test]

@@ -28,6 +28,7 @@ public class FederatedLoginServiceTests
     private Mock<ISessionCreator> _sessions = null!;
     private Mock<ISessionManager> _sessionManager = null!;
     private Mock<ITrustedAuditWriter> _audit = null!;
+    private Mock<IMfaPolicy> _mfaPolicy = null!;
     private List<(AuditEventDraft Draft, AuditContext Context)> _events = null!;
     private ExternalIdentity? _seenIdentity;
     private FederatedLoginService _login = null!;
@@ -38,6 +39,7 @@ public class FederatedLoginServiceTests
         _linker = new Mock<IExternalIdentityLinker>();
         _sessions = new Mock<ISessionCreator>();
         _sessionManager = new Mock<ISessionManager>();
+        _mfaPolicy = new Mock<IMfaPolicy>();
         _sessionManager
             .Setup(m => m.RevokeSession(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -51,12 +53,13 @@ public class FederatedLoginServiceTests
         GivenSession(new IssuedSession(Token, Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(8)));
 
         _login = new FederatedLoginService(
-            _linker.Object,
-            _sessions.Object,
-            _sessionManager.Object,
-            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance));
-    }
-
+        _linker.Object,
+        _sessions.Object,
+        _sessionManager.Object,
+        new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance),
+        _mfaPolicy.Object);
+        }
+        
     // ---------- Success ----------
 
     [TestCase(FederatedLoginOutcome.Linked)]
@@ -80,6 +83,32 @@ public class FederatedLoginServiceTests
             Assert.That(e.Context.Actor.Id, Is.EqualTo(AccountId));
             Assert.That(e.Context.CorrelationId, Is.EqualTo("corr-1"));
         });
+    }
+
+    [Test]
+    public async Task LinkedIdentity_WithRoleRequiringMfa_CreatesMfaPendingSession()
+    {
+        GivenLink(new FederatedLoginResult(FederatedLoginOutcome.Linked, AccountId, AccountRole.Teacher));
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Teacher)).Returns(true);
+
+        var result = await _login.ExecuteAsync(Principal(), "corr-oidc-mfa");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _sessions.Verify(store => store.CreateAsync(
+            AccountId, AuthenticationLevel.MfaPending, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task LinkedIdentity_WithRoleNotRequiringMfa_CreatesActiveSession()
+    {
+        GivenLink(new FederatedLoginResult(FederatedLoginOutcome.Linked, AccountId, AccountRole.Student));
+        _mfaPolicy.Setup(policy => policy.IsRequiredFor(AccountRole.Student)).Returns(false);
+
+        var result = await _login.ExecuteAsync(Principal(), "corr-oidc-mfa");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _sessions.Verify(store => store.CreateAsync(
+            AccountId, AuthenticationLevel.Active, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ---------- Reading the validated token ----------

@@ -27,7 +27,8 @@ public sealed class MfaService(
     TimeProvider clock,
     ITotpSecretProtector secretProtector,
     IOptions<MfaLockoutOptions> lockout,
-    ILogger<MfaService> logger) : IMfaService
+    ILogger<MfaService> logger,
+    IMfaPolicy mfaPolicy) : IMfaService
 {
     private const int SecretKeyVersion = 1;
     private static readonly TimeSpan EnrollmentLifetime = TimeSpan.FromMinutes(10);
@@ -39,6 +40,7 @@ public sealed class MfaService(
     private readonly ITotpSecretProtector _secretProtector = secretProtector;
     private readonly MfaLockoutOptions _lockout = lockout.Value;
     private readonly ILogger<MfaService> _logger = logger;
+    private readonly IMfaPolicy _mfaPolicy = mfaPolicy;
 
     public async Task<(MfaOutcome Outcome, string? Uri)> EnrollAsync(
         string? rawToken,
@@ -49,10 +51,12 @@ public sealed class MfaService(
             return (MfaOutcome.Unauthorized, null);
 
         var session = await _sessionStore.FindByTokenAsync(rawToken, ct);
-        if (session is null || !IsActiveSession(session))
+        if (session is null)
             return (MfaOutcome.Unauthorized, null);
 
         var credentials = await _mfaCredentialsStore.GetAsync(session.UserId, ct);
+        if (!await MayEnrollAsync(session, credentials, ct))
+            return (MfaOutcome.Unauthorized, null);
         if (credentials?.MfaEnabled == true)
             return (MfaOutcome.AlreadyEnabled, null);
 
@@ -68,7 +72,7 @@ public sealed class MfaService(
             // both are still valid, in the same transaction, so a block or revocation in between stores nothing.
             await using var work = await _mfaCredentialsStore.BeginAsync(ct);
             var now = _clock.GetUtcNow();
-            if (!await work.TryLockActiveSessionAsync(session.UserId, session.Id, AuthLevel.Active, now, ct))
+            if (!await work.TryLockActiveSessionAsync(session.UserId, session.Id, session.AuthLevel, now, ct))
                 return (MfaOutcome.Unauthorized, null);
 
             if (!await work.TryCreatePendingAsync(
@@ -102,12 +106,14 @@ public sealed class MfaService(
             return MfaOutcome.Unauthorized;
 
         var session = await _sessionStore.FindByTokenAsync(rawToken, ct);
-        if (session is null || !IsActiveSession(session))
+        if (session is null)
             return MfaOutcome.Unauthorized;
 
         var userId = session.UserId;
         // No row yet means confirm without /mfa/enroll: a client error like every other missing enrollment.
         var credentials = await _mfaCredentialsStore.GetAsync(userId, ct);
+        if (!await MayEnrollAsync(session, credentials, ct))
+            return MfaOutcome.Unauthorized;
         if (credentials is null)
             return await RefuseEnableAsync(userId, "no_valid_enrollment", correlationId, MfaOutcome.InvalidCode, ct);
         if (credentials.MfaEnabled)
@@ -142,7 +148,7 @@ public sealed class MfaService(
         {
             await using var work = await _mfaCredentialsStore.BeginAsync(ct);
             var now = _clock.GetUtcNow();
-            if (!await work.TryLockActiveSessionAsync(userId, session.Id, AuthLevel.Active, now, ct))
+            if (!await work.TryLockActiveSessionAsync(userId, session.Id, session.AuthLevel, now, ct))
                 sessionInactive = true;
             else if (await work.TryConfirmEnrollmentAsync(userId, pendingCiphertext, result.timeStepMatched, now, ct))
             {
@@ -295,6 +301,25 @@ public sealed class MfaService(
         session.RevokedAt is null
         && session.AuthLevel == AuthLevel.Active
         && session.ExpiresAt > _clock.GetUtcNow();
+
+    /// <summary>
+    /// US-19: a fully signed-in session may enroll as before. A <c>MfaPending</c> session may enroll only when the role
+    /// requires MFA and the account has none yet, so a stolen password cannot replace an authenticator that exists.
+    /// </summary>
+    private async Task<bool> MayEnrollAsync(Session session, MfaCredentials? credentials, CancellationToken ct)
+    {
+        if (IsActiveSession(session))
+            return true;
+
+        if (session.AuthLevel != AuthLevel.MfaPending || !session.IsActiveAt(_clock.GetUtcNow()))
+            return false;
+
+        if (credentials?.MfaEnabled == true)
+            return false;
+
+        var role = await _mfaCredentialsStore.GetRoleAsync(session.UserId, ct);
+        return role is { } r && _mfaPolicy.IsRequiredFor(r);
+    }
 
     /// <summary>A refused confirmation changes nothing, so a failed Audit write does not change the answer.</summary>
     private async Task<MfaOutcome> RefuseEnableAsync(

@@ -25,6 +25,14 @@ public class EfMfaCredentialsStore(PlatformIdentityDbContext db) : IMfaCredentia
             .SingleOrDefaultAsync(ct);
     }
 
+    public async Task<AccountRole?> GetRoleAsync(Guid userId, CancellationToken ct)
+    {
+        return await _db.Accounts
+            .Where(account => account.Id == userId)
+            .Select(account => (AccountRole?)account.Role)
+            .SingleOrDefaultAsync(ct);
+    }
+
     public async Task<bool> RecordFailedAttemptAsync(
         Guid userId,
         int maxAttempts,
