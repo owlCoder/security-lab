@@ -14,6 +14,8 @@ public sealed class MembershipDbContext(DbContextOptions<MembershipDbContext> op
 
     public DbSet<CourseMember> CourseMembers => Set<CourseMember>();
 
+    public DbSet<CourseDelegation> CourseDelegations => Set<CourseDelegation>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(Schema);
