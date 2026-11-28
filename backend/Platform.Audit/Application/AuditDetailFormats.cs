@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 using Platform.Audit.Contracts;
 
@@ -8,6 +10,7 @@ namespace Platform.Audit.Application;
 internal static partial class AuditDetailFormats
 {
     private const int MaxCount = 100_000;
+    private const int MaxIpAddressLength = 45;
 
     private static readonly string[] AccountStatuses = ["active", "blocked", "archived"];
     private static readonly string[] CourseRoles = ["none", "student", "teacher", "assistant"];
@@ -34,6 +37,9 @@ internal static partial class AuditDetailFormats
     [GeneratedRegex(@"^(0|[1-9][0-9]{0,5})$", RegexOptions.CultureInvariant)]
     private static partial Regex CountPattern();
 
+    [GeneratedRegex(@"^[0-9a-fA-F.:]+$", RegexOptions.CultureInvariant)]
+    private static partial Regex IpAddressPattern();
+
     public static bool IsValid(AuditDetailFormat format, string? value)
     {
         if (string.IsNullOrEmpty(value)
@@ -57,9 +63,19 @@ internal static partial class AuditDetailFormats
             AuditDetailFormat.Sha256 => value.Length == 64 && value.All(ch => ch is >= '0' and <= '9' or >= 'a' and <= 'f'),
             AuditDetailFormat.RevisionNumber => int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
                 && number > 0 && value == number.ToString(CultureInfo.InvariantCulture),
+            AuditDetailFormat.IpAddress => IsIpAddress(value),
             _ => false
         };
     }
+
+    // IDN-22: hex digits, dots and colons only, so zone ids, brackets, ports and spaces are rejected.
+    // IPv4 must round-trip, because IPAddress.TryParse also accepts short forms such as "1".
+    private static bool IsIpAddress(string value) =>
+        value.Length <= MaxIpAddressLength
+        && IpAddressPattern().IsMatch(value)
+        && IPAddress.TryParse(value, out var address)
+        && (address.AddressFamily == AddressFamily.InterNetworkV6
+            || (address.AddressFamily == AddressFamily.InterNetwork && address.ToString() == value));
 
     private static bool IsUtcTimestamp(string value) =>
         UtcTimestampPattern().IsMatch(value)

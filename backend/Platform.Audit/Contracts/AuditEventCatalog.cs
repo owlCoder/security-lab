@@ -61,7 +61,10 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             AuditPresence.Optional,
             AuditResourceTypes.Account,
-            Fields(("reasonCode", ReasonCode))),
+            Fields(
+                ("reasonCode", ReasonCode),
+                // IDN-22: full client address, masked by the reader of the login history.
+                ("sourceAddress", new AuditDetailField(AuditDetailFormat.IpAddress)))),
 
         new AuditEventSchema(
             AuditEventTypes.AuthLogout,
@@ -174,6 +177,17 @@ public static class AuditEventCatalog
                 ("lockoutEnd", new AuditDetailField(
                     AuditDetailFormat.UtcTimestamp,
                     new[] { AuditOutcome.Success }.ToFrozenSet())),
+                ("reasonCode", ReasonCode))),
+
+        // IDN-11: session identifier rotation. Never carries the token, its hash or the session handle.
+        new AuditEventSchema(
+            AuditEventTypes.SessionRotated,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Denied, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("trigger", new AuditDetailField(AuditDetailFormat.Code)),
                 ("reasonCode", ReasonCode))),
 
         new AuditEventSchema(

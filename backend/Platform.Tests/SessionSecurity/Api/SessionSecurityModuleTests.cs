@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Api.Modules.SessionSecurity;
+using Platform.Api.Modules.SessionSecurity.Audit;
+using Platform.Audit.Contracts;
 using Platform.SessionSecurity.Application;
 using Platform.SessionSecurity.Contracts;
 using Platform.SessionSecurity.Domain;
@@ -16,13 +18,15 @@ namespace Platform.Tests.SessionSecurity.Api;
 public sealed class SessionSecurityModuleTests
 {
     private const string CorrelationId = "corr-1";
+    private const string PreLoginToken = "pre-login-token-value";
 
     private static readonly DateTimeOffset Now = new(2026, 11, 10, 9, 0, 0, TimeSpan.Zero);
+    private static readonly string UserId = Guid.Parse("aaaaaaaa-0000-4000-8000-000000000001").ToString("D");
 
     [Test]
     public void AddSessionSecurity_WhenResolvedInScope_ProvidesRotationUseCase()
     {
-        using var provider = BuildProvider();
+        using var provider = BuildProvider(new RecordingTrustedAuditWriter());
         using var scope = provider.CreateScope();
 
         var useCase = scope.ServiceProvider.GetRequiredService<IRotateSessionUseCase>();
@@ -33,7 +37,7 @@ public sealed class SessionSecurityModuleTests
     [Test]
     public void AddSessionSecurity_WhenResolvedInScope_ProvidesLoginHistoryUseCase()
     {
-        using var provider = BuildProvider();
+        using var provider = BuildProvider(new RecordingTrustedAuditWriter());
         using var scope = provider.CreateScope();
 
         var useCase = scope.ServiceProvider.GetRequiredService<ISearchLoginHistoryUseCase>();
@@ -60,53 +64,75 @@ public sealed class SessionSecurityModuleTests
     }
 
     [Test]
-    public async Task UnavailableSessionSecurityAuditWriter_TryWriteAsync_ReturnsFalse()
+    public void AddSessionSecurity_WhenResolvedInScope_ProvidesAuditModuleAdapter()
     {
-        using var provider = BuildProvider();
+        using var provider = BuildProvider(new RecordingTrustedAuditWriter());
         using var scope = provider.CreateScope();
+
         var writer = scope.ServiceProvider.GetRequiredService<ISessionSecurityAuditWriter>();
 
-        var result = await writer.TryWriteAsync(new SessionSecurityAuditEntry(
-            SessionSecurityAuditEvents.SessionRotated, "user-a", RotationTrigger.Login,
-            SessionRotationCodes.Rotated, Now, CorrelationId));
-
-        Assert.That(result, Is.False);
+        Assert.That(writer, Is.InstanceOf<AuditSessionSecurityAuditWriter>());
     }
 
     [Test]
-    public async Task AddSessionSecurity_WithUnavailableAudit_RotationIsRejected()
+    public async Task AddSessionSecurity_WhenAuditModuleIsUnavailable_RotationIsRejected()
     {
-        using var provider = BuildProvider();
+        var trusted = new RecordingTrustedAuditWriter(AuditWriteResult.Unavailable());
+        using var provider = BuildProvider(trusted);
         using var scope = provider.CreateScope();
-        const string preLoginToken = "pre-login-token-value";
 
-        var store = (InMemorySessionRotationStore)scope.ServiceProvider
-            .GetRequiredService<ISessionRotationStore>();
-        var tokenGenerator = scope.ServiceProvider.GetRequiredService<ISessionTokenGenerator>();
-        store.Add(new RotatableSession(
-            Guid.NewGuid(),
-            SubjectId: null,
-            tokenGenerator.ComputeHash(preLoginToken),
-            SessionPrivilegeLevel.PreAuthentication,
-            Now.AddMinutes(-5),
-            Now.AddHours(8)));
-
-        var useCase = scope.ServiceProvider.GetRequiredService<IRotateSessionUseCase>();
-        var result = await useCase.RotateAsync(new RotateSessionRequest(
-            preLoginToken, "user-a", RotationTrigger.Login, SessionPrivilegeLevel.Authenticated, CorrelationId));
+        var result = await RotateAsync(scope.ServiceProvider);
 
         Assert.Multiple(() =>
         {
             Assert.That(result.Succeeded, Is.False);
             Assert.That(result.Code, Is.EqualTo(SessionRotationCodes.AuditFailed));
+            Assert.That(result.NewToken, Is.Null);
         });
     }
 
-    private static ServiceProvider BuildProvider()
+    [Test]
+    public async Task AddSessionSecurity_WhenAuditModuleRecords_RotationSucceedsAndIsAudited()
+    {
+        var trusted = new RecordingTrustedAuditWriter();
+        using var provider = BuildProvider(trusted);
+        using var scope = provider.CreateScope();
+
+        var result = await RotateAsync(scope.ServiceProvider);
+
+        var (draft, _) = trusted.Writes.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Succeeded, Is.True);
+            Assert.That(draft.EventType, Is.EqualTo(AuditEventTypes.SessionRotated));
+            Assert.That(draft.Outcome, Is.EqualTo(AuditOutcome.Success));
+        });
+    }
+
+    private static async Task<SessionRotationResult> RotateAsync(IServiceProvider services)
+    {
+        var store = (InMemorySessionRotationStore)services.GetRequiredService<ISessionRotationStore>();
+        var tokenGenerator = services.GetRequiredService<ISessionTokenGenerator>();
+        store.Add(new RotatableSession(
+            Guid.NewGuid(),
+            SubjectId: null,
+            tokenGenerator.ComputeHash(PreLoginToken),
+            SessionPrivilegeLevel.PreAuthentication,
+            Now.AddMinutes(-5),
+            Now.AddHours(8)));
+
+        var useCase = services.GetRequiredService<IRotateSessionUseCase>();
+        return await useCase.RotateAsync(new RotateSessionRequest(
+            PreLoginToken, UserId, RotationTrigger.Login, SessionPrivilegeLevel.Authenticated, CorrelationId));
+    }
+
+    private static ServiceProvider BuildProvider(RecordingTrustedAuditWriter trustedAuditWriter)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TimeProvider>(new FixedTimeProvider(Now));
+        // The Audit module (Team 12) is registered by the host; here it is replaced by a recording double.
+        services.AddSingleton<ITrustedAuditWriter>(trustedAuditWriter);
         services.AddSessionSecurity();
         // These tests exercise the module's wiring in isolation, not a real store adapter.
         // AddSessionSecuritySessions() registers the same in-memory store for now; the line
