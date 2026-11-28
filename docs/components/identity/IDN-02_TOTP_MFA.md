@@ -344,6 +344,9 @@ umesto koda i URI-ja (`MfaContracts_ToString_HideCodeAndUri`; Trace log oba MFA 
 
 ## 9. Budući rad
 
+Audit dopuna i preostala IDN-05 integracija iz #270 opisane su u
+[IDN-05 — MFA Audit ugovor](IDN-05.md#issue-270-mfa-audit-ugovor).
+
 Recovery kodovi i administratorski MFA reset nisu deo US-17. TOTP nije
 phishing-resistant MFA; WebAuthn/passkeys mogu biti buduće poboljšanje.
 

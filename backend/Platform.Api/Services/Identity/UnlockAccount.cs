@@ -1,5 +1,4 @@
 using System.Data.Common;
-using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Platform.Api.Enums.Identity;
@@ -61,11 +60,7 @@ public sealed partial class UnlockAccount(
             else
             {
                 var recorded = await audit.WriteAsync(
-                    new AuditEventDraft(
-                        AuditEventTypes.AccountUnlocked,
-                        AuditOutcome.Success,
-                        Resource: AccountRef(targetId),
-                        Details: new Dictionary<string, string> { ["lockoutEnd"] = UtcTimestamp(clearedEnd) }),
+                    IdentityAuditProducer.CreateAccountUnlockedDraft(targetId, clearedEnd, null),
                     new AuditContext(actor, correlationId),
                     work.Transaction, ct);
 
@@ -127,11 +122,6 @@ public sealed partial class UnlockAccount(
 
     private static AuditResourceRef AccountRef(Guid accountId) =>
         new(AuditResourceTypes.Account, accountId.ToString("D"));
-
-    // The Audit contract accepts an ISO 8601 UTC timestamp ending with Z and up to 7 fractional digits
-    // (AuditDetailFormat.UtcTimestamp). FFFFFFF keeps the exact value; a zero fraction drops the '.' as well.
-    private static string UtcTimestamp(DateTimeOffset value) =>
-        value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture);
 
     [GeneratedRegex("^[A-Za-z0-9._-]{1,64}$", RegexOptions.CultureInvariant)]
     private static partial Regex CorrelationIdPattern();

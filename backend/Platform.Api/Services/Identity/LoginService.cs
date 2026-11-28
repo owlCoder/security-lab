@@ -13,6 +13,7 @@ namespace Platform.Api.Services.Identity;
 /// <summary>
 /// US-04: e-mail + password login (DFD process P1). Unknown e-mail, wrong password, missing hash and
 /// blocked/archived accounts all return the same InvalidCredentials; only the audit event tells them apart.
+/// IDN-22: every auth.login event also carries the client address the caller passes in.
 /// </summary>
 internal sealed class LoginService(
     ICredentialVerifier credentials,
@@ -22,10 +23,12 @@ internal sealed class LoginService(
     IdentityAuditProducer audit) : ILoginService
 {
     public async Task<LoginResult> ExecuteAsync(
-        string? email, string? password, string correlationId, CancellationToken ct = default)
+        string? email, string? password, string correlationId, string? sourceAddress = null,
+        CancellationToken ct = default)
     {
         if (!IsAcceptable(email, password))
-            return await FailAsync(LoginOutcome.InvalidRequest, "invalid_request", correlationId, null, ct);
+            return await FailAsync(
+                LoginOutcome.InvalidRequest, "invalid_request", correlationId, null, sourceAddress, ct);
 
         var check = await credentials.VerifyAsync(email!, password!, ct);
 
@@ -37,10 +40,12 @@ internal sealed class LoginService(
                 "account_locked",
                 correlationId,
                 check.AccountId,
+                sourceAddress,
                 ct);
 
         if (!check.IsValid)
-            return await FailAsync(LoginOutcome.InvalidCredentials, "invalid_credentials", correlationId, null, ct);
+            return await FailAsync(
+                LoginOutcome.InvalidCredentials, "invalid_credentials", correlationId, null, sourceAddress, ct);
 
         if (check.Status != AccountStatus.Active)
             return await FailAsync(
@@ -48,6 +53,7 @@ internal sealed class LoginService(
                 check.Status == AccountStatus.Blocked ? "account_blocked" : "account_archived",
                 correlationId,
                 check.AccountId,
+                sourceAddress,
                 ct,
                 actorConfirmed: true);
 
@@ -64,6 +70,7 @@ internal sealed class LoginService(
                 "mfa_unavailable",
                 correlationId,
                 check.AccountId,
+                sourceAddress,
                 ct,
                 actorConfirmed: true);
         }
@@ -84,6 +91,7 @@ internal sealed class LoginService(
                 "account_inactive",
                 correlationId,
                 check.AccountId,
+                sourceAddress,
                 ct,
                 actorConfirmed: true);
         }
@@ -94,13 +102,14 @@ internal sealed class LoginService(
                 "session_unavailable",
                 correlationId,
                 check.AccountId,
+                sourceAddress,
                 ct,
                 actorConfirmed: true);
 
         // The session has already been persisted. A disconnected client must not cancel
         // the evidence write for an action that has taken effect.
         var auditResult = await audit.LoginSucceededAsync(
-            check.AccountId, correlationId, CancellationToken.None);
+            check.AccountId, correlationId, sourceAddress, CancellationToken.None);
         if (!auditResult.IsRecorded)
         {
             // The client must never receive a session for a login that could not be
@@ -124,6 +133,7 @@ internal sealed class LoginService(
         string reasonCode,
         string correlationId,
         Guid? confirmedUserId,
+        string? sourceAddress,
         CancellationToken cancellationToken,
         bool actorConfirmed = false)
     {
@@ -131,6 +141,7 @@ internal sealed class LoginService(
             reasonCode,
             correlationId,
             confirmedUserId,
+            sourceAddress,
             cancellationToken,
             actorConfirmed);
         return new LoginResult(outcome);

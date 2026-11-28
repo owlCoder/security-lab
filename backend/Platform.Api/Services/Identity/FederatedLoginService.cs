@@ -48,7 +48,7 @@ internal sealed class FederatedLoginService(
                 outcome: LoginOutcome.Unavailable);
 
         // Same rule as password login: no session for a login that could not be durably audited.
-        var auditResult = await audit.LoginSucceededAsync(accountId, correlationId, CancellationToken.None);
+        var auditResult = await audit.LoginSucceededAsync(accountId, correlationId, cancellationToken: CancellationToken.None);
         if (!auditResult.IsRecorded)
         {
             await sessionManager.RevokeSession(accountId, session.Handle, CancellationToken.None);
@@ -97,7 +97,8 @@ internal sealed class FederatedLoginService(
         bool actorConfirmed = false,
         LoginOutcome outcome = LoginOutcome.InvalidCredentials)
     {
-        await audit.LoginFailedAsync(reasonCode, correlationId, confirmedUserId, ct, actorConfirmed);
+        await audit.LoginFailedAsync(
+            reasonCode, correlationId, confirmedUserId, cancellationToken: ct, actorConfirmed: actorConfirmed);
         return new LoginResult(outcome);
     }
 }

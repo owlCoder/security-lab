@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -39,6 +40,7 @@ public class AccountUnlockIntegrationTests : IntegrationTestBase
     [Test]
     public async Task Admin_UnlocksLockedAccount_LoginWorksAgain_AndSuccessIsAudited()
     {
+        // Arrange
         var (admin, student) = await ArrangeAdminAndStudentAsync();
         await LockAsync(student.Id, failedLogins: 2);
         var lockedUntil = (await UserTestData.GetAsync(Factory, student.Id))!.LockoutEnd!.Value;
@@ -46,8 +48,10 @@ public class AccountUnlockIntegrationTests : IntegrationTestBase
         Assert.That((await LoginAsync(student.Email, Password)).StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized),
             "the correct password is refused while the account is locked");
 
+        // Act
         var response = await SendAsync(UnlockUrl(student.Id), adminSession.RawToken);
 
+        // Assert
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var body = await response.Content.ReadFromJsonAsync<UnlockResponse>();
         Assert.That(body, Is.EqualTo(new UnlockResponse(student.Id, true)));
@@ -63,6 +67,8 @@ public class AccountUnlockIntegrationTests : IntegrationTestBase
         Assert.That(record.Outcome, Is.EqualTo("Success"));
         Assert.That(record.ActorId, Is.EqualTo(admin.Id));
         Assert.That(record.Details, Does.Contain("lockoutEnd").And.Not.Contain(student.Email));
+        using var auditDetails = JsonDocument.Parse(record.Details);
+        Assert.That(auditDetails.RootElement.GetProperty("lockoutKind").GetString(), Is.EqualTo("password"));
         // The exact value that was cleared, in UTC, with the microseconds PostgreSQL stored.
         Assert.That(record.Details, Does.Contain(
             lockedUntil.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture)));

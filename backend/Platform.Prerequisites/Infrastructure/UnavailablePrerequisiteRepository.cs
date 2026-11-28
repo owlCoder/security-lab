@@ -1,5 +1,4 @@
-﻿
-using Platform.Prerequisites.Contracts;
+﻿using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Domain;
 
 namespace Platform.Prerequisites.Infrastructure;

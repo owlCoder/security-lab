@@ -18,6 +18,7 @@ D3 and D6 in [DECISIONS.md](DECISIONS.md) and the contract in [CONTRACTS.md](CON
 | Team 1, Identity login | IDN-02 | Where `auth.login` and `auth.logout` are written, which actor is used, behaviour when the audit write fails | Members 9 and 3 |
 | Team 2, Identity account status | IDN-03 | Moving `account.status.change` to the shared contract, reason codes instead of free text, transaction | Members 9, 3 and 2 |
 | IDN-05 owner (rate limiting) | IDN-05 | Whether and how often `auth.login.throttled` is written | Member 9 |
+| IDN-05 owners (#270) | IDN-05, SEC-04 | Review `auth.mfa.throttled`, its frequency and the `account.unlocked.lockoutKind` values; decide whether `both` needs separate expiry fields | Member 9 |
 | Membership and delegation owner | ACC-03, ACC-07 | Who owns them; a reader for current membership and delegation (AUD-06); producing `course.*` events | Members 9 and 5 |
 | Owners of AUD-02..05, AUD-07 and ADM-01, ADM-05, ADM-07 | AUD, ADM | Who owns them; correlation (AUD-04); retention and archive | Members 9, 10, 2 and 7 |
 | Course assistant | | Events without a course, administrator view, KT1/KT2 dates | Member 1 (dates), member 9 (scope) |
@@ -189,6 +190,15 @@ Audit component agree a short list of codes.
 - `auth.login.throttled` (IDN-05): one record per refused request is the default. If the volume
   is too high, the IDN-05 owner and member 9 agree a documented limit; no silent sampling. The
   client IP address is not stored without a separate data-minimization decision.
+- `auth.mfa.throttled` (#270 proposal): IDN-05 owns the HTTP integration and frequency.
+  Propose one write attempt per request refused by the MFA HTTP policy, without silent sampling.
+  Only `Denied` with `Anonymous` and server correlation is accepted; no account, course, IP or
+  details. It is distinct from the per-account MFA attempt-limit event. The producer and catalog
+  are prepared; the HTTP callback is still pending. Audit failure must preserve the 429.
+- `account.unlocked.lockoutKind` (#270 proposal): `password`, `mfa` or `both`, Success only.
+  The existing password-only unlock now uses the factory and emits `password` transactionally.
+  MFA clearing remains pending. Team 12 must confirm the event/detail contract and whether the
+  latest cleared `lockoutEnd` suffices for `both` or a separate MFA expiry is needed.
 - `session.validation` is not in the catalog. Either it is added with a schema and a test, or it
   stays a technical log entry. Decision for the session owner and member 8.
 - When the audit write of a login fails, the behaviour of authentication is decided by the

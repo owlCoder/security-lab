@@ -37,6 +37,7 @@ internal static class AuditDraftExamples
         yield return (
             new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
             AnonymousContext);
+        yield return (new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied), AnonymousContext);
 
         yield return (
             new AuditEventDraft(
@@ -99,6 +100,8 @@ internal static class AuditDraftExamples
         yield return (StatusChange(), UserContext);
 
         yield return (Unlock(), UserContext);
+
+        yield return (Rotation(), UserContext);
 
         foreach (var eventType in new[] { AuditEventTypes.RevisionSubmitted, AuditEventTypes.RevisionApproved,
                      AuditEventTypes.RevisionReturned })
@@ -163,6 +166,15 @@ internal static class AuditDraftExamples
             outcome,
             Resource: TargetAccount,
             Details: details ?? Details(("lockoutEnd", "2026-11-23T10:15:00Z")));
+
+    public static AuditEventDraft Rotation(
+        AuditOutcome outcome = AuditOutcome.Success,
+        IReadOnlyDictionary<string, string>? details = null) =>
+        new(
+            AuditEventTypes.SessionRotated,
+            outcome,
+            Resource: TargetAccount,
+            Details: details ?? Details(("trigger", "login")));
 
     public static IReadOnlyDictionary<string, string> Details(params (string Key, string Value)[] entries) =>
         entries.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);

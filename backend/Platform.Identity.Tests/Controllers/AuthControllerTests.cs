@@ -91,6 +91,7 @@ public class AuthControllerTests
                 email,
                 password,
                 http.TraceIdentifier,
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LoginResult(
                 LoginOutcome.Success,
@@ -105,7 +106,8 @@ public class AuthControllerTests
         Assert.That(http.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
         Assert.That(http.Response.Headers.SetCookie.ToString(), Does.Contain($"{SessionCookie.Name}={token}"));
         _login.Verify(
-            service => service.ExecuteAsync(email, password, http.TraceIdentifier, CancellationToken.None),
+            service => service.ExecuteAsync(
+                email, password, http.TraceIdentifier, It.IsAny<string?>(), CancellationToken.None),
             Times.Once);
     }
 
@@ -118,7 +120,7 @@ public class AuthControllerTests
         var request = new LoginRequest("test@platform.com", "SecurePassword123!");
         _login
             .Setup(service => service.ExecuteAsync(
-                request.Email, request.Password, http.TraceIdentifier, It.IsAny<CancellationToken>()))
+                request.Email, request.Password, http.TraceIdentifier, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LoginResult(
                 LoginOutcome.Success,
                 userId,
@@ -150,6 +152,7 @@ public class AuthControllerTests
                 request.Email,
                 request.Password,
                 http.TraceIdentifier,
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LoginResult(outcome));
 
