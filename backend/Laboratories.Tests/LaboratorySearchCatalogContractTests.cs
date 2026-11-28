@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging;
 using Platform.Access.AspNet;
 using Platform.Access.Contracts;
 using AccessActionScope = Platform.Access.Domain.Enums.ActionScope;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.Laboratories.Api;
@@ -191,11 +190,10 @@ public sealed class LaboratorySearchCatalogContractTests
         }
     }
 
-    [TestCase(AuthenticationLevel.None, false)]
-    [TestCase(AuthenticationLevel.MfaPending, false)]
-    [TestCase(AuthenticationLevel.Active, true)]
+    [TestCase(AuthLevel.MfaPending, false)]
+    [TestCase(AuthLevel.Active, true)]
     public async Task Catalog_RejectsSessionWithoutFullyAuthenticatedSubject(
-        AuthenticationLevel authenticationLevel, bool emptySessionUserId)
+        AuthLevel authenticationLevel, bool emptySessionUserId)
     {
         using var factory = new CatalogContractFactory(
             authenticationLevel: authenticationLevel, emptySessionUserId: emptySessionUserId);
@@ -263,7 +261,7 @@ public sealed class LaboratorySearchCatalogContractTests
 
     private sealed class CatalogContractFactory(
         AccountStatus? accountStatus = AccountStatus.Active,
-        AuthenticationLevel authenticationLevel = AuthenticationLevel.Active,
+        AuthLevel authenticationLevel = AuthLevel.Active,
         bool emptySessionUserId = false) : WebApplicationFactory<Program>
     {
         private readonly InMemoryLaboratoryRepository repository = new();
@@ -326,7 +324,7 @@ public sealed class LaboratorySearchCatalogContractTests
                 ? new(accountId, currentStatus) : null);
     }
 
-    private sealed class TestSessionManager(AuthenticationLevel level, bool emptyUserId) : ISessionManager
+    private sealed class TestSessionManager(AuthLevel level, bool emptyUserId) : ISessionManager
     {
         public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) =>
             Task.FromResult<ValidateSession?>(token == Teacher

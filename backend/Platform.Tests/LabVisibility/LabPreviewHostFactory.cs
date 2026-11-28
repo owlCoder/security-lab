@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -65,7 +64,7 @@ internal sealed class LabPreviewHostFactory : WebApplicationFactory<Program>
     {
         public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) =>
             Task.FromResult(KnownUsers.Contains(token)
-                ? new ValidateSession(Guid.NewGuid(), Guid.Parse(token), AuthenticationLevel.Active)
+                ? new ValidateSession(Guid.NewGuid(), Guid.Parse(token), AuthLevel.Active)
                 : null);
 
         public Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) =>

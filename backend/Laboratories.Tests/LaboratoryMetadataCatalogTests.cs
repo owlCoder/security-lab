@@ -10,7 +10,6 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Platform.Access.Infrastructure.Membership;
 using Platform.Access.Infrastructure.Resources;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.Laboratories.Api;
@@ -196,7 +195,7 @@ public sealed class LaboratoryMetadataCatalogTests
     {
         public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) =>
             Task.FromResult<ValidateSession?>(token == "metadata-catalog-test"
-                ? new(Guid.NewGuid(), MetadataTestData.TeacherId, AuthenticationLevel.Active) : null);
+                ? new(Guid.NewGuid(), MetadataTestData.TeacherId, AuthLevel.Active) : null);
         public Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<bool> RevokeSession(Guid ownerUserId, Guid sessionHandle, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<SessionInfo>> ListForUser(Guid userId, CancellationToken ct = default) => throw new NotSupportedException();

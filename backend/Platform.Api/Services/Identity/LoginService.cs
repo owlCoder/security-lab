@@ -75,12 +75,12 @@ internal sealed class LoginService(
                 actorConfirmed: true);
         }
 
-        var authenticationLevel = mfaEnabled ? AuthenticationLevel.MfaPending : AuthenticationLevel.Active;
+        var authLevel = mfaEnabled ? AuthLevel.MfaPending : AuthLevel.Active;
 
         IssuedSession? session;
         try
         {
-            session = await sessions.CreateAsync(check.AccountId, authenticationLevel, ct);
+            session = await sessions.CreateAsync(check.AccountId, authLevel, ct);
         }
         catch (AccountNotActiveException)
         {
@@ -121,7 +121,7 @@ internal sealed class LoginService(
         }
 
         return new LoginResult(
-            LoginOutcome.Success, check.AccountId, session, authenticationLevel == AuthenticationLevel.MfaPending);
+            LoginOutcome.Success, check.AccountId, session, authLevel == AuthLevel.MfaPending);
     }
 
     private static bool IsAcceptable(string? email, string? password) =>

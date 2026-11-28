@@ -3,12 +3,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Platform.Access.AspNet;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 using Moq;
 
 namespace Platform.Identity.Tests.Middleware;
@@ -97,7 +97,7 @@ public class SessionCheckMiddlewareTests
         var userId = Guid.NewGuid();
         var token = "valid-token";
 
-        SessionReturns(token, new ValidateSession(Guid.NewGuid(), userId, AuthenticationLevel.Active));
+        SessionReturns(token, new ValidateSession(Guid.NewGuid(), userId, AuthLevel.Active));
         context.Request.Headers.Cookie = $"{SessionCookie.Name}={token}";
 
         await _middleware.Invoke(context, _sessions.Object);
@@ -182,7 +182,7 @@ public class SessionCheckMiddlewareTests
     public async Task DevelopmentModuleRoute_ValidSessionCookie_CallsNext_AndStoresSession()
     {
         var context = ProtectedRequest("/api/laboratories", Environments.Development);
-        SessionReturns("valid-token", new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthenticationLevel.Active));
+        SessionReturns("valid-token", new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthLevel.Active));
         context.Request.Headers.Cookie = $"{SessionCookie.Name}=valid-token";
 
         await _middleware.Invoke(context, _sessions.Object);
@@ -262,7 +262,7 @@ public class SessionCheckMiddlewareTests
     public async Task ProtectedEndpoint_ValidToken_TwoRequestsOnTheSameContext_DoNotFail()
     {
         var context = ProtectedRequest("/api/auth/me", Environments.Production);
-        SessionReturns("valid-token", new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthenticationLevel.Active));
+        SessionReturns("valid-token", new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthLevel.Active));
         context.Request.Headers.Cookie = $"{SessionCookie.Name}=valid-token";
 
         await _middleware.Invoke(context, _sessions.Object);

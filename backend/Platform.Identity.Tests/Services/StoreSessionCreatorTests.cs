@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
@@ -29,7 +28,7 @@ public class StoreSessionCreatorTests
     {
         var userId = Guid.NewGuid();
 
-        var issued = await _creator.CreateAsync(userId, AuthenticationLevel.Active);
+        var issued = await _creator.CreateAsync(userId, AuthLevel.Active);
 
         Assert.That(issued!.Token, Is.EqualTo(Token));
         Assert.That(issued.Handle, Is.EqualTo(_store.Created!.SessionHandle));
@@ -38,19 +37,13 @@ public class StoreSessionCreatorTests
         Assert.That(_store.LastLifetime, Is.EqualTo(StoreSessionCreator.Lifetime));
     }
 
-    [TestCase(AuthenticationLevel.Active, AuthLevel.Active)]
-    [TestCase(AuthenticationLevel.MfaPending, AuthLevel.MfaPending)]
-    public async Task Create_KeepsTheAuthenticationLevel(AuthenticationLevel level, AuthLevel expected)
+    [TestCase(AuthLevel.Active)]
+    [TestCase(AuthLevel.MfaPending)]
+    public async Task Create_KeepsTheAuthLevel(AuthLevel level)
     {
         await _creator.CreateAsync(Guid.NewGuid(), level);
 
-        Assert.That(_store.Created!.AuthLevel, Is.EqualTo(expected));
-    }
-
-    [Test]
-    public async Task Create_WithoutALevel_IsRefused()
-    {
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => _creator.CreateAsync(Guid.NewGuid(), AuthenticationLevel.None));
+        Assert.That(_store.Created!.AuthLevel, Is.EqualTo(level));
     }
 
     [Test]
@@ -58,7 +51,7 @@ public class StoreSessionCreatorTests
     {
         _store.Failure = new DbUpdateException("database is down");
 
-        Assert.That(await _creator.CreateAsync(Guid.NewGuid(), AuthenticationLevel.Active), Is.Null);
+        Assert.That(await _creator.CreateAsync(Guid.NewGuid(), AuthLevel.Active), Is.Null);
     }
 
     [Test]
@@ -66,7 +59,7 @@ public class StoreSessionCreatorTests
     {
         _store.AccountIsActive = false;
 
-        await Assert.ThrowsAsync<AccountNotActiveException>(() => _creator.CreateAsync(Guid.NewGuid(), AuthenticationLevel.Active));
+        await Assert.ThrowsAsync<AccountNotActiveException>(() => _creator.CreateAsync(Guid.NewGuid(), AuthLevel.Active));
         Assert.That(_store.Created, Is.Null);
     }
 

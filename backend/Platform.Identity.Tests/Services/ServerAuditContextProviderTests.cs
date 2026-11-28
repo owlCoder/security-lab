@@ -1,8 +1,8 @@
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Audit;
 using Platform.Audit.Contracts;
+using Platform.Identity.Enums;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -15,7 +15,7 @@ public sealed class ServerAuditContextProviderTests
         var userId = Guid.NewGuid();
         var provider = new ServerAuditContextProvider(
             new StubIdentityContext(new CallerIdentity(
-                true, userId, AuthenticationLevel.Active, Guid.NewGuid())),
+                true, userId, AuthLevel.Active, Guid.NewGuid())),
             new StubCorrelationContext("server-correlation"));
 
         var context = provider.GetCurrentContext();

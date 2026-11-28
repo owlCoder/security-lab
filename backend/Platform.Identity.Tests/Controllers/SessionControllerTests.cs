@@ -4,10 +4,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Platform.Audit.Contracts;
 using Platform.Api.Controllers.Identity;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Identity.Tests.Controllers;
 
@@ -71,7 +71,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             true,
             userId,
-            AuthenticationLevel.Active,
+            AuthLevel.Active,
             Guid.NewGuid()));
 
         _sessionManager
@@ -103,7 +103,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             true,
             userId,
-            AuthenticationLevel.Active,
+            AuthLevel.Active,
             Guid.NewGuid()));
 
         _sessionManager
@@ -144,7 +144,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             false,
             Guid.NewGuid(),
-            AuthenticationLevel.MfaPending,
+            AuthLevel.MfaPending,
             Guid.NewGuid()));
 
         var result = await _controller.GetMySessions(CancellationToken.None);
@@ -163,7 +163,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             true,
             null,
-            AuthenticationLevel.Active,
+            AuthLevel.Active,
             Guid.NewGuid()));
 
         var result = await _controller.GetMySessions(CancellationToken.None);
@@ -187,7 +187,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             true,
             userId,
-            AuthenticationLevel.Active,
+            AuthLevel.Active,
             Guid.NewGuid()));
 
         _sessionManager
@@ -228,7 +228,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             true,
             userId,
-            AuthenticationLevel.Active,
+            AuthLevel.Active,
             Guid.NewGuid()));
 
         _sessionManager
@@ -272,7 +272,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             false,
             hasUserId ? Guid.NewGuid() : null,
-            AuthenticationLevel.MfaPending,
+            AuthLevel.MfaPending,
             Guid.NewGuid()));
 
         var result = await _controller.RevokeSession(Guid.NewGuid(), CancellationToken.None);
@@ -294,7 +294,7 @@ public class SessionControllerTests
         CallerIs(new CallerIdentity(
             true,
             null,
-            AuthenticationLevel.Active,
+            AuthLevel.Active,
             Guid.NewGuid()));
 
         var result = await _controller.RevokeSession(Guid.NewGuid(), CancellationToken.None);

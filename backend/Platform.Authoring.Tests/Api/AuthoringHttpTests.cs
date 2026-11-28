@@ -14,12 +14,12 @@ using Microsoft.Extensions.Configuration;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 
 using ISessionManager = Platform.Api.Interfaces.Identity.ISessionManager;
 using Platform.Identity.Entities;
+using Platform.Identity.Enums;
 using Platform.Identity.Testing;
 
 namespace Platform.Authoring.Tests.Api;
@@ -259,7 +259,7 @@ public sealed class AuthoringHttpRequests
 
             if(token == AuthoringHostFactory.SessionToken && Guid.TryParse(sessionUserId, out var userId))
             {
-                return Task.FromResult<ValidateSession?>(new ValidateSession(Guid.NewGuid(), userId, AuthenticationLevel.Active));
+                return Task.FromResult<ValidateSession?>(new ValidateSession(Guid.NewGuid(), userId, AuthLevel.Active));
             }
 
             return Task.FromResult<ValidateSession?>(null);

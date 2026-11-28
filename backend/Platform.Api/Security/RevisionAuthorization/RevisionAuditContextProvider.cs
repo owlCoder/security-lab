@@ -1,7 +1,7 @@
-using Platform.Api.Enums.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Audit.Contracts;
+using Platform.Identity.Enums;
 
 namespace Platform.Api.Security.RevisionAuthorization;
 
@@ -14,7 +14,7 @@ public sealed class RevisionAuditContextProvider(IHttpContextAccessor accessor) 
             ?? throw new InvalidOperationException("REV-05 audit requires an HTTP request context.");
         var session = http.Items[SessionCheckMiddleware.SessionItemKey] as ValidateSession
             ?? http.Items[RevisionRequestIdentity.SessionItemKey] as ValidateSession;
-        var actor = session is { Level: AuthenticationLevel.Active } && session.UserId != Guid.Empty
+        var actor = session is { Level: AuthLevel.Active } && session.UserId != Guid.Empty
             ? AuditActor.ForUser(session.UserId) : AuditActor.Anonymous;
         return new AuditContext(actor, http.TraceIdentifier);
     }

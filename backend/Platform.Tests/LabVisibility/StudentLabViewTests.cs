@@ -7,7 +7,6 @@ using Platform.LabVisibility.Domain;
 using Platform.LabVisibility.Infrastructure.Persistence;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
@@ -225,7 +224,7 @@ public sealed class StudentLabViewTests
             ValidateSession? session = null;
             if (token == StudentId || token == OtherUserId || token == BlockedUserId)
             {
-                session = new ValidateSession(Guid.Parse("99999999-9999-9999-9999-999999999999"), Guid.Parse(token), AuthenticationLevel.Active);
+                session = new ValidateSession(Guid.Parse("99999999-9999-9999-9999-999999999999"), Guid.Parse(token), AuthLevel.Active);
             }
 
             return Task.FromResult(session);

@@ -123,8 +123,8 @@ public class ChangeAccountStatusTests
         }
     }
 
-    private static CallerIdentity Admin => new(true, AdminId, AuthenticationLevel.None, new Guid());
-    private static CallerIdentity Student => new(true, StudentId, AuthenticationLevel.None, new Guid());
+    private static CallerIdentity Admin => new(true, AdminId, AuthLevel.Active, new Guid());
+    private static CallerIdentity Student => new(true, StudentId, AuthLevel.Active, new Guid());
 
     private static (ChangeAccountStatus Sut, FakeStore Store, FakeAudit Audit) Build(
         CallerIdentity? caller,

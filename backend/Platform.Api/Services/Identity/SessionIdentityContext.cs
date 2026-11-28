@@ -1,6 +1,6 @@
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Identity.Enums;
 using Platform.Identity.Services.Sessions;
 
 namespace Platform.Api.Services.Identity;
@@ -25,7 +25,7 @@ public sealed class SessionIdentityContext : IIdentityContext
                 return null;
 
             return new CallerIdentity(
-                session.Level == AuthenticationLevel.Active,
+                session.Level == AuthLevel.Active,
                 session.UserId,
                 session.Level,
                 session.Handle);

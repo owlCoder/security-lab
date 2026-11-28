@@ -229,7 +229,7 @@ These are the places where the code and the intended single data model differ. T
 
 Present in the repository now:
 
-- Contracts: `IIdentityContext` (`CallerIdentity`), `ISessionManager`, `IAccountAdministrationDecision`, `AuthenticationLevel` (`None`, `MfaPending`, `Active`). Audit through the Audit module contract (`IdentityAuditProducer`); the old Identity `IAuditWriter` / `LoggerAuditWriter` is removed.
+- Contracts: `IIdentityContext` (`CallerIdentity`), `ISessionManager`, `IAccountAdministrationDecision`, `AuthLevel` (`MfaPending`, `Active`, from `Platform.Identity.Enums`). Audit through the Audit module contract (`IdentityAuditProducer`); the old Identity `IAuditWriter` / `LoggerAuditWriter` is removed.
 - Identity module: `backend/Platform.Identity` with `PlatformIdentityDbContext` (`identity.accounts`, `identity.sessions`, `identity.mfa_credentials`), `AddIdentityModule(configuration)`, BCrypt `IPasswordHasher`, `ICredentialVerifier`, `ISessionStore`, `IMfaCredentialsStore`, migrations `InitialIdentity`, `AddAccountPasswordHash`, `AddSessions`, `AddAccountRole` and the MFA credentials migration.
 - US-17 and US-18 MFA: `POST /api/auth/mfa/enroll`, `.../enroll/confirm`, `.../verify` (`MfaService`). Details in [`IDN-02_TOTP_MFA.md`](./IDN-02_TOTP_MFA.md).
 - US-04 login: `POST /api/auth/login` (`AuthController`, `LoginService`), cookie `SecurityLab.Session`. Details in [`IDN-02_LOGIN.md`](./IDN-02_LOGIN.md).

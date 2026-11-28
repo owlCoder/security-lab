@@ -1,8 +1,8 @@
 using Moq;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Identity.Tests.Services.Accounts;
 
@@ -23,7 +23,8 @@ public sealed class AccountAdministrationDecisionTests
         var admins = new Mock<IAdminDirectory>(MockBehavior.Strict);
         admins.Setup(x => x.IsAdministrator(UserId)).Returns(administrator);
         var policy = new AdminOnlyAccountAdministrationDecision(admins.Object);
-        var caller = new CallerIdentity(authenticated, UserId, AuthenticationLevel.None, Guid.Empty);
+        var caller = new CallerIdentity(
+            authenticated, UserId, authenticated ? AuthLevel.Active : AuthLevel.MfaPending, Guid.Empty);
 
         // Act
         var allowed = policy.CanUnlockAccount(caller);
@@ -41,7 +42,7 @@ public sealed class AccountAdministrationDecisionTests
         var admins = new Mock<IAdminDirectory>(MockBehavior.Strict);
         admins.Setup(x => x.IsAdministrator(Guid.Empty)).Returns(false);
         var policy = new AdminOnlyAccountAdministrationDecision(admins.Object);
-        var caller = new CallerIdentity(true, null, AuthenticationLevel.None, Guid.Empty);
+        var caller = new CallerIdentity(true, null, AuthLevel.Active, Guid.Empty);
 
         // Act
         var allowed = policy.CanUnlockAccount(caller);

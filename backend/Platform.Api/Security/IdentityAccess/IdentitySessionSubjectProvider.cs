@@ -1,11 +1,11 @@
 using Platform.Access.AspNet;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Api.Security.IdentityAccess;
 
@@ -48,7 +48,7 @@ public sealed class IdentitySessionSubjectProvider(IAccessSubjectProvider inner,
         var session = httpContext.Items[SessionCheckMiddleware.SessionItemKey] as ValidateSession
             ?? await sessions.ValidateAsync(token, cancellationToken);
 
-        return session is { Level: AuthenticationLevel.Active } && session.UserId != Guid.Empty
+        return session is { Level: AuthLevel.Active } && session.UserId != Guid.Empty
             ? new SubjectRef(session.UserId.ToString("D"), AccountState.Active)
             : null;
     }

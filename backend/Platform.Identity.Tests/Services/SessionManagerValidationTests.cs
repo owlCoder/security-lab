@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Identity.Entities;
@@ -45,7 +44,7 @@ public class SessionManagerValidationTests
 
         var result = await _manager.ValidateAsync(token);
 
-        Assert.That(result, Is.EqualTo(new ValidateSession(session.SessionHandle, userId, AuthenticationLevel.Active)));
+        Assert.That(result, Is.EqualTo(new ValidateSession(session.SessionHandle, userId, AuthLevel.Active)));
         Assert.That(ReadSaved(session.Id).LastActivityAt, Is.EqualTo(_clock.GetUtcNow()));
     }
 
@@ -56,7 +55,7 @@ public class SessionManagerValidationTests
 
         var result = await _manager.ValidateAsync(token);
 
-        Assert.That(result!.Level, Is.EqualTo(AuthenticationLevel.MfaPending));
+        Assert.That(result!.Level, Is.EqualTo(AuthLevel.MfaPending));
     }
 
     [Test]

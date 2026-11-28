@@ -6,11 +6,11 @@ using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Audit.Contracts;
+using Platform.Identity.Enums;
 
 namespace Platform.Tests.RevisionAuthorization;
 
@@ -91,7 +91,7 @@ public sealed class RevisionAuditForwardingTests
         http.Request.Headers["X-Actor-ID"] = Guid.NewGuid().ToString();
         http.Request.Headers["X-Correlation-ID"] = "client-correlation";
         http.Items[SessionCheckMiddleware.SessionItemKey] =
-            new ValidateSession(Guid.NewGuid(), user, AuthenticationLevel.Active);
+            new ValidateSession(Guid.NewGuid(), user, AuthLevel.Active);
         var provider = new RevisionAuditContextProvider(new HttpContextAccessor { HttpContext = http });
         Assert.That(provider.GetContext(), Is.EqualTo(new AuditContext(AuditActor.ForUser(user), "server-correlation")));
     }
@@ -101,7 +101,7 @@ public sealed class RevisionAuditForwardingTests
     {
         var http = new DefaultHttpContext { TraceIdentifier = "server-correlation" };
         http.Items[SessionCheckMiddleware.SessionItemKey] =
-            new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthenticationLevel.MfaPending);
+            new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthLevel.MfaPending);
         var provider = new RevisionAuditContextProvider(new HttpContextAccessor { HttpContext = http });
         Assert.That(provider.GetContext().Actor, Is.EqualTo(AuditActor.Anonymous));
     }

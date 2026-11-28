@@ -178,7 +178,7 @@ public sealed class LoginServiceSourceAddressTests
         SetupCredentials(new CredentialResult(true, UserId, AccountStatus.Active));
         _mfaCredentials.Setup(m => m.GetAsync(UserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((MfaCredentials?)null);
-        _sessions.Setup(s => s.CreateAsync(UserId, AuthenticationLevel.Active, It.IsAny<CancellationToken>()))
+        _sessions.Setup(s => s.CreateAsync(UserId, AuthLevel.Active, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new IssuedSession(
                 "synthetic-session-token", Guid.Parse("bbbbbbbb-0000-4000-8000-000000000001"), Now.AddHours(8)));
     }

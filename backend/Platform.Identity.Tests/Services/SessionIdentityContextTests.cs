@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Http;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 using Platform.Identity.Services.Sessions;
 
 namespace Platform.Identity.Tests.Services;
@@ -32,14 +32,14 @@ public class SessionIdentityContextTests
     {
         var userId = Guid.NewGuid();
         var handle = Guid.NewGuid();
-        _context.Items[SessionHttpContextItems.Session] = new ValidateSession(handle, userId, AuthenticationLevel.Active);
+        _context.Items[SessionHttpContextItems.Session] = new ValidateSession(handle, userId, AuthLevel.Active);
 
         var caller = _identity.Current;
 
         Assert.That(caller, Is.Not.Null);
         Assert.That(caller!.IsAuthenticated, Is.True);
         Assert.That(caller.UserId, Is.EqualTo(userId));
-        Assert.That(caller.Level, Is.EqualTo(AuthenticationLevel.Active));
+        Assert.That(caller.Level, Is.EqualTo(AuthLevel.Active));
         Assert.That(caller.CurrentSessionHandle, Is.EqualTo(handle));
     }
 
@@ -47,13 +47,13 @@ public class SessionIdentityContextTests
     public void MfaPendingSession_IsNotAuthenticated_ButHasUserId()
     {
         var userId = Guid.NewGuid();
-        _context.Items[SessionHttpContextItems.Session] = new ValidateSession(Guid.NewGuid(), userId, AuthenticationLevel.MfaPending);
+        _context.Items[SessionHttpContextItems.Session] = new ValidateSession(Guid.NewGuid(), userId, AuthLevel.MfaPending);
 
         var caller = _identity.Current;
 
         Assert.That(caller, Is.Not.Null);
         Assert.That(caller!.IsAuthenticated, Is.False);
         Assert.That(caller.UserId, Is.EqualTo(userId));
-        Assert.That(caller.Level, Is.EqualTo(AuthenticationLevel.MfaPending));
+        Assert.That(caller.Level, Is.EqualTo(AuthLevel.MfaPending));
     }
 }

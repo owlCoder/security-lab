@@ -2,15 +2,14 @@ using Microsoft.AspNetCore.Http;
 using Platform.Access.AspNet;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
-using Platform.Identity.Enums;
 
 namespace Platform.Tests.RevisionAuthorization;
 
@@ -82,8 +81,8 @@ public sealed class RevisionRequestIdentityTests
         public Task<ValidateSession?> ValidateAsync(string token, CancellationToken ct = default) =>
             Task.FromResult<ValidateSession?>(token switch
             {
-                "valid" => new ValidateSession(Guid.NewGuid(), User, AuthenticationLevel.Active),
-                "pending" => new ValidateSession(Guid.NewGuid(), User, AuthenticationLevel.MfaPending),
+                "valid" => new ValidateSession(Guid.NewGuid(), User, AuthLevel.Active),
+                "pending" => new ValidateSession(Guid.NewGuid(), User, AuthLevel.MfaPending),
                 _ => null
             });
         public Task<int> RevokeAllForUser(Guid userId, string reason, CancellationToken ct = default) => throw new NotSupportedException();
