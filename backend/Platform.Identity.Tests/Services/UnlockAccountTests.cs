@@ -121,7 +121,7 @@ public class UnlockAccountTests
         var audit = new AuditSetup(store);
         var identity = new Mock<IIdentityContext>();
         identity.SetupGet(x => x.Current).Returns(caller);
-        var access = new Mock<IAccessDecision>();
+        var access = new Mock<IAccountAdministrationDecision>();
         access.Setup(x => x.CanUnlockAccount(It.IsAny<CallerIdentity>())).Returns(caller?.UserId == AdminId);
         var correlation = new Mock<ICorrelationContext>();
         correlation.SetupGet(x => x.CorrelationId).Returns(correlationId);

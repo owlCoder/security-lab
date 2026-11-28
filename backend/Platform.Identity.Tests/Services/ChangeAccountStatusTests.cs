@@ -139,7 +139,7 @@ public class ChangeAccountStatusTests
         var audit = new FakeAudit();
         var sut = new ChangeAccountStatus(
             new FakeIdentity(caller),
-            new AdminOnlyAccessDecision(new FakeAdmins(AdminId)),
+            new AdminOnlyAccountAdministrationDecision(new FakeAdmins(AdminId)),
             store, audit, new FakeCorrelation(correlationId),
             NullLogger<ChangeAccountStatus>.Instance);
 

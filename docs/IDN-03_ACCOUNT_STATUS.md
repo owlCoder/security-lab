@@ -22,7 +22,7 @@ so the next login and the next request of an existing session see it.
 |Contract|Implementation|
 |-|-|
 |`IIdentityContext`|`SessionIdentityContext` (server-side session, IDN-02)|
-|`IAccessDecision`|`AdminOnlyAccessDecision`, administrator only, deny by default. `CanChangeAccountStatus` is the check of this component; `CanUnlockAccount` is the second-line check of the [IDN-05 administrator unlock](components/identity/IDN-05-admin-unlock.md), with the same administrator source|
+|`IAccountAdministrationDecision`|`AdminOnlyAccountAdministrationDecision`, administrator only, deny by default. `CanChangeAccountStatus` is the check of this component; `CanUnlockAccount` is the second-line check of the [IDN-05 administrator unlock](components/identity/IDN-05-admin-unlock.md), with the same administrator source|
 |`IAccountStatusStore`|`EfAccountStatusStore` over `PlatformIdentityDbContext` (`identity.accounts`, `identity.sessions`)|
 |`IAccountStatusUnitOfWork`|One transaction opened by `IAccountStatusStore.BeginAsync`; disposing without `CommitAsync` rolls it back. `FindForUpdateAsync` reads and locks the account row, `ApplyAsync` stores the status and, for `BLOCKED` and `ARCHIVED`, revokes the sessions. `ClearLockoutAsync` is used only by the IDN-05 administrator unlock: it sets `failed_login_count` to 0 and `lockout_end` to null and returns the lockout end it cleared, or changes nothing and returns null when the account is not locked. It never touches the status or the sessions|
 |`ISessionManager`|`SessionManager` (single registration; revocation runs inside the status transaction)|
@@ -35,7 +35,7 @@ flowchart LR
   Client[Admin client] -->|PUT status| Ctrl[AdminAccountsController]
   Ctrl --> UC[ChangeAccountStatus]
   UC --> Ctx[IIdentityContext]
-  UC --> Acc[IAccessDecision]
+  UC --> Acc[IAccountAdministrationDecision]
   UC --> Store[IAccountStatusStore]
   UC --> Aud[ITransactionalAuditWriter]
   Store --> DB[(PostgreSQL: identity.accounts, identity.sessions)]
@@ -88,7 +88,7 @@ The CSRF check comes first of all, before the session check and Access (see [`ID
 
 ## Security requirements
 
-* Server-side access checks: `IAccessDecision` runs inside the use-case, not only in the controller (ACC-05, SEC-01).
+* Server-side access checks: `IAccountAdministrationDecision` runs inside the use-case, not only in the controller (ACC-05, SEC-01).
 * Session check on every request (SEC-03): `SessionManager.ValidateAsync` refuses a revoked or expired session and also a session whose account is not `ACTIVE`. This is defense in depth only: it is not enough alone, because a session stored behind the revocation would work again after reactivation.
 * Session issuing (SEC-03): `ISessionStore.CreateForActiveAccountAsync` locks the account row with `SELECT ... FOR SHARE` in the same transaction that stores the session. A login that passed its status check before a block either waits for the block and stores nothing (`AccountNotActiveException`, login answers like any refused login), or commits first and is then revoked by the block. No token can outlive a block, so reactivation never revives one.
 * The status is accepted only by name (`ACTIVE`, `BLOCKED`, `ARCHIVED`, any letter case). Numbers such as `1` or `99` are rejected.

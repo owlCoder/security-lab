@@ -16,7 +16,7 @@ namespace Platform.Api.Services.Identity;
 /// </summary>
 public sealed partial class ChangeAccountStatus(
     IIdentityContext identity,
-    IAccessDecision access,
+    IAccountAdministrationDecision access,
     IAccountStatusStore store,
     ITransactionalAuditWriter audit,
     ICorrelationContext correlation,

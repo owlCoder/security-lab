@@ -40,6 +40,7 @@ using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Identity.Composition;
 using Platform.Competencies.Composition;
 using Platform.Authoring.Application;
 using Platform.Identity;
@@ -55,8 +56,6 @@ using Platform.LabVisibility.Infrastructure.Persistence;
 using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Infrastructure;
 
-// Oba modula imaju IAccessDecision, zato koristimo alias.
-using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
 using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 
@@ -96,6 +95,8 @@ builder.Services.AddIdentityModule();
 
 // IDN-02: prijava, odjava i sesije
 builder.Services.AddIdentityModule(builder.Configuration);
+// IDN-06: trajan i sertifikatom šifrovan key ring za TOTP tajne; van Development-a start pada bez njega.
+builder.Services.AddMfaKeyRing(builder.Configuration, builder.Environment);
 
 if (builder.Environment.IsDevelopment())
 {
@@ -170,7 +171,7 @@ builder.Services.AddLabVisibilityAccess();
 builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
-builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
+builder.Services.AddSingleton<IAccountAdministrationDecision, AdminOnlyAccountAdministrationDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
 // IDN-05: administrator unlock (account.unlock, registered by REV-05), same store and transaction as IDN-03.
 builder.Services.AddScoped<UnlockAccount>();

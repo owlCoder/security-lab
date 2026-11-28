@@ -122,68 +122,16 @@ public class IdentityModuleTests
         Assert.Throws<CryptographicException>(() => totp.Unprotect(otherCiphertext));
     }
 
-    // IDN-06: a restart is a new service provider. With the same KeysPath it still reads the stored secret.
-    [Test]
-    public void TotpSecretProtector_WithKeysPath_NewInstanceReadsTheStoredSecret()
-    {
-        // Arrange
-        var keysPath = Directory.CreateTempSubdirectory("idn06-keys-").FullName;
-        try
-        {
-            string ciphertext;
-            using (var first = BuildProvider("Host=localhost;Database=model_only", keysPath))
-                ciphertext = first.GetRequiredService<ITotpSecretProtector>().Protect("JBSWY3DPEHPK3PXP");
-
-            // Act
-            using var second = BuildProvider("Host=localhost;Database=model_only", keysPath);
-            var secret = second.GetRequiredService<ITotpSecretProtector>().Unprotect(ciphertext);
-
-            // Assert
-            Assert.That(secret, Is.EqualTo("JBSWY3DPEHPK3PXP"));
-            Assert.That(Directory.GetFiles(keysPath, "key-*.xml"), Is.Not.Empty);
-        }
-        finally
-        {
-            Directory.Delete(keysPath, recursive: true);
-        }
-    }
-
-    // IDN-06: keys from another folder do not open the secret.
-    [Test]
-    public void TotpSecretProtector_WithAnotherKeysPath_CannotReadTheStoredSecret()
-    {
-        // Arrange
-        var firstPath = Directory.CreateTempSubdirectory("idn06-keys-").FullName;
-        var secondPath = Directory.CreateTempSubdirectory("idn06-keys-").FullName;
-        try
-        {
-            string ciphertext;
-            using (var first = BuildProvider("Host=localhost;Database=model_only", firstPath))
-                ciphertext = first.GetRequiredService<ITotpSecretProtector>().Protect("JBSWY3DPEHPK3PXP");
-
-            // Act
-            using var second = BuildProvider("Host=localhost;Database=model_only", secondPath);
-            var protector = second.GetRequiredService<ITotpSecretProtector>();
-
-            // Assert
-            Assert.Throws<CryptographicException>(() => protector.Unprotect(ciphertext));
-        }
-        finally
-        {
-            Directory.Delete(firstPath, recursive: true);
-            Directory.Delete(secondPath, recursive: true);
-        }
-    }
+    // US-22: persistence and encryption of the key ring are tested in MfaKeyRingTests.
 
     private IEntityType AccountEntity() => _context.Model.FindEntityType(typeof(UserAccount))!;
 
-    private static ServiceProvider BuildProvider(string? connectionString, string? keysPath = null)
+    private static ServiceProvider BuildProvider(string? connectionString)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [$"ConnectionStrings:{IdentityModule.ConnectionStringName}"] = connectionString,
-                [IdentityModule.DataProtectionKeysPathKey] = keysPath
+                [$"ConnectionStrings:{IdentityModule.ConnectionStringName}"] = connectionString
             })
             .Build();
 

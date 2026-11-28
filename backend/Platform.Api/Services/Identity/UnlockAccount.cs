@@ -15,7 +15,7 @@ namespace Platform.Api.Services.Identity;
 /// </summary>
 public sealed partial class UnlockAccount(
     IIdentityContext identity,
-    IAccessDecision access,
+    IAccountAdministrationDecision access,
     IAccountStatusStore store,
     ITransactionalAuditWriter audit,
     ICorrelationContext correlation,
