@@ -1,5 +1,5 @@
-using Platform.Identity.Enums;
 using Platform.Api.Models.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Api.Interfaces.Identity;
 

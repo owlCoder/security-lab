@@ -12,8 +12,8 @@ using Platform.Access.Domain.Models;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
-using Platform.Identity.Enums;
 using Platform.Api.Security.RevisionAuthorization;
+using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 

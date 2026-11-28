@@ -14,12 +14,12 @@ using Microsoft.Extensions.Configuration;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Identity.Enums;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 
 using ISessionManager = Platform.Api.Interfaces.Identity.ISessionManager;
 using Platform.Identity.Entities;
+using Platform.Identity.Enums;
 using Platform.Identity.Testing;
 
 namespace Platform.Authoring.Tests.Api;

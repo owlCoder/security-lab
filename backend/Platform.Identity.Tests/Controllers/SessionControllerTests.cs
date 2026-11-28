@@ -4,10 +4,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Platform.Audit.Contracts;
 using Platform.Api.Controllers.Identity;
-using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 
 namespace Platform.Identity.Tests.Controllers;
 

@@ -1,6 +1,6 @@
-using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Identity.Enums;
 using Platform.Identity.Services.Sessions;
 
 namespace Platform.Api.Services.Identity;

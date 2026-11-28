@@ -3,12 +3,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Platform.Access.AspNet;
-using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 using Moq;
 
 namespace Platform.Identity.Tests.Middleware;

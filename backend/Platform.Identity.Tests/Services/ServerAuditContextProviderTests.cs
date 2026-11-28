@@ -1,8 +1,8 @@
-using Platform.Identity.Enums;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Audit;
 using Platform.Audit.Contracts;
+using Platform.Identity.Enums;
 
 namespace Platform.Identity.Tests.Services;
 

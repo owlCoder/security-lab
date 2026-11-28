@@ -1,7 +1,7 @@
-using Platform.Identity.Enums;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Audit.Contracts;
+using Platform.Identity.Enums;
 
 namespace Platform.Api.Security.RevisionAuthorization;
 

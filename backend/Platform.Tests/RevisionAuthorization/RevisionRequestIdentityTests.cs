@@ -7,9 +7,9 @@ using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
-using Platform.Identity.Enums;
 
 namespace Platform.Tests.RevisionAuthorization;
 

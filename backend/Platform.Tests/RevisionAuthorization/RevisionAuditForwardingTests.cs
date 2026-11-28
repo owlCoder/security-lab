@@ -6,11 +6,11 @@ using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Identity.Enums;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Audit.Contracts;
+using Platform.Identity.Enums;
 
 namespace Platform.Tests.RevisionAuthorization;
 
