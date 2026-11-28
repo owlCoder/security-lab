@@ -1,95 +1,109 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Moq;
+using Platform.Api.Interfaces.Identity;
 using Platform.Identity.Entities;
 using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
-using Platform.Identity.Persistence;
 using Platform.Identity.Services;
-using Testcontainers.PostgreSql;
+using Platform.Identity.Tests.Helpers;
 
-namespace Platform.Identity.Tests.Services;
+namespace Platform.Identity.Tests.Integration.Login;
 
-// IDN-05: lockout on the real login store (identity.accounts).
-// The database is a throwaway Testcontainers Postgres, never a shared one.
+// IDN-05: lockout on the real login store (identity.accounts), in the shared test database.
+// The class host replaces only the clock and the password hasher, both with Moq mocks: the clock so a test
+// can move time, the hasher so a test can count, hold or abandon hash checks while the real BCrypt runs.
 [TestFixture]
 [Category("IDN-05")]
-public sealed class AccountLockoutTests
+[NonParallelizable]
+public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
 {
     private const string Password = "Str0ng-Password!2026";
     private const string WrongPassword = "Wr0ng-Password!2026";
     private const int MaxAttempts = 3;
     private const int LockoutMinutes = 15;
 
-    private readonly ManualClock _clock = new(new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero));
-    private readonly CountingHasher _hasher = new();
-    private PostgreSqlContainer _db = null!;
-    private ServiceProvider _provider = null!;
-    private string _passwordHash = null!;
+    private static readonly DateTimeOffset Start = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+    private static readonly TimeSpan HoldTimeout = TimeSpan.FromSeconds(30);
+
+    private readonly BCryptPasswordHasher _bcrypt = new();
+    private readonly Mock<TimeProvider> _clockMock = new() { CallBase = true };
+    private readonly Mock<IPasswordHasher> _hasherMock = new(MockBehavior.Strict);
+    private WebApplicationFactory<Program> _host = null!;
+    private TimeProvider _clock => _clockMock.Object;
+    private IPasswordHasher _hasher => _hasherMock.Object;
+    private DateTimeOffset _now;
+
+    // Hash checks held inside Verify (HoldHashChecks) and checks abandoned midway (AbandonAsync).
+    private CountdownEvent? _entered;
+    private ManualResetEventSlim? _open;
+    private int _holds;
+    private int _abandon;
 
     [OneTimeSetUp]
-    public async Task StartDatabase()
+    public void CreateLockoutHost()
     {
-        _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await _db.StartAsync();
+        _hasherMock.Setup(h => h.Hash(It.IsAny<string>())).Returns<string>(password => _bcrypt.Hash(password));
+        _hasherMock.Setup(h => h.Verify(It.IsAny<string>(), It.IsAny<string?>()))
+            .Returns<string, string?>(VerifyHash);
 
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:Identity"] = _db.GetConnectionString(),
-                ["Identity:Lockout:MaxFailedAccessAttempts"] = MaxAttempts.ToString(),
-                ["Identity:Lockout:LockoutMinutes"] = LockoutMinutes.ToString()
-            })
-            .Build();
-
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton<TimeProvider>(_clock);
-        services.AddIdentityModule(config);
-        services.Replace(ServiceDescriptor.Singleton<IPasswordHasher>(_hasher));
-
-        _provider = services.BuildServiceProvider(new ServiceProviderOptions
+        _host = Factory.WithWebHostBuilder(builder =>
         {
-            ValidateScopes = true,
-            ValidateOnBuild = true
+            builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", MaxAttempts.ToString());
+            builder.UseSetting("Identity:Lockout:LockoutMinutes", LockoutMinutes.ToString());
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(_clockMock.Object);
+                services.RemoveAll<IPasswordHasher>();
+                services.AddSingleton(_hasherMock.Object);
+            });
         });
-
-        _passwordHash = _hasher.Hash(Password);
-
-        using var scope = _provider.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>().Database.MigrateAsync();
     }
 
     [OneTimeTearDown]
-    public async Task StopDatabase()
+    public async Task DisposeLockoutHost() => await _host.DisposeAsync();
+
+    [SetUp]
+    public void ResetDoubles()
     {
-        await _provider.DisposeAsync();
-        await _db.DisposeAsync();
+        ReleaseHashChecks();
+        Volatile.Write(ref _abandon, 0);
+        _hasherMock.Invocations.Clear();
+        SetNow(Start);
     }
 
     [Test]
-    public async Task Failures_below_the_limit_do_not_lock_the_account()
+    public async Task Verify_FailuresBelowLimit_ShouldNotLockAccount()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
 
+        // Act
         for (var i = 0; i < MaxAttempts - 1; i++)
             Assert.That(await VerifyAsync(email, WrongPassword), Is.EqualTo(CredentialResult.Invalid));
 
+        // Assert
         var account = await FindAsync(id);
         Assert.That(account.FailedLoginCount, Is.EqualTo(MaxAttempts - 1));
         Assert.That(account.LockoutEnd, Is.Null);
     }
 
     [Test]
-    public async Task Reaching_the_limit_locks_the_account_for_the_configured_time()
+    public async Task Verify_FailuresReachLimit_ShouldLockForConfiguredTime()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
 
+        // Act
         var last = await FailAsync(email, MaxAttempts);
 
+        // Assert
         Assert.That(last.IsLockedOut, Is.True);
         Assert.That(last.IsValid, Is.False);
         Assert.That(last.AccountId, Is.EqualTo(id));
@@ -100,41 +114,50 @@ public sealed class AccountLockoutTests
     }
 
     [Test]
-    public async Task Correct_password_is_rejected_while_the_account_is_locked()
+    public async Task Verify_CorrectPasswordWhileLocked_ShouldReturnLockedOut()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
 
+        // Act
         var result = await VerifyAsync(email, Password);
 
+        // Assert
         Assert.That(result.IsValid, Is.False);
         Assert.That(result.IsLockedOut, Is.True);
         Assert.That((await FindAsync(id)).LockoutEnd, Is.GreaterThan(_clock.GetUtcNow()));
     }
 
     [Test]
-    public async Task Attempts_while_locked_are_not_counted_and_do_not_extend_the_lockout()
+    public async Task Verify_AttemptsWhileLocked_ShouldNotCount_AndNotExtendLockout()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
         var lockoutEnd = (await FindAsync(id)).LockoutEnd;
+        Advance(TimeSpan.FromMinutes(1));
 
-        _clock.Advance(TimeSpan.FromMinutes(1));
+        // Act
         await FailAsync(email, MaxAttempts + 1);
 
+        // Assert
         var account = await FindAsync(id);
         Assert.That(account.LockoutEnd, Is.EqualTo(lockoutEnd));
         Assert.That(account.FailedLoginCount, Is.EqualTo(0));
     }
 
     [Test]
-    public async Task Successful_login_resets_the_failure_counter()
+    public async Task Verify_CorrectPasswordBelowLimit_ShouldResetFailureCounter()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts - 1);
 
+        // Act
         var success = await VerifyAsync(email, Password);
 
+        // Assert
         Assert.That(success.IsValid, Is.True);
         Assert.That(success.AccountId, Is.EqualTo(id));
         Assert.That(success.Status, Is.EqualTo(AccountStatus.Active));
@@ -145,115 +168,143 @@ public sealed class AccountLockoutTests
     }
 
     [Test]
-    public async Task Expired_lockout_allows_login_and_is_cleared()
+    public async Task Verify_ExpiredLockout_ShouldSucceed_AndClearLockout()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
+        Advance(TimeSpan.FromMinutes(LockoutMinutes).Add(TimeSpan.FromSeconds(1)));
 
-        _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes).Add(TimeSpan.FromSeconds(1)));
+        // Act
         var result = await VerifyAsync(email, Password);
 
+        // Assert
         Assert.That(result.IsValid, Is.True);
         Assert.That((await FindAsync(id)).LockoutEnd, Is.Null);
     }
 
     [Test]
-    public async Task Lockout_expiring_exactly_now_is_over()
+    public async Task Verify_LockoutEndingExactlyNow_ShouldSucceed()
     {
+        // Arrange
         var (_, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
+        Advance(TimeSpan.FromMinutes(LockoutMinutes));
 
-        _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes));
-
+        // Act & Assert
         Assert.That((await VerifyAsync(email, Password)).IsValid, Is.True);
     }
 
     [Test]
-    public async Task After_an_expired_lockout_a_full_run_of_failures_is_needed_again()
+    public async Task Verify_AfterExpiredLockout_ShouldNeedFullRunOfFailuresAgain()
     {
+        // Arrange
         var (_, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
-        _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes).Add(TimeSpan.FromSeconds(1)));
+        Advance(TimeSpan.FromMinutes(LockoutMinutes).Add(TimeSpan.FromSeconds(1)));
 
+        // Act & Assert
         Assert.That((await FailAsync(email, MaxAttempts - 1)).IsLockedOut, Is.False);
         Assert.That((await FailAsync(email, 1)).IsLockedOut, Is.True);
     }
 
     [Test]
-    public async Task Parallel_failures_are_all_counted()
+    public async Task Verify_ParallelFailures_ShouldCountEveryAttempt()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
 
+        // Act
         await Task.WhenAll(Enumerable.Range(0, MaxAttempts)
             .Select(_ => Task.Run(() => VerifyAsync(email, WrongPassword))));
 
+        // Assert
         Assert.That((await FindAsync(id)).LockoutEnd, Is.GreaterThan(_clock.GetUtcNow()));
     }
 
     [Test]
-    public async Task Email_case_and_whitespace_count_against_the_same_account()
+    public async Task Verify_EmailCaseAndWhitespace_ShouldCountAgainstSameAccount()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
 
+        // Act
         await VerifyAsync(email.ToUpperInvariant(), WrongPassword);
         await VerifyAsync($"  {email} ", WrongPassword);
 
+        // Assert
         Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(2));
     }
 
     [Test]
-    public async Task One_account_failing_does_not_touch_another()
+    public async Task Verify_FailuresOnOtherAccount_ShouldNotAffectThisAccount()
     {
+        // Arrange
         var (_, email) = await CreateAccountAsync();
         var (otherId, otherEmail) = await CreateAccountAsync();
 
+        // Act
         await FailAsync(email, MaxAttempts);
 
+        // Assert
         Assert.That((await FindAsync(otherId)).FailedLoginCount, Is.EqualTo(0));
         Assert.That((await VerifyAsync(otherEmail, Password)).IsValid, Is.True);
     }
 
     [Test]
-    public async Task Unknown_email_is_invalid_verifies_a_hash_and_creates_nothing()
+    public async Task Verify_UnknownEmail_ShouldReturnInvalid_AndCheckHash_AndCreateNoAccount()
     {
+        // Arrange
         var email = NewEmail();
-        _hasher.Reset();
 
+        // Act & Assert
         for (var i = 0; i < MaxAttempts + 1; i++)
             Assert.That(await VerifyAsync(email, WrongPassword), Is.EqualTo(CredentialResult.Invalid));
 
-        Assert.That(_hasher.Verifications, Is.EqualTo(MaxAttempts + 1));
-
-        using var scope = _provider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        Assert.That(await db.Accounts.CountAsync(a => a.Email == email), Is.EqualTo(0));
+        VerifyHashChecks(MaxAttempts + 1);
+        Assert.That(await UserTestData.GetByEmailAsync(Factory, email), Is.Null);
     }
 
     [Test]
-    public async Task Locked_account_still_verifies_a_hash()
+    public async Task Verify_LockedAccount_ShouldStillCheckHash()
     {
+        // Arrange
         var (_, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
-        _hasher.Reset();
+        _hasherMock.Invocations.Clear();
 
+        // Act
         await VerifyAsync(email, WrongPassword);
 
-        Assert.That(_hasher.Verifications, Is.EqualTo(1));
+        // Assert
+        VerifyHashChecks(1);
     }
 
     [Test]
-    public async Task Correct_password_in_flight_when_the_account_locks_is_refused()
+    public async Task Verify_CorrectPasswordInFlightWhenAccountLocks_ShouldReturnLockedOut()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
-        using var gate = HoldHashChecks(1);
+        HoldHashChecks(1);
+        DateTimeOffset? lockoutEnd;
+        CredentialResult result;
 
-        var inFlight = Task.Run(() => VerifyAsync(email, Password));
-        gate.WaitUntilFull();
-        await FailAsync(email, MaxAttempts);
-        var lockoutEnd = (await FindAsync(id)).LockoutEnd;
-        gate.Open();
-        var result = await inFlight;
+        try
+        {
+            // Act
+            var inFlight = Task.Run(() => VerifyAsync(email, Password));
+            WaitUntilHeld();
+            await FailAsync(email, MaxAttempts);
+            lockoutEnd = (await FindAsync(id)).LockoutEnd;
+            ReleaseHashChecks();
+            result = await inFlight;
+        }
+        finally
+        {
+            ReleaseHashChecks();
+        }
 
+        // Assert
         Assert.That(lockoutEnd, Is.GreaterThan(_clock.GetUtcNow()));
         Assert.That(result.IsValid, Is.False);
         Assert.That(result.IsLockedOut, Is.True);
@@ -261,40 +312,64 @@ public sealed class AccountLockoutTests
     }
 
     [Test]
-    public async Task Guesses_over_the_limit_are_refused_while_earlier_guesses_are_still_running()
+    public async Task Verify_GuessesOverLimitWhileEarlierRunning_ShouldReturnLockedOut()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
-        using var gate = HoldHashChecks(MaxAttempts);
+        HoldHashChecks(MaxAttempts);
+        CredentialResult[] overLimit;
+        CredentialResult[] results;
 
-        var running = Enumerable.Range(0, MaxAttempts)
-            .Select(_ => Task.Run(() => VerifyAsync(email, WrongPassword)))
-            .ToArray();
-        gate.WaitUntilFull();
+        try
+        {
+            var running = Enumerable.Range(0, MaxAttempts)
+                .Select(_ => Task.Run(() => VerifyAsync(email, WrongPassword)))
+                .ToArray();
+            WaitUntilHeld();
 
-        // No failure has finished yet, so only charging attempts up front can refuse these.
-        var overLimit = await Task.WhenAll(Enumerable.Range(0, 5)
-            .Select(_ => Task.Run(() => VerifyAsync(email, Password))));
+            // Act
+            // No failure has finished yet, so only charging attempts up front can refuse these.
+            overLimit = await Task.WhenAll(Enumerable.Range(0, 5)
+                .Select(_ => Task.Run(() => VerifyAsync(email, Password))));
 
-        gate.Open();
-        var results = await Task.WhenAll(running);
+            ReleaseHashChecks();
+            results = await Task.WhenAll(running);
+        }
+        finally
+        {
+            ReleaseHashChecks();
+        }
 
+        // Assert
         Assert.That(overLimit.Select(r => r.IsLockedOut), Is.All.True);
         Assert.That(overLimit.Concat(results).Select(r => r.IsValid), Is.All.False);
         Assert.That((await FindAsync(id)).LockoutEnd, Is.GreaterThan(_clock.GetUtcNow()));
     }
 
     [Test]
-    public async Task Correct_password_in_flight_below_the_limit_still_logs_in()
+    public async Task Verify_CorrectPasswordInFlightBelowLimit_ShouldSucceed()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
-        using var gate = HoldHashChecks(1);
+        HoldHashChecks(1);
+        CredentialResult result;
 
-        var inFlight = Task.Run(() => VerifyAsync(email, Password));
-        gate.WaitUntilFull();
-        await VerifyAsync(email, WrongPassword);
-        gate.Open();
+        try
+        {
+            // Act
+            var inFlight = Task.Run(() => VerifyAsync(email, Password));
+            WaitUntilHeld();
+            await VerifyAsync(email, WrongPassword);
+            ReleaseHashChecks();
+            result = await inFlight;
+        }
+        finally
+        {
+            ReleaseHashChecks();
+        }
 
-        Assert.That((await inFlight).IsValid, Is.True);
+        // Assert
+        Assert.That(result.IsValid, Is.True);
 
         var account = await FindAsync(id);
         Assert.That(account.FailedLoginCount, Is.EqualTo(0));
@@ -302,18 +377,21 @@ public sealed class AccountLockoutTests
     }
 
     [Test]
-    public async Task Checks_abandoned_midway_still_count_and_do_not_leave_the_account_stuck()
+    public async Task Verify_AbandonedChecks_ShouldCount_AndLockUntilLockoutEnds()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
 
+        // Act
         await AbandonAsync(email, MaxAttempts);
 
+        // Assert
         Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(MaxAttempts));
 
         // Abandoned guesses are not free: the next attempt gets no password check.
         Assert.That((await VerifyAsync(email, Password)).IsLockedOut, Is.True);
 
-        _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes));
+        Advance(TimeSpan.FromMinutes(LockoutMinutes));
         Assert.That((await VerifyAsync(email, Password)).IsValid, Is.True);
     }
 
@@ -323,13 +401,16 @@ public sealed class AccountLockoutTests
     // would make every login in flight during an unlock a free guess (rule: only a charged attempt counts).
     [TestCase(Password)]
     [TestCase(WrongPassword)]
-    public async Task Login_in_flight_during_an_admin_unlock_is_refused_whatever_the_password(string password)
+    public async Task Verify_AdminUnlockAfterChargeOnLockedAccount_ShouldReturnLockedOut(string password)
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
         await FailAsync(email, MaxAttempts);
 
+        // Act
         var result = await VerifyWithUnlockAfterChargeAsync(id, email, password);
 
+        // Assert
         Assert.That(result, Is.EqualTo(CredentialResult.LockedOut(id)), "the outcome must not depend on the password");
         var account = await FindAsync(id);
         Assert.That(account.LockoutEnd, Is.Null, "the unlock itself stands");
@@ -344,17 +425,20 @@ public sealed class AccountLockoutTests
     // that commits before the read hides the lockout it set. Its password result must not be used either.
     [TestCase(Password)]
     [TestCase(WrongPassword)]
-    public async Task Login_that_sets_the_lockout_itself_is_refused_when_an_admin_unlock_lands_before_the_read(string password)
+    public async Task Verify_AdminUnlockAfterAttemptSetLockout_ShouldReturnLockedOut(string password)
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
         await AbandonAsync(email, MaxAttempts);
         var before = await FindAsync(id);
         Assert.That(before.FailedLoginCount, Is.EqualTo(MaxAttempts), "the counter is at the limit");
         Assert.That(before.LockoutEnd, Is.Null, "the account is not locked yet");
 
+        // Act
         // The unlock asserts that it had a running lockout to clear: the one this attempt set.
         var result = await VerifyWithUnlockAfterChargeAsync(id, email, password);
 
+        // Assert
         Assert.That(result, Is.EqualTo(CredentialResult.LockedOut(id)), "the outcome must not depend on the password");
         var account = await FindAsync(id);
         Assert.That(account.LockoutEnd, Is.Null, "the unlock itself stands");
@@ -365,8 +449,9 @@ public sealed class AccountLockoutTests
     }
 
     [Test]
-    public async Task Attempt_that_only_sets_the_lockout_is_not_reported_as_charged()
+    public async Task ReserveAttempt_AtLimit_ShouldSetLockout_AndNotCharge()
     {
+        // Arrange
         var (id, email) = await CreateAccountAsync();
 
         for (var i = 1; i <= MaxAttempts; i++)
@@ -375,7 +460,11 @@ public sealed class AccountLockoutTests
             Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(i));
         }
 
-        Assert.That(await ReserveAsync(email), Is.False, "at the limit the attempt sets the lockout and is not charged");
+        // Act
+        var atLimit = await ReserveAsync(email);
+
+        // Assert
+        Assert.That(atLimit, Is.False, "at the limit the attempt sets the lockout and is not charged");
         var locked = await FindAsync(id);
         Assert.That(locked.LockoutEnd, Is.EqualTo(_clock.GetUtcNow().AddMinutes(LockoutMinutes)));
         Assert.That(locked.FailedLoginCount, Is.EqualTo(0));
@@ -383,25 +472,88 @@ public sealed class AccountLockoutTests
         Assert.That(await ReserveAsync(email), Is.False, "a locked account charges nothing");
         Assert.That(await ReserveAsync(NewEmail()), Is.False, "an unknown e-mail charges nothing");
 
-        _clock.Advance(TimeSpan.FromMinutes(LockoutMinutes));
+        Advance(TimeSpan.FromMinutes(LockoutMinutes));
         Assert.That(await ReserveAsync(email), Is.True, "after the lockout ends the next attempt is charged");
         Assert.That((await FindAsync(id)).FailedLoginCount, Is.EqualTo(1));
     }
 
+    private void SetNow(DateTimeOffset now)
+    {
+        _now = now;
+        _clockMock.Setup(t => t.GetUtcNow()).Returns(now);
+    }
+
+    private void Advance(TimeSpan by) => SetNow(_now + by);
+
+    // The real BCrypt check, with optional holds (so a test can act while checks are in flight) and abandons
+    // (requests interrupted during the hash).
+    private bool VerifyHash(string password, string? passwordHash)
+    {
+        if (Volatile.Read(ref _entered) is { } entered && Interlocked.Decrement(ref _holds) >= 0)
+        {
+            entered.Signal();
+            _open!.Wait(HoldTimeout);
+        }
+
+        if (Volatile.Read(ref _abandon) > 0 && Interlocked.Decrement(ref _abandon) >= 0)
+            throw new OperationCanceledException();
+
+        return _bcrypt.Verify(password, passwordHash);
+    }
+
+    private void VerifyHashChecks(int count) =>
+        _hasherMock.Verify(h => h.Verify(It.IsAny<string>(), It.IsAny<string?>()), Times.Exactly(count));
+
+    // Holds the next <paramref name="count"/> checks inside Verify until ReleaseHashChecks.
+    private void HoldHashChecks(int count)
+    {
+        _open = new ManualResetEventSlim();
+        _holds = count;
+        Volatile.Write(ref _entered, new CountdownEvent(count));
+    }
+
+    private void WaitUntilHeld() => Assert.That(_entered!.Wait(HoldTimeout), Is.True);
+
+    private void ReleaseHashChecks()
+    {
+        Volatile.Write(ref _entered, null);
+        _open?.Set();
+    }
+
     private async Task<bool> ReserveAsync(string email)
     {
-        using var scope = _provider.CreateScope();
+        using var scope = _host.Services.CreateScope();
         var now = _clock.GetUtcNow();
         return await scope.ServiceProvider.GetRequiredService<ICredentialStore>()
             .ReserveAttemptAsync(email, MaxAttempts, now, now.AddMinutes(LockoutMinutes));
     }
 
+    // Commits an administrator unlock right after the attempt is charged and before the account is read:
+    // the window a login in flight hits during a real unlock, made deterministic. Every other store call goes
+    // to the real EF store.
     private async Task<CredentialResult> VerifyWithUnlockAfterChargeAsync(Guid id, string email, string password)
     {
-        using var scope = _provider.CreateScope();
-        var store = new UnlockAfterCharge(
-            new EfCredentialStore(scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>()),
-            () => UnlockAsync(id));
+        using var scope = _host.Services.CreateScope();
+        var inner = scope.ServiceProvider.GetRequiredService<ICredentialStore>();
+        var storeMock = new Mock<ICredentialStore>(MockBehavior.Strict);
+        storeMock.Setup(s => s.FindByEmailAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>(inner.FindByEmailAsync);
+        storeMock.Setup(s => s.ReserveAttemptAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(),
+                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd,
+                CancellationToken ct) =>
+            {
+                var charged = await inner.ReserveAttemptAsync(normalizedEmail, maxAttempts, now, lockoutEnd, ct);
+                await UnlockAsync(id);
+                return charged;
+            });
+        storeMock.Setup(s => s.LockIfLimitReachedAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTimeOffset>(),
+                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns<string, int, DateTimeOffset, DateTimeOffset, CancellationToken>(inner.LockIfLimitReachedAsync);
+        storeMock.Setup(s => s.TryClearFailuresAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, DateTimeOffset, CancellationToken>(inner.TryClearFailuresAsync);
+
+        var store = storeMock.Object;
         var verifier = new CredentialVerifier(
             store, _hasher, scope.ServiceProvider.GetRequiredService<IOptions<IdentityLockoutOptions>>(), _clock);
 
@@ -411,34 +563,19 @@ public sealed class AccountLockoutTests
     // The real administrator unlock (IDN-05), committed in its own scope, connection and transaction.
     private async Task UnlockAsync(Guid id)
     {
-        using var scope = _provider.CreateScope();
-        var statusStore = new Platform.Api.Services.Identity.EfAccountStatusStore(
-            scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>());
+        using var scope = _host.Services.CreateScope();
+        var statusStore = scope.ServiceProvider.GetRequiredService<IAccountStatusStore>();
         await using var work = await statusStore.BeginAsync();
         var account = await work.FindForUpdateAsync(id);
         Assert.That(await work.ClearLockoutAsync(account!, _clock.GetUtcNow()), Is.Not.Null, "the account was locked");
         await work.CommitAsync();
     }
 
-    private HashGate HoldHashChecks(int count)
-    {
-        var gate = new HashGate(count, () => _hasher.Gate = null);
-        _hasher.Gate = gate;
-        return gate;
-    }
-
     private static string NewEmail() => $"lockout-{Guid.NewGuid():N}@example.com";
 
-    private async Task<(Guid Id, string Email)> CreateAccountAsync()
+    private static async Task<(Guid Id, string Email)> CreateAccountAsync()
     {
-        var account = new UserAccount(Guid.NewGuid(), NewEmail());
-        account.SetPasswordHash(_passwordHash);
-
-        using var scope = _provider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        db.Accounts.Add(account);
-        await db.SaveChangesAsync();
-
+        var account = await UserTestData.AddAsync(Factory, NewEmail(), Password);
         return (account.Id, account.Email);
     }
 
@@ -454,111 +591,16 @@ public sealed class AccountLockoutTests
     // Requests interrupted during the hash: each attempt stays charged, and none of them reaches the lockout check.
     private async Task AbandonAsync(string email, int attempts)
     {
-        _hasher.AbandonNext(attempts);
+        Volatile.Write(ref _abandon, attempts);
         for (var i = 0; i < attempts; i++)
             await Assert.CatchAsync<OperationCanceledException>(() => VerifyAsync(email, WrongPassword));
     }
 
     private async Task<CredentialResult> VerifyAsync(string email, string password)
     {
-        using var scope = _provider.CreateScope();
+        using var scope = _host.Services.CreateScope();
         return await scope.ServiceProvider.GetRequiredService<ICredentialVerifier>().VerifyAsync(email, password);
     }
 
-    private async Task<UserAccount> FindAsync(Guid id)
-    {
-        using var scope = _provider.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        return await db.Accounts.AsNoTracking().SingleAsync(a => a.Id == id);
-    }
-
-    private sealed class ManualClock(DateTimeOffset start) : TimeProvider
-    {
-        private DateTimeOffset _now = start;
-
-        public override DateTimeOffset GetUtcNow() => _now;
-
-        public void Advance(TimeSpan by) => _now += by;
-    }
-
-    // Holds the first checks inside Verify, so a test can act while they are in flight.
-    private sealed class HashGate(int holds, Action onDispose) : IDisposable
-    {
-        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
-
-        private readonly CountdownEvent _entered = new(holds);
-        private readonly ManualResetEventSlim _open = new();
-        private int _remaining = holds;
-
-        public void Pass()
-        {
-            if (Interlocked.Decrement(ref _remaining) < 0)
-                return;
-
-            _entered.Signal();
-            _open.Wait(Timeout);
-        }
-
-        public void WaitUntilFull() => Assert.That(_entered.Wait(Timeout), Is.True);
-
-        public void Open() => _open.Set();
-
-        public void Dispose()
-        {
-            Open();
-            onDispose();
-        }
-    }
-
-    // Commits an administrator unlock right after the attempt is charged and before the account is read:
-    // the window a login in flight hits during a real unlock, made deterministic.
-    private sealed class UnlockAfterCharge(ICredentialStore inner, Func<Task> unlock) : ICredentialStore
-    {
-        public Task<CredentialRecord?> FindByEmailAsync(string normalizedEmail, CancellationToken ct = default) =>
-            inner.FindByEmailAsync(normalizedEmail, ct);
-
-        public async Task<bool> ReserveAttemptAsync(
-            string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default)
-        {
-            var charged = await inner.ReserveAttemptAsync(normalizedEmail, maxAttempts, now, lockoutEnd, ct);
-            await unlock();
-            return charged;
-        }
-
-        public Task<DateTimeOffset?> LockIfLimitReachedAsync(
-            string normalizedEmail, int maxAttempts, DateTimeOffset now, DateTimeOffset lockoutEnd, CancellationToken ct = default) =>
-            inner.LockIfLimitReachedAsync(normalizedEmail, maxAttempts, now, lockoutEnd, ct);
-
-        public Task<bool> TryClearFailuresAsync(Guid accountId, DateTimeOffset now, CancellationToken ct = default) =>
-            inner.TryClearFailuresAsync(accountId, now, ct);
-    }
-
-    // Counts checks, so the hash work on every path is proven without measuring time.
-    private sealed class CountingHasher : IPasswordHasher
-    {
-        private readonly BCryptPasswordHasher _inner = new();
-        private int _verifications;
-        private int _abandon;
-
-        public HashGate? Gate { get; set; }
-
-        public void AbandonNext(int count) => Volatile.Write(ref _abandon, count);
-
-        public int Verifications => Volatile.Read(ref _verifications);
-
-        public void Reset() => Interlocked.Exchange(ref _verifications, 0);
-
-        public string Hash(string password) => _inner.Hash(password);
-
-        public bool Verify(string password, string? passwordHash)
-        {
-            Interlocked.Increment(ref _verifications);
-            Gate?.Pass();
-
-            if (Volatile.Read(ref _abandon) > 0 && Interlocked.Decrement(ref _abandon) >= 0)
-                throw new OperationCanceledException();
-
-            return _inner.Verify(password, passwordHash);
-        }
-    }
+    private static async Task<UserAccount> FindAsync(Guid id) => (await UserTestData.GetAsync(Factory, id))!;
 }
