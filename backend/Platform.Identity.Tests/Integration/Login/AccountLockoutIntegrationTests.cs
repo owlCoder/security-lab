@@ -67,7 +67,12 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
     }
 
     [OneTimeTearDown]
-    public async Task DisposeLockoutHost() => await _host.DisposeAsync();
+    public async Task DisposeLockoutHost()
+    {
+        ReleaseHashChecks();
+        _open?.Dispose();
+        await _host.DisposeAsync();
+    }
 
     [SetUp]
     public void ResetDoubles()
@@ -191,8 +196,11 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
         await FailAsync(email, MaxAttempts);
         Advance(TimeSpan.FromMinutes(LockoutMinutes));
 
-        // Act & Assert
-        Assert.That((await VerifyAsync(email, Password)).IsValid, Is.True);
+        // Act
+        var result = await VerifyAsync(email, Password);
+
+        // Assert
+        Assert.That(result.IsValid, Is.True);
     }
 
     [Test]
@@ -203,9 +211,13 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
         await FailAsync(email, MaxAttempts);
         Advance(TimeSpan.FromMinutes(LockoutMinutes).Add(TimeSpan.FromSeconds(1)));
 
-        // Act & Assert
-        Assert.That((await FailAsync(email, MaxAttempts - 1)).IsLockedOut, Is.False);
-        Assert.That((await FailAsync(email, 1)).IsLockedOut, Is.True);
+        // Act
+        var belowLimit = await FailAsync(email, MaxAttempts - 1);
+        var atLimit = await FailAsync(email, 1);
+
+        // Assert
+        Assert.That(belowLimit.IsLockedOut, Is.False);
+        Assert.That(atLimit.IsLockedOut, Is.True);
     }
 
     [Test]
@@ -257,10 +269,14 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
         // Arrange
         var email = NewEmail();
 
-        // Act & Assert
-        for (var i = 0; i < MaxAttempts + 1; i++)
-            Assert.That(await VerifyAsync(email, WrongPassword), Is.EqualTo(CredentialResult.Invalid));
+        var results = new List<CredentialResult>();
 
+        // Act
+        for (var i = 0; i < MaxAttempts + 1; i++)
+            results.Add(await VerifyAsync(email, WrongPassword));
+
+        // Assert
+        Assert.That(results, Is.All.EqualTo(CredentialResult.Invalid));
         VerifyHashChecks(MaxAttempts + 1);
         Assert.That(await UserTestData.GetByEmailAsync(Factory, email), Is.Null);
     }
@@ -505,8 +521,10 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
         _hasherMock.Verify(h => h.Verify(It.IsAny<string>(), It.IsAny<string?>()), Times.Exactly(count));
 
     // Holds the next <paramref name="count"/> checks inside Verify until ReleaseHashChecks.
+    // The previous gate is disposed only here: threads released from it may still be leaving its Wait.
     private void HoldHashChecks(int count)
     {
+        _open?.Dispose();
         _open = new ManualResetEventSlim();
         _holds = count;
         Volatile.Write(ref _entered, new CountdownEvent(count));
@@ -516,8 +534,9 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
 
     private void ReleaseHashChecks()
     {
-        Volatile.Write(ref _entered, null);
+        var entered = Interlocked.Exchange(ref _entered, null);
         _open?.Set();
+        entered?.Dispose();
     }
 
     private async Task<bool> ReserveAsync(string email)
@@ -530,7 +549,8 @@ public sealed class AccountLockoutIntegrationTests : IntegrationTestBase
 
     // Commits an administrator unlock right after the attempt is charged and before the account is read:
     // the window a login in flight hits during a real unlock, made deterministic. Every other store call goes
-    // to the real EF store.
+    // to the real EF store. The verifier is built by hand because the mock store has to wrap this scope's
+    // EfCredentialStore and unlock this particular account; its other dependencies are the class host's.
     private async Task<CredentialResult> VerifyWithUnlockAfterChargeAsync(Guid id, string email, string password)
     {
         using var scope = _host.Services.CreateScope();
