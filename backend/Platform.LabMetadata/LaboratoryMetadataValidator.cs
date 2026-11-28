@@ -8,6 +8,8 @@ public sealed class LaboratoryMetadataValidator
 {
     // Maksimalna dozvoljena duzina cilja laboratorije.
     public const int MaxObjectiveLength = 2000;
+    public const int MaxTags = 20;
+    public const int MaxTagLength = 64;
 
     public MetadataValidationResult Validate(
         Guid laboratoryId,
@@ -63,6 +65,24 @@ public sealed class LaboratoryMetadataValidator
                 "tags",
                 "Laboratory tags collection is required."
             ));
+        }
+        else
+        {
+            var count = 0;
+            foreach (var tag in tags)
+            {
+                // Count raw entries before normalization, including duplicates.
+                if (++count > MaxTags)
+                {
+                    errors.Add(new("tags", $"At most {MaxTags} tags are allowed."));
+                    break;
+                }
+                if (tag is not null && tag.Length > MaxTagLength)
+                {
+                    errors.Add(new("tags", $"Each tag cannot exceed {MaxTagLength} characters."));
+                    break;
+                }
+            }
         }
 
         return new MetadataValidationResult(errors);

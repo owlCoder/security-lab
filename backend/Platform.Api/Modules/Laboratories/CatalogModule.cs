@@ -5,6 +5,7 @@ using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
+using Platform.LaboratoryPersistence.Application;
 
 namespace Platform.Api.Modules.Laboratories;
 
@@ -18,7 +19,8 @@ public static class CatalogModule
             new ActionDefinition(CatalogReadPolicy.ActionId, ActionScope.Authenticated, null, false));
 
         if (!string.IsNullOrWhiteSpace(
-            configuration.GetConnectionString("Authoring")))
+            configuration.GetConnectionString("Authoring")) ||
+            services.Any(service => service.ServiceType == typeof(ILaboratoryMetadataStore)))
         {
             services.AddScoped<CatalogService>();
         }
@@ -37,7 +39,9 @@ public static class CatalogModule
         // Test hosts can apply configuration after service registration. Only map
         // routes when AddCatalog actually registered their required service.
         if (app.ServiceProvider.GetRequiredService<IServiceProviderIsService>()
-            .IsService(typeof(CatalogService)))
+            .IsService(typeof(CatalogService)) &&
+            app.ServiceProvider.GetRequiredService<IServiceProviderIsService>()
+                .IsService(typeof(ILaboratoryMetadataStore)))
         {
             app.MapCatalogEndpoints();
         }

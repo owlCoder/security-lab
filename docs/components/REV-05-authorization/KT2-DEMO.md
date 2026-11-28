@@ -38,7 +38,7 @@ pravo. Kada audit mutacije ne uspije, nema commit-a.
 
 ```powershell
 dotnet test backend/Platform.RateLimiting.Tests/Platform.RateLimiting.Tests.csproj --configuration Release
-dotnet test backend/Platform.Identity.Tests/Platform.Identity.Tests.csproj --configuration Release --filter "FullyQualifiedName~IdentityAuditPostgresIntegrationTests"
+dotnet test backend/Platform.Identity.Tests/Platform.Identity.Tests.csproj --configuration Release --filter "FullyQualifiedName~IdentityAuditIntegrationTests"
 ```
 
 Prva grupa koristi pravi Program pipeline sa testnim credential/session adapterima;

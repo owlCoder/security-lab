@@ -71,7 +71,7 @@ Lokalno 19.11.2026. na osnovi b43cdd0: 18 Identity audit, 87 REV autorizacionih 
 48 REV HTTP/PostgreSQL testova: ukupno 153 prosla, 0 pala, 0 preskocenih. To je
 istorijski rezultat, ne broj testova danasnjeg main-a.
 
-AccountLockoutHttpFlow_PersistsAuditAtThreshold_AndForLaterRejectedLogin provjerava
+Login_LockoutThresholdAndLaterAttempt_ShouldPersistAnonymousFailureEvents provjerava
 stvarni prag i kasnije odbijanje: Anonymous akter, nalog kao cilj, serverska
 korelacija, isti genericki 401 i bez nove sesije.
 AccountLockout_WhenAuditInsertFails_StaysLockedAndIssuesNoSession stvarno ukida

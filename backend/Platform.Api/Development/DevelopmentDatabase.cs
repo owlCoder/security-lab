@@ -12,14 +12,22 @@ public static class DevelopmentDatabase
     /// US-02: applies pending identity migrations when the API starts locally. Other environments never migrate
     /// on startup. Returns false when the database is not ready; the API still starts, as it does without a database.
     /// </summary>
-    public static async Task<bool> ApplyIdentityMigrationsAsync(this WebApplication app, CancellationToken ct = default)
-    {
-        DevelopmentAccountSeeder.RequireDevelopment(app.Environment);
+    public static Task<bool> ApplyIdentityMigrationsAsync(this WebApplication app, CancellationToken ct = default) =>
+        app.Services.ApplyIdentityMigrationsAsync(ct);
 
-        var logger = app.Services.GetRequiredService<ILoggerFactory>()
+    /// <summary>
+    /// The same for the services of a built host (environment, configuration and logging are read from them),
+    /// so tests can run it on the host of <c>WebApplicationFactory</c>.
+    /// </summary>
+    public static async Task<bool> ApplyIdentityMigrationsAsync(this IServiceProvider services, CancellationToken ct = default)
+    {
+        DevelopmentAccountSeeder.RequireDevelopment(services.GetRequiredService<IHostEnvironment>());
+
+        var logger = services.GetRequiredService<ILoggerFactory>()
             .CreateLogger(nameof(DevelopmentDatabase));
 
-        if (string.IsNullOrWhiteSpace(app.Configuration.GetConnectionString(IdentityModule.ConnectionStringName)))
+        if (string.IsNullOrWhiteSpace(services.GetRequiredService<IConfiguration>()
+                .GetConnectionString(IdentityModule.ConnectionStringName)))
         {
             logger.LogInformation(
                 "Identity connection string is not set, migrations and development accounts are skipped. See docs/DEVELOPMENT.md.");
@@ -30,11 +38,11 @@ public static class DevelopmentDatabase
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(DatabaseTimeout);
-            using var scope = app.Services.CreateScope();
-            var services = scope.ServiceProvider;
+            using var scope = services.CreateScope();
+            var scoped = scope.ServiceProvider;
             // IDN-01: AspNetUsers is in the same identity schema and shares the migration history table.
-            await services.GetRequiredService<PlatformIdentityDbContext>().Database.MigrateAsync(timeout.Token);
-            await services.GetRequiredService<AccountDbContext>().Database.MigrateAsync(timeout.Token);
+            await scoped.GetRequiredService<PlatformIdentityDbContext>().Database.MigrateAsync(timeout.Token);
+            await scoped.GetRequiredService<AccountDbContext>().Database.MigrateAsync(timeout.Token);
 
             logger.LogInformation("Identity migrations are up to date.");
             return true;
