@@ -19,6 +19,9 @@ internal sealed class InMemoryMembershipStore : IMembershipStore
     /// <summary>Simulira da Audit nije mogao da sačuva zapis.</summary>
     public bool SimulateAuditFailure { get; set; }
 
+    /// <summary>Simulira nedostupnu bazu: citanje baca izuzetak, kao EfMembershipStore kad baza ne radi.</summary>
+    public bool SimulateUnavailable { get; set; }
+
     /// <summary>Audit podaci (akter, korelacioni ID) za svaki uspešan upis.</summary>
     public List<AuditContext> AuditContexts { get; } = [];
 
@@ -38,6 +41,11 @@ internal sealed class InMemoryMembershipStore : IMembershipStore
         Guid accountId,
         CancellationToken cancellationToken = default)
     {
+        if (SimulateUnavailable)
+        {
+            throw new InvalidOperationException("Membership database is unavailable (test).");
+        }
+
         lock (gate)
         {
             return ValueTask.FromResult(members.SingleOrDefault(m =>

@@ -99,6 +99,26 @@ public sealed class StoreMembershipReaderTests
         Assert.That(after.Outcome, Is.EqualTo(AccessOutcome.Deny));
     }
 
+    [Test]
+    public void Unavailable_database_is_an_error_not_a_missing_membership()
+    {
+        // Nedostupna baza ne sme da izgleda kao "nije upisan" (null): greska ide dalje,
+        // a Access (Tim 3) i SharedMembershipAdapter (ACC-08) je pretvaraju u odbijanje.
+        store.SimulateUnavailable = true;
+
+        Assert.ThrowsAsync<InvalidOperationException>(async () => await reader.GetAsync(Student, Course));
+    }
+
+    [Test]
+    public async Task Enrolled_student_is_denied_while_the_database_is_unavailable()
+    {
+        store.SimulateUnavailable = true;
+
+        var decision = await LabRead(Student);
+
+        Assert.That(decision.Outcome, Is.EqualTo(AccessOutcome.Deny));
+    }
+
     private ValueTask<AccessDecision> LabRead(Guid accountId) =>
         access.DecideAsync(new AccessRequest(
             new SubjectRef(accountId.ToString("D"), AccountState.Active),
