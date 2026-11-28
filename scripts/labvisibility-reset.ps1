@@ -1,11 +1,16 @@
-# AUT-04 (KT2-09): resets the local LabVisibility data to the demo seed with one command.
-# Drops only the lab_visibility schema in the local docker-compose database, then starts the API once
-# in Development so the real startup code applies the InitialLabVisibility migration and the demo seed
-# (labs 4444... published and 5555... draft). Other modules' schemas are not touched.
+# AUT-04 (KT2-09): resets the local LabVisibility demo data with one command.
+# Order: every precondition is checked first (.env, db service, build or existing DLL, free API port,
+# and a dry-run of the drop). Only then are the four lab_visibility tables and the empty schema dropped,
+# with RESTRICT inside one transaction: if anything outside lab_visibility depends on them, or the schema
+# holds an object the reset does not know, PostgreSQL refuses and nothing is deleted. Then the API is
+# started once in Development, so the real startup code applies the migration and the demo seed.
+# The schema holds demo data only; everything in it is recreated by the seed.
 # Local development only; never point it at a shared or production database.
 [CmdletBinding()]
 param(
     [switch]$NoBuild,
+    # Runs every precondition and the drop as a dry run (rolled back); deletes nothing.
+    [switch]$CheckOnly,
     [int]$Port = 5089
 )
 
@@ -41,9 +46,13 @@ function Invoke-Compose {
 }
 
 function Invoke-Psql([hashtable]$envValues, [string]$sql) {
-    $output = Invoke-Compose exec -T db psql -v ON_ERROR_STOP=1 -t -A `
-        -U $envValues['POSTGRES_USER'] -d $envValues['POSTGRES_DB'] -c $sql
-    if ($LASTEXITCODE -ne 0) { throw "psql failed: $sql" }
+    $psqlArgs = @('exec', '-T', 'db', 'psql', '-q', '-v', 'ON_ERROR_STOP=1', '-t', '-A',
+        '-U', $envValues['POSTGRES_USER'], '-d', $envValues['POSTGRES_DB'])
+    # SQL goes through stdin: Windows PowerShell 5.1 strips double quotes from native arguments,
+    # which would break the quoted "__EFMigrationsHistory" identifier.
+    if ($script:composeCommand -eq 'docker-compose') { $output = $sql | & docker-compose @psqlArgs }
+    else { $output = $sql | & docker compose @psqlArgs }
+    if ($LASTEXITCODE -ne 0) { throw 'psql failed.' }
     return $output
 }
 
@@ -54,10 +63,15 @@ $script:composeCommand = 'docker compose'
 try { & docker compose version *> $null; if ($LASTEXITCODE -ne 0) { $script:composeCommand = 'docker-compose' } }
 catch { $script:composeCommand = 'docker-compose' }
 
-Write-Host '1/4 Starting the local PostgreSQL service (docker compose, 127.0.0.1:5432)...'
+$labTables = 'lab_visibility.lab_evaluator_key, lab_visibility.lab_public_task, lab_visibility.lab_public_content, lab_visibility."__EFMigrationsHistory"'
+# RESTRICT (never CASCADE): PostgreSQL refuses to drop if anything else depends on these tables or the
+# schema still holds an unknown object. One transaction: either all of it is dropped or nothing is.
+$dropSql = "DROP TABLE IF EXISTS $labTables RESTRICT; DROP SCHEMA IF EXISTS lab_visibility RESTRICT;"
+
+Write-Host '1/5 Checking preconditions (nothing is deleted in this step)...'
 Invoke-Compose up -d db
 if ($LASTEXITCODE -ne 0) {
-    throw 'docker compose could not start the db service. Is Docker Desktop running? Is port 5432 taken by a local PostgreSQL service?'
+    throw 'docker compose could not start the db service. Is Docker Desktop running? Is port 5432 taken by a local PostgreSQL service? Nothing was deleted.'
 }
 $healthy = $false
 for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -69,10 +83,31 @@ for ($attempt = 0; $attempt -lt 60; $attempt++) {
     }
     Start-Sleep -Seconds 1
 }
-if (-not $healthy) { throw 'The db service did not become healthy.' }
+if (-not $healthy) { throw 'The db service did not become healthy. Nothing was deleted.' }
 
-Write-Host '2/4 Dropping only the lab_visibility schema...'
-Invoke-Psql $envValues 'DROP SCHEMA IF EXISTS lab_visibility CASCADE;' | Out-Null
+if (-not $NoBuild) {
+    & dotnet build backend/Platform.Api/Platform.Api.csproj --configuration Debug
+    if ($LASTEXITCODE -ne 0) { throw 'Build failed. Nothing was deleted.' }
+}
+
+# The built DLL directly (as in CI), so stopping the process really stops the API.
+$dll = Join-Path $root 'backend/Platform.Api/bin/Debug/net10.0/Platform.Api.dll'
+if (-not (Test-Path -LiteralPath $dll)) { throw "Missing $dll. Run without -NoBuild. Nothing was deleted." }
+
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+try { $listener.Start() }
+catch { throw "Port $Port is in use; pass another -Port. Nothing was deleted." }
+finally { $listener.Stop() }
+
+try { Invoke-Psql $envValues "BEGIN; $dropSql ROLLBACK;" | Out-Null }
+catch {
+    throw 'Reset refused: something outside lab_visibility depends on its tables, or the schema holds an object this script does not know. Nothing was deleted.'
+}
+
+if ($CheckOnly) {
+    Write-Host 'LabVisibility reset CHECK PASS: all preconditions hold and the drop would succeed. Nothing was deleted (-CheckOnly).'
+    return
+}
 
 $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
 $builder['Host'] = '127.0.0.1'
@@ -81,12 +116,11 @@ $builder['Database'] = $envValues['POSTGRES_DB']
 $builder['Username'] = $envValues['POSTGRES_USER']
 $builder['Password'] = $envValues['POSTGRES_PASSWORD']
 
-if (-not $NoBuild) {
-    & dotnet build backend/Platform.Api/Platform.Api.csproj --configuration Debug
-    if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
-}
+Write-Host '2/5 Dropping the four lab_visibility tables and the schema (RESTRICT, one transaction)...'
+try { Invoke-Psql $envValues "BEGIN; $dropSql COMMIT;" | Out-Null }
+catch { throw 'Drop refused by PostgreSQL; the transaction was rolled back and nothing was deleted.' }
 
-Write-Host '3/4 Starting the API once: migration + demo seed...'
+Write-Host '3/5 Starting the API once: migration + demo seed...'
 $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
 $previousConnection = $env:ConnectionStrings__LabVisibility
 $log = Join-Path ([System.IO.Path]::GetTempPath()) ("labvisibility-reset-" + [Guid]::NewGuid().ToString('N') + '.log')
@@ -96,9 +130,6 @@ try {
     $env:ASPNETCORE_ENVIRONMENT = 'Development'
     $env:ConnectionStrings__LabVisibility = $builder.ConnectionString
 
-    # The built DLL directly (as in CI), so stopping the process really stops the API.
-    $dll = Join-Path $root 'backend/Platform.Api/bin/Debug/net10.0/Platform.Api.dll'
-    if (-not (Test-Path -LiteralPath $dll)) { throw "Missing $dll. Run without -NoBuild." }
     $api = Start-Process -FilePath 'dotnet' -PassThru -NoNewWindow `
         -RedirectStandardOutput $log -RedirectStandardError "$log.err" `
         -ArgumentList @($dll, '--contentRoot', (Join-Path $root 'backend/Platform.Api'), '--urls', "http://127.0.0.1:$Port")
@@ -115,7 +146,7 @@ try {
     }
     if (-not $ready) {
         Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -Last 30
-        throw 'The API did not start; migration and seed were not confirmed.'
+        throw 'The API did not start; the lab_visibility schema is empty now. Fix the cause shown above and run the reset again (the seed recreates all demo data).'
     }
 }
 finally {
@@ -124,7 +155,7 @@ finally {
     $env:ConnectionStrings__LabVisibility = $previousConnection
 }
 
-Write-Host '4/4 Checking the seed...'
+Write-Host '4/5 Checking the seed...'
 $labs = [int](Invoke-Psql $envValues 'SELECT count(*) FROM lab_visibility.lab_public_content;')
 $tasks = [int](Invoke-Psql $envValues 'SELECT count(*) FROM lab_visibility.lab_public_task;')
 $keys = [int](Invoke-Psql $envValues 'SELECT count(*) FROM lab_visibility.lab_evaluator_key;')
@@ -138,4 +169,4 @@ if ($answerTables.Count -ne 1 -or $answerTables[0] -ne 'lab_evaluator_key') {
 }
 
 Remove-Item -LiteralPath $log, "$log.err" -ErrorAction SilentlyContinue
-Write-Host "LabVisibility reset PASS: $labs labs (4444... published, 5555... draft), $tasks tasks, $keys key rows; answers only in lab_evaluator_key."
+Write-Host "5/5 LabVisibility reset PASS: $labs labs (4444... published, 5555... draft), $tasks tasks, $keys key rows; answers only in lab_evaluator_key."

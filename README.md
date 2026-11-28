@@ -68,7 +68,7 @@ Locally, the API applies the identity migrations and seeds the development accou
 
 ### 5. Reset the LabVisibility demo data (AUT-04/AUT-07)
 
-One command brings the student view and preview demo back to a known state. It starts the `db` service, drops only the `lab_visibility` schema, starts the API once in Development to apply the `InitialLabVisibility` migration and the demo seed, and checks the result. Other modules' data is not touched.
+One command brings the student view and preview demo back to a known state. It first checks everything it needs (the `db` service, the build, a free API port) and does a dry run of the drop; only then does it drop the four `lab_visibility` tables and the empty schema with `RESTRICT` in one transaction, start the API once in Development to apply the `InitialLabVisibility` migration and the demo seed, and check the result. `RESTRICT` means PostgreSQL refuses, and nothing is deleted, if anything outside `lab_visibility` depends on those tables or the schema holds an object the script does not know. Everything in `lab_visibility` is demo data that the seed recreates. `-CheckOnly` runs every check and the dry run without deleting anything.
 
 ```
 powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1

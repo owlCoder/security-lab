@@ -240,11 +240,22 @@ dotnet build backend/SecurityLab.slnx --configuration Release
 powershell -ExecutionPolicy Bypass -File scripts/test-labvisibility-postgres.ps1 -NoBuild
 ```
 
-**Ponovljiv seed.** `scripts/labvisibility-reset.ps1` jednom komandom vraća lokalnu bazu na demo stanje: briše samo šemu `lab_visibility`, jednom pokreće API u Development režimu (pravi kod primenjuje migraciju i seed, sadržaj i ključ svake laboratorije u jednoj transakciji) i proverava 2 laboratorije, 3 zadatka i 3 reda ključa. Druge šeme se ne diraju; connection string postoji samo za taj proces.
+**Ponovljiv seed.** `scripts/labvisibility-reset.ps1` jednom komandom vraća lokalnu bazu na demo stanje. Redosled je namerno takav da se ništa ne briše dok sve ostalo nije provereno:
+
+1. Provere bez ikakve izmene: `.env`, `db` servis je `healthy`, build prolazi (ili postoji DLL uz `-NoBuild`), API port je slobodan, i probno brisanje u transakciji koja se odmah poništava (`BEGIN … ROLLBACK`). Ako bilo šta od toga padne, skripta staje i baza ostaje netaknuta.
+2. Brisanje: četiri tabele šeme `lab_visibility` i prazna šema, sa `RESTRICT` (nikad `CASCADE`) u jednoj transakciji. Ako bilo šta van `lab_visibility` zavisi od tih tabela, ili šema sadrži objekat koji skripta ne poznaje, PostgreSQL odbija i ne briše se ništa.
+3. API se jednom pokrene u Development režimu; pravi kod primenjuje migraciju i seed (sadržaj i ključ svake laboratorije u jednoj transakciji).
+4. Provera: 2 laboratorije, 3 zadatka, 3 reda ključa, odgovor samo u `lab_evaluator_key`.
+
+Sve u šemi `lab_visibility` su demo podaci koje seed ponovo pravi. Ako API ne krene posle koraka 2, šema ostaje prazna dok se reset ne pokrene ponovo. Connection string postoji samo za taj proces. `-CheckOnly` izvrši sve provere i probno brisanje, a ne briše ništa.
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1 -CheckOnly
 powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1
 ```
+
+**Granica HTTP testova.** `LabVisibilityPostgresHttpTests` koriste pravu bazu, prave politike, pravi EF reader i store i demo seed, ali testnu sesiju i testni status naloga (isto kao `LabPreviewHostFactory`). Oni dokazuju integraciju sa PostgreSQL-om, a ne integraciju sa stvarnim IDN sesijama i ACC članstvom; to pokrivaju testovi tih kartica.
+
 
 ## Plan za KT2
 
