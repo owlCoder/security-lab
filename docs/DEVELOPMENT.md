@@ -129,7 +129,7 @@ For tests, `TestUsers.Create(accounts, role, status, password)` creates a user i
 
 TOTP secrets are encrypted with an ASP.NET Core Data Protection key ring. In Development you need nothing: without settings the API uses the default local key ring. Every other environment (Staging, Testing, Production) requires `Identity__DataProtection__KeysPath` and `Identity__DataProtection__CertificatePath`, otherwise the API does not start. The variables are listed with empty values in `.env.example`; leave them empty in Development. Setting only one of `KeysPath` and `CertificatePath` stops the start in every environment, Development included: keys in `KeysPath` without a certificate would lie on disk unencrypted.
 
-To run the API outside Development on your machine, make a local-only PFX outside the repository:
+To run the API outside Development on your machine, make a local-only PFX with an RSA key (XML encryption of the key ring does not work with ECDSA) outside the repository:
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=SecurityLab key ring" -keyout keyring.key -out keyring.crt

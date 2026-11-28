@@ -146,13 +146,14 @@ purpose. Drugi moduli prave sopstveni protector iz `IDataProtectionProvider`, sa
 
 Gubitak Data Protection ključeva znači da se nijedna sačuvana TOTP tajna ne može dešifrovati. Bez recovery
 kodova i admin reseta svi MFA nalozi tada ostaju zaključani. Gde se ključevi čuvaju i čime se šifruju određuje
-samo `AddMfaKeyRing` (`MfaKeyRing.cs`, poziva ga `Program.cs`). `IdentityModule` registruje samo Data Protection
+samo `AddMfaKeyRing` (`Composition/MfaKeyRing.cs`, opcije u `Options/Mfa/MfaKeyRingOptions.cs`, poziva ga
+`Program.cs`). `IdentityModule` registruje samo Data Protection
 sa application name-om `SecurityLab` i `ITotpSecretProtector`.
 
 | Podešavanje | Značenje |
 |-|-|
 | `Identity:DataProtection:KeysPath` | direktorijum za ključeve; van repozitorijuma, mora da preživi restart i ide u backup zajedno sa bazom (ADM-03, OPS-04) |
-| `Identity:DataProtection:CertificatePath` | PFX sa privatnim ključem (`ProtectKeysWithCertificate`); njime je šifrovan svaki ključ upisan u `KeysPath` |
+| `Identity:DataProtection:CertificatePath` | PFX sa privatnim RSA ključem (`ProtectKeysWithCertificate`); njime je šifrovan svaki ključ upisan u `KeysPath`. XML enkripcija sertifikatom ne radi sa ECDSA ključem |
 | `Identity:DataProtection:CertificatePassword` | lozinka PFX-a; samo kroz environment varijablu, a u Development-u i `.env` ili user-secrets; nikad u repozitorijumu (ADM-04) |
 
 Ključ na disku ne sadrži master key u čistom obliku, nego `encryptedSecret` šifrovan sertifikatom. Kopija
@@ -167,17 +168,19 @@ starim ključem više se ne mogu pročitati, pa ti nalozi ponovo prolaze MFA enr
 `CertificatePath` su obavezni. API se ne pokreće u ovim slučajevima, a poruka greške ne sadrži lozinku ni sadržaj
 ključa:
 
-| Uslov | Test (`MfaKeyRingTests`) |
+| Uslov | Test (`Composition/MfaKeyRingTests`) |
 |-|-|
 | podešavanja nedostaju | `AddMfaKeyRing_OutsideDevelopmentWithoutSettings_Throws`, `ApiHost_InProductionWithoutKeyRing_DoesNotStart` |
 | podešeno je samo jedno od dva (i u Development-u) | `AddMfaKeyRing_OnlyOneSettingInDevelopment_Throws` |
 | PFX fajl ne postoji | `AddMfaKeyRing_MissingCertificateFile_Throws` |
 | lozinka nije dobra | `AddMfaKeyRing_WrongCertificatePassword_ThrowsWithoutRevealingIt` |
 | sertifikat nema privatni ključ | `AddMfaKeyRing_CertificateWithoutPrivateKey_Throws` |
+| ključ sertifikata nije RSA (npr. ECDSA; inače bi pao tek prvi enrollment) | `AddMfaKeyRing_EcdsaCertificate_Throws` |
 | `KeysPath` ne može da se napravi | `AddMfaKeyRing_KeysPathThatCannotBeCreated_Throws` |
 | `KeysPath` postoji, ali nije čitljiv ili upisiv | `AddMfaKeyRing_ExistingKeysPathWithoutReadAccess_Throws`, `..._WithoutWriteAccess_Throws` |
 | postojeći ključ (`*.xml`) nije čitljiv, npr. posle restore-a sa drugim vlasnikom fajlova | `AddMfaKeyRing_ExistingKeyFileWithoutReadAccess_Throws` |
-| postojeći ključ nije šifrovan sertifikatom (`masterKey` u čistom obliku) ili nije ispravan XML | `AddMfaKeyRing_KeyWrittenWithoutCertificate_Throws`, `AddMfaKeyRing_KeyFileThatIsNotXml_Throws` |
+| postojeći ključ nije šifrovan sertifikatom (`masterKey` u čistom obliku) | `AddMfaKeyRing_KeyWrittenWithoutCertificate_Throws` |
+| `*.xml` u `KeysPath` nije ispravan fajl ključa (posebna poruka, da oštećen restore ne liči na nedostajući sertifikat) | `AddMfaKeyRing_KeyFileThatIsNotXml_Throws` |
 
 Pozitivni slučajevi: `ApiHost_InProductionWithKeyRing_StartsAndWritesEncryptedKeys` (pravi host u `Production`-u
 sa ispravnim podešavanjem se pokreće i piše ključ u `KeysPath`),
@@ -196,7 +199,7 @@ sa ispravnim podešavanjem se pokreće i piše ključ u `KeysPath`),
   bilo kog hosta, postavlja `Identity__DataProtection__*` environment varijable: direktorijum i self-signed PFX u
   temp folderu, obrisane na kraju procesa. Folder koji ostane posle prekinutog procesa briše sledeće pokretanje
   kad je stariji od jednog dana. Već postavljene varijable se ne menjaju. Zato i novi host drugog tima, u
-  `Production` ili `Testing` okruženju, radi bez izmena (`MfaKeyRingTests.TestProcess_HasTheSharedTestKeyRing`).
+  `Production` ili `Testing` okruženju, radi bez izmena (`MfaKeyRingTests.AddMfaKeyRing_SharedTestKeyRingVariables_ProtectsSecret`).
   Test koji proverava start bez key ring-a gazi te varijable praznim vrednostima preko `UseSetting`.
 - Živa HTTPS demonstracija (`Platform.Coursework.Demo`, `LiveApiProcess`) pokreće pravi API kao `Production`
   proces, pa pravi sopstveni PFX i `KeysPath` u svom privatnom direktorijumu. Oni preživljavaju restart API-ja
@@ -318,20 +321,26 @@ US-18 i audit testovi (unit testovi u `backend/Platform.Identity.Tests/Services/
 - zapise `auth.mfa.enabled` i `auth.mfa.verified` u `audit` šemi bez koda, tajne i e-maila;
 - svaki razlog koji servis piše prolazi pravi `AuditDraftValidator` (`MfaRefusals_WithEveryReasonTheServiceWrites_PassTheAuditContract`);
 - potvrdu bez enrollment-a (`401`) i dva paralelna enroll-a (jedan `200`, jedan `409`, nijedan `500`);
-- key ring (`MfaKeyRingTests`, odeljak 5 "Ključevi").
+- key ring (`Composition/MfaKeyRingTests`, odeljak 5 "Ključevi").
 
 US-22 testovi (`Integration/Mfa/MfaSecretExposureIntegrationTests`) hvataju sve log zapise test hosta, na svim
-nivoima, uključujući `Trace`, sa porukom, strukturiranim vrednostima, scope-ovima i izuzetkom:
+nivoima, uključujući `Trace`, sa porukom, strukturiranim vrednostima, scope-ovima i izuzetkom. Oba audit writer-a
+(`ITrustedAuditWriter`, `ITransactionalAuditWriter`) su Moq mock-ovi koji hvataju svaki draft i kontekst:
 
 - kroz `mfa/enroll`, `mfa/enroll/confirm` i `mfa/verify` (uspeh, ponovljen kod, pogrešan kod do praga pokušaja)
-  nijedan zapis ne sadrži Base32 tajnu, `otpauth://` URI, TOTP kod ni šifrat (pending i aktivni);
+  nijedan log zapis ni audit draft (`auth.mfa.*`) ne sadrži Base32 tajnu, `otpauth://` URI, TOTP kod ni šifrat
+  (pending i aktivni);
+- kad audit vrati `Unavailable`, `IdentityAuditProducer` upisuje tehnički alarm u log („Audit write failed“), za
+  odbijanje (`401` ostaje) i za uspeh (`503`). Ni alarm ni ostali zapisi ne sadrže tajnu, kod ni šifrat;
 - kontrolni test pokazuje da provera pronalazi tajnu upisanu u strukturiranu vrednost loga;
 - tajna je samo u odgovoru na `mfa/enroll`. Odgovori (zaglavlja i telo) na confirm, verify, ponovljen verify,
-  `/api/auth/me`, `/api/auth/sessions`, odbijen confirm i drugi enroll je ne sadrže, a ne sadrže ni kod.
+  `/api/auth/me`, `/api/auth/sessions`, odbijen confirm i drugi enroll je ne sadrže, a ne sadrže ni kod. Nijedan
+  odgovor, ni enroll, ne sadrži šifrat.
 
 MVC na nivou `Trace` loguje argumente akcije kroz `ToString()`, a `record` ispisuje sva svoja polja. Zato
-`MfaVerifyRequest` i `MfaEnrollResponse` u `ToString()` daju `***` umesto koda i URI-ja
-(`MfaContracts_ToString_HideCodeAndUri`).
+`MfaVerifyRequest` i `MfaEnrollResponse`, kao i `LoginRequest`, imaju `override ToString()` koji daje `***`
+umesto koda i URI-ja (`MfaContracts_ToString_HideCodeAndUri`; Trace log oba MFA route-a pokriva i
+`MfaLoggingIntegrationTests`).
 
 ## 9. Budući rad
 
