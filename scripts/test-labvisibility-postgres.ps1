@@ -55,7 +55,7 @@ try {
     $arguments = @(
         'test', 'backend/Platform.Tests/Platform.Tests.csproj',
         '--configuration', 'Release',
-        '--filter', 'FullyQualifiedName~Platform.Tests.LabVisibility.LabVisibilityPostgresTests',
+        '--filter', 'FullyQualifiedName~Platform.Tests.LabVisibility.LabVisibilityPostgres',
         '--logger', 'trx;LogFileName=labvisibility-postgres.trx',
         '--results-directory', $results)
     if ($NoBuild) { $arguments += '--no-build' }
@@ -72,11 +72,11 @@ try {
     }
 
     $databaseIds = @($trx.TestRun.TestDefinitions.UnitTest | Where-Object {
-        ($_.TestMethod.className -split ',', 2)[0] -eq 'Platform.Tests.LabVisibility.LabVisibilityPostgresTests'
+        ($_.TestMethod.className -split ',', 2)[0] -like 'Platform.Tests.LabVisibility.LabVisibilityPostgres*'
     } | ForEach-Object { $_.id })
     $databaseResults = @($trx.TestRun.Results.UnitTestResult | Where-Object { $_.testId -in $databaseIds })
-    if ($databaseResults.Count -lt 8 -or @($databaseResults | Where-Object { $_.outcome -ne 'Passed' }).Count -gt 0) {
-        throw 'Expected at least eight passing LabVisibilityPostgresTests against PostgreSQL.'
+    if ($databaseResults.Count -lt 14 -or @($databaseResults | Where-Object { $_.outcome -ne 'Passed' }).Count -gt 0) {
+        throw 'Expected at least 14 passing LabVisibility PostgreSQL tests (8 store/reader + 6 HTTP).'
     }
 
     Write-Host "LabVisibility PostgreSQL PASS: $($counters.passed)/$($counters.total), database tests: $($databaseResults.Count). Results: $report"

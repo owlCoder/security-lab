@@ -66,6 +66,16 @@ The database listens on `127.0.0.1:5432` only. Stop it with `docker compose down
 
 Locally, the API applies the identity migrations and seeds the development accounts when it starts. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for configuration, migrations, and the database reset.
 
+### 5. Reset the LabVisibility demo data (AUT-04/AUT-07)
+
+One command brings the student view and preview demo back to a known state. It starts the `db` service, drops only the `lab_visibility` schema, starts the API once in Development to apply the `InitialLabVisibility` migration and the demo seed, and checks the result. Other modules' data is not touched.
+
+```
+powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1
+```
+
+It needs `.env` from step 4 and Docker Desktop. The connection string is built from `.env` only for that run and is never written to disk. Expected result: `LabVisibility reset PASS: 2 labs (4444... published, 5555... draft), 3 tasks, 3 key rows`. Details and the PostgreSQL tests: [docs/components/AUT-04-AUT-07/persistence.md](docs/components/AUT-04-AUT-07/persistence.md).
+
 ## Running the checks
 
 These are the same checks that run in CI (`.github/workflows/ci.yml`). Run them before opening a pull request.
