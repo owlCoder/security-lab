@@ -172,6 +172,7 @@ with `EventIdConflict` and never replaces the stored record.
 | Method | Event type | Outcome | Allowed `reasonCode` |
 |-|-|-|-|
 | `MfaEnrollmentStartedAsync` | `auth.mfa.enrollment.started` | Success | none |
+| `MfaEnrollmentRefusedAsync` | `auth.mfa.enrollment.started` | Failure | required: `invalid_password`, `account_locked` (IDN-06 step-up, #252) |
 | `MfaEnabledAsync` | `auth.mfa.enabled` | Success | none |
 | `MfaEnableFailedAsync` | `auth.mfa.enabled` | Failure | required: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive` |
 | `MfaVerifiedAsync` | `auth.mfa.verified` | Success | none |
@@ -198,7 +199,7 @@ rejected backup code or an attempt-limit denial.
 | `auth.login` | Identity (IDN-02) | Success, Failure | Success: `User`. Failure: `Anonymous`, or `User` when the credentials were valid but the account is not active | forbidden | optional `Account` (the account that logged in) | `reasonCode` |
 | `auth.logout` | Identity (IDN-02) | Success | `User` | forbidden | none | none |
 | `auth.login.throttled` | Identity (IDN-05) | Denied | `Anonymous` | forbidden | none | none |
-| `auth.mfa.enrollment.started` | Identity (IDN-06) | Success | `User` | forbidden | `Account` (required) | none |
+| `auth.mfa.enrollment.started` | Identity (IDN-06) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` required on Failure: `invalid_password`, `account_locked` |
 | `auth.mfa.enabled` | Identity (IDN-06) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` required on Failure: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive` |
 | `auth.mfa.verified` | Identity (IDN-06) | Success, Failure, Denied | `User` (recognized after password verification, MFA-pending session) | forbidden | `Account` (required) | `reasonCode` required on Failure: `invalid_code`, `replayed_code`, `invalid_secret`, `session_inactive`; on Denied: `attempt_limit` |
 | `auth.session.revoked` | Identity (IDN-07) | Success, Failure | `User` | forbidden | `Account` (required) | `revocationCause` (`user_request`, `mfa_attempts_exceeded`), `revokedHandle` (optional), `reasonCode` (Failure only, free Code) |
@@ -212,10 +213,11 @@ rejected backup code or an attempt-limit denial.
 | `audit.events.viewed` | Audit (AUD-06) | Success | `User` | required | `Course` (required) | `filterType`, `filterOutcome`, `filterFrom`, `filterTo`, `resultCount` |
 
 `reasonCode` is allowed for `Denied` or `Failure` in schemas that define it. It is required for
-`auth.mfa.enabled` on `Failure`, and for `auth.mfa.verified` on `Failure` or `Denied`; neither event
-requires it on `Success`, and the closed values for each outcome are shown below. In other schemas,
-`reasonCode` remains optional and uses the free Code format. For `auth.session.revoked`, it remains
-Failure-only and free Code. `auth.mfa.enrollment.started` has no `reasonCode`. An empty GUID is
+`auth.mfa.enrollment.started` and `auth.mfa.enabled` on `Failure`, and for `auth.mfa.verified` on
+`Failure` or `Denied`; none of them requires it on `Success`, and the closed values for each outcome
+are shown below. In other schemas, `reasonCode` remains optional and uses the free Code format. For
+`auth.session.revoked`, it remains Failure-only and free Code. A refused `auth.mfa.enrollment.started`
+(wrong password or locked account at the step-up check) never carries the password. An empty GUID is
 never a valid `CourseId`.
 
 The catalog is `AuditEventCatalog` in `Platform.Audit.Contracts`, so producers can see what each
@@ -226,7 +228,7 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 
 | Key | Format |
 |-|-|
-| `reasonCode` | Code: `^[a-z][a-z0-9_]{0,31}$`. Closed lists: `auth.mfa.enabled` Failure: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive`; `auth.mfa.verified` Failure: `invalid_code`, `replayed_code`, `invalid_secret`, `session_inactive`; Denied: `attempt_limit`. Other events (including `auth.session.revoked`) retain free Code values. |
+| `reasonCode` | Code: `^[a-z][a-z0-9_]{0,31}$`. Closed lists: `auth.mfa.enrollment.started` Failure: `invalid_password`, `account_locked`; `auth.mfa.enabled` Failure: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive`; `auth.mfa.verified` Failure: `invalid_code`, `replayed_code`, `invalid_secret`, `session_inactive`; Denied: `attempt_limit`. Other events (including `auth.session.revoked`) retain free Code values. |
 | `revocationCause` | Closed list: `user_request`, `mfa_attempts_exceeded` (Code format). |
 | `revokedHandle` | UUID |
 | `oldStatus`, `newStatus` | one of `active`, `blocked`, `archived` |

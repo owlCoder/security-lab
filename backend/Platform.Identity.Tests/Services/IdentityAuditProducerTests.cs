@@ -200,6 +200,25 @@ public sealed class IdentityAuditProducerTests
         });
     }
 
+    [TestCase("invalid_password")]
+    [TestCase("account_locked")]
+    public async Task MfaEnrollmentRefused_UsesFailureReasonAccountResourceAndUserActor(string reasonCode)
+    {
+        var writer = new RecordingWriter();
+        await CreateProducer(writer).MfaEnrollmentRefusedAsync(ActorId, reasonCode, CorrelationId);
+        var write = writer.Single();
+        Assert.Multiple(() =>
+        {
+            Assert.That(write.Transaction, Is.Null);
+            Assert.That(write.Draft.EventType, Is.EqualTo(AuditEventTypes.AuthMfaEnrollmentStarted));
+            Assert.That(write.Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+            Assert.That(write.Draft.Resource, Is.EqualTo(new AuditResourceRef(AuditResourceTypes.Account, ActorId.ToString())));
+            Assert.That(write.Draft.Details, Is.EquivalentTo(new Dictionary<string, string> { ["reasonCode"] = reasonCode }));
+            Assert.That(write.Context.Actor, Is.EqualTo(AuditActor.ForUser(ActorId)));
+            Assert.That(write.Context.CorrelationId, Is.EqualTo(CorrelationId));
+        });
+    }
+
     [Test]
     public async Task MfaEnableFailedWithAlreadyEnabled_UsesFailureReasonAndAccountResource()
     {
@@ -315,6 +334,8 @@ public sealed class IdentityAuditProducerTests
         var producer = CreateProducer(writer);
         using var transaction = new MarkerTransaction();
         await producer.MfaEnrollmentStartedAsync(ActorId, CorrelationId);
+        // account_locked, not invalid_password: the serialized check below refuses the substring "password".
+        await producer.MfaEnrollmentRefusedAsync(ActorId, "account_locked", CorrelationId);
         await producer.MfaEnabledAsync(ActorId, CorrelationId, transaction);
         await producer.MfaEnableFailedAsync(ActorId, "invalid_code", CorrelationId);
         await producer.MfaVerifiedAsync(ActorId, CorrelationId, transaction);
@@ -343,7 +364,7 @@ public sealed class IdentityAuditProducerTests
         {
             Assert.That(parameterNames.Any(name =>
                 forbiddenParameterNames.Contains(name, StringComparer.OrdinalIgnoreCase)), Is.False);
-            Assert.That(writer.Writes, Has.Count.EqualTo(8));
+            Assert.That(writer.Writes, Has.Count.EqualTo(9));
             foreach (var write in writer.Writes)
             {
                 var detailKeys = write.Draft.Details?.Keys ?? Array.Empty<string>();
@@ -358,6 +379,7 @@ public sealed class IdentityAuditProducerTests
     }
 
     [TestCase("MfaEnrollmentStarted")]
+    [TestCase("MfaEnrollmentRefused")]
     [TestCase("MfaEnabled")]
     [TestCase("MfaEnableFailed")]
     [TestCase("MfaVerified")]
@@ -376,6 +398,9 @@ public sealed class IdentityAuditProducerTests
         {
             case "MfaEnrollmentStarted":
                 await producer.MfaEnrollmentStartedAsync(ActorId, CorrelationId);
+                break;
+            case "MfaEnrollmentRefused":
+                await producer.MfaEnrollmentRefusedAsync(ActorId, "invalid_password", CorrelationId);
                 break;
             case "MfaEnabled":
                 await producer.MfaEnabledAsync(ActorId, CorrelationId, transaction);
@@ -504,6 +529,8 @@ public sealed class IdentityAuditProducerTests
     [TestCase("verified", "invalid_secret")]
     [TestCase("verified", "session_inactive")]
     [TestCase("verified.denied", "attempt_limit")]
+    [TestCase("enrollment", "invalid_password")]
+    [TestCase("enrollment", "account_locked")]
     public async Task MfaRefusals_WithEveryReasonTheServiceWrites_PassTheAuditContract(string which, string reason)
     {
         // Arrange
@@ -513,6 +540,7 @@ public sealed class IdentityAuditProducerTests
         // Act
         _ = which switch
         {
+            "enrollment" => await producer.MfaEnrollmentRefusedAsync(ActorId, reason, CorrelationId),
             "enabled" => await producer.MfaEnableFailedAsync(ActorId, reason, CorrelationId),
             "verified" => await producer.MfaVerifyFailedAsync(ActorId, reason, CorrelationId),
             _ => await producer.MfaVerifyDeniedByAttemptLimitAsync(ActorId, CorrelationId)

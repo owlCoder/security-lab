@@ -86,7 +86,7 @@ public sealed class MfaWriteRaceIntegrationTests : MfaIntegrationTestBase
         using var client = interrupted.CreateCsrfClient();
 
         // Act
-        var response = await PostWithSessionAsync("/api/auth/mfa/enroll", session.RawToken, new { }, client);
+        var response = await PostWithSessionAsync("/api/auth/mfa/enroll", session.RawToken, new { Password }, client);
         await block.CommittedAfterTheWriteWaited;
 
         // Assert
@@ -107,7 +107,7 @@ public sealed class MfaWriteRaceIntegrationTests : MfaIntegrationTestBase
         using var client = interrupted.CreateCsrfClient();
 
         // Act
-        var response = await PostWithSessionAsync("/api/auth/mfa/enroll", session.RawToken, new { }, client);
+        var response = await PostWithSessionAsync("/api/auth/mfa/enroll", session.RawToken, new { Password }, client);
 
         // Assert
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));

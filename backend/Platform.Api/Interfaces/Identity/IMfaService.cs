@@ -5,8 +5,13 @@ namespace Platform.Api.Interfaces.Identity;
 
 public interface IMfaService
 {
+    /// <summary>
+    /// US-17 with the IDN-06 step-up (#252): <paramref name="password"/> must be the current password of the
+    /// session's account. A wrong password or a locked account is <c>Unauthorized</c> and stores nothing.
+    /// </summary>
     Task<(MfaOutcome Outcome, string? Uri)> EnrollAsync(
         string? rawToken,
+        string? password,
         string correlationId,
         CancellationToken ct);
 

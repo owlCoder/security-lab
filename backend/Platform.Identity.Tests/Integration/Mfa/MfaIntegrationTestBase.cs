@@ -49,10 +49,17 @@ public abstract class MfaIntegrationTestBase : IntegrationTestBase
         SetSessionCookie(response);
     }
 
+    /// <summary>
+    /// IDN-06 (#252): starts an enrollment with the client's session. The step-up needs the current password, which
+    /// is <see cref="Password"/> for every account the tests create.
+    /// </summary>
+    protected static async Task<HttpResponseMessage> EnrollAsync(string? password = Password) =>
+        await Client.PostAsJsonAsync("/api/auth/mfa/enroll", new { Password = password });
+
     /// <summary>Starts an enrollment with the client's session and returns the secret from the returned URI.</summary>
     protected static async Task<string> EnrollAndReadSecretAsync()
     {
-        var response = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var response = await EnrollAsync();
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var body = await response.Content.ReadFromJsonAsync<MfaEnrollResponse>();
         Assert.That(body, Is.Not.Null);

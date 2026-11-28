@@ -99,16 +99,18 @@ public class AuthController(
         return Ok(new MeResponse(caller.UserId!.Value, caller.Level.ToString()));
     }
 
+    // IDN-06 (#252): the body carries the current password (step-up). It is passed on and never logged or returned.
     [RequireAccess(IdentityAccessActions.MfaEnroll)]
     [HttpPost("mfa/enroll")]
-    public async Task<IActionResult> MfaEnroll(CancellationToken ct)
+    public async Task<IActionResult> MfaEnroll([FromBody] MfaEnrollRequest request, CancellationToken ct)
     {
-        var (outcome, uri) =
-            await _mfaService.EnrollAsync(Request.Cookies[SessionCookie.Name], HttpContext.TraceIdentifier, ct);
+        var (outcome, uri) = await _mfaService.EnrollAsync(
+            Request.Cookies[SessionCookie.Name], request.Password, HttpContext.TraceIdentifier, ct);
         Response.Headers.CacheControl = "no-store";
         return outcome switch
         {
             MfaOutcome.Success => Ok(new MfaEnrollResponse(uri!)),
+            MfaOutcome.InvalidRequest => BadRequest(new { code = "invalid_request" }),
             MfaOutcome.AlreadyEnabled => Conflict(new { code = "mfa_already_enabled" }),
             MfaOutcome.EnrollmentPending => Conflict(new { code = "mfa_enrollment_pending" }),
             MfaOutcome.Unavailable => StatusCode(503, new { code = "mfa_unavailable" }),

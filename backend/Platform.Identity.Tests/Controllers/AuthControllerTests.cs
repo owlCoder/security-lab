@@ -301,6 +301,35 @@ public class AuthControllerTests
         Assert.That(http.Response.Headers.ContainsKey("Set-Cookie"), Is.False);
     }
 
+    [TestCase(MfaOutcome.Success, 200)]
+    [TestCase(MfaOutcome.InvalidRequest, 400)]
+    [TestCase(MfaOutcome.AlreadyEnabled, 409)]
+    [TestCase(MfaOutcome.EnrollmentPending, 409)]
+    [TestCase(MfaOutcome.Unavailable, 503)]
+    [TestCase(MfaOutcome.Unauthorized, 401)]
+    public async Task MfaEnroll_PassesThePassword_AndMapsServiceOutcome(MfaOutcome outcome, int expectedStatusCode)
+    {
+        // Arrange
+        const string token = "active-session-token";
+        const string password = "Current-Password-1!";
+        var http = HttpContextWithCookie(token);
+        _controller.ControllerContext.HttpContext = http;
+        var uri = outcome == MfaOutcome.Success ? "otpauth://totp/test" : null;
+        _mfa.Setup(service => service.EnrollAsync(
+                token, password, http.TraceIdentifier, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((outcome, uri));
+
+        // Act
+        var response = await _controller.MfaEnroll(new MfaEnrollRequest(password), CancellationToken.None);
+
+        // Assert
+        var objectResult = response as ObjectResult;
+        Assert.That(objectResult?.StatusCode ?? (response as StatusCodeResult)?.StatusCode, Is.EqualTo(expectedStatusCode));
+        Assert.That(http.Response.Headers.CacheControl.ToString(), Is.EqualTo("no-store"));
+        // IDN-06 (#252): the password is never echoed back, whatever the outcome.
+        Assert.That(System.Text.Json.JsonSerializer.Serialize(objectResult?.Value), Does.Not.Contain(password));
+    }
+
     private static DefaultHttpContext HttpContextWithCookie(string? token)
     {
         var http = new DefaultHttpContext();

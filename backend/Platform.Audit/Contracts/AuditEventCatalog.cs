@@ -26,6 +26,12 @@ public static class AuditEventCatalog
     private static readonly AuditDetailField FailureReasonCode = new(
         AuditDetailFormat.Code,
         new[] { AuditOutcome.Failure }.ToFrozenSet());
+    // IDN-06 (#252): a refused enrollment (step-up password check). Never the password itself.
+    private static readonly AuditDetailField MfaEnrollmentFailureReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Failure }.ToFrozenSet(),
+        new[] { AuditOutcome.Failure }.ToFrozenSet(),
+        ValuesByOutcome((AuditOutcome.Failure, Codes("invalid_password", "account_locked"))));
     private static readonly AuditDetailField MfaEnabledFailureReasonCode = new(
         AuditDetailFormat.Code,
         new[] { AuditOutcome.Failure }.ToFrozenSet(),
@@ -112,11 +118,11 @@ public static class AuditEventCatalog
 
         new AuditEventSchema(
             AuditEventTypes.AuthMfaEnrollmentStarted,
-            Outcomes((AuditOutcome.Success, User)),
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
             AuditPresence.Forbidden,
             AuditPresence.Required,
             AuditResourceTypes.Account,
-            Fields()),
+            Fields(("reasonCode", MfaEnrollmentFailureReasonCode))),
 
         new AuditEventSchema(
             AuditEventTypes.AuthMfaEnabled,

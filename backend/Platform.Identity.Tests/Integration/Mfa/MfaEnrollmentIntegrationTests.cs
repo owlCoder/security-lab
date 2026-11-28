@@ -19,7 +19,7 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
     {
         await LoginAsAsync("mfa-enroll@platform.com");
 
-        var response = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var response = await EnrollAsync();
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         var body = await response.Content.ReadFromJsonAsync<MfaEnrollResponse>();
@@ -37,7 +37,7 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
     [Test]
     public async Task Enroll_WithoutSession_ReturnsUnauthorized()
     {
-        var response = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var response = await EnrollAsync();
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
     }
@@ -50,7 +50,7 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
         var session = await SessionTestData.CreateAsync(Factory, user.Id);
         SetSessionCookie(session.RawToken);
 
-        var response = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var response = await EnrollAsync();
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
     }
@@ -62,7 +62,7 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
         await MfaTestData.AddEnabledAsync(Factory, user.Id, TotpHelpers.GenerateSecret());
         await LoginExistingAsync("mfa-enroll-pending@platform.com");
 
-        var response = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var response = await EnrollAsync();
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
     }
@@ -71,9 +71,9 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
     public async Task Enroll_RepeatedBeforeConfirmation_ReturnsConflict()
     {
         await LoginAsAsync("mfa-enroll-repeat@platform.com");
-        var first = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var first = await EnrollAsync();
 
-        var second = await Client.PostAsync("/api/auth/mfa/enroll", null);
+        var second = await EnrollAsync();
 
         Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That(second.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
@@ -88,8 +88,8 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
         var second = await SessionTestData.CreateAsync(Factory, user.Id);
 
         var responses = await Task.WhenAll(
-            PostWithSessionAsync("/api/auth/mfa/enroll", first.RawToken, new { }),
-            PostWithSessionAsync("/api/auth/mfa/enroll", second.RawToken, new { }));
+            PostWithSessionAsync("/api/auth/mfa/enroll", first.RawToken, new { Password }),
+            PostWithSessionAsync("/api/auth/mfa/enroll", second.RawToken, new { Password }));
 
         Assert.That(responses.Select(r => r.StatusCode),
             Is.EquivalentTo(new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));
@@ -107,8 +107,8 @@ public sealed class MfaEnrollmentIntegrationTests : MfaIntegrationTestBase
         var second = await SessionTestData.CreateAsync(Factory, user.Id);
 
         var responses = await Task.WhenAll(
-            PostWithSessionAsync("/api/auth/mfa/enroll", first.RawToken, new { }),
-            PostWithSessionAsync("/api/auth/mfa/enroll", second.RawToken, new { }));
+            PostWithSessionAsync("/api/auth/mfa/enroll", first.RawToken, new { Password }),
+            PostWithSessionAsync("/api/auth/mfa/enroll", second.RawToken, new { Password }));
 
         Assert.That(responses.Select(r => r.StatusCode),
             Is.EquivalentTo(new[] { HttpStatusCode.OK, HttpStatusCode.Conflict }));

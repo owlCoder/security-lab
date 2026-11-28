@@ -10,6 +10,8 @@ using Platform.Identity.Enums;
 using Platform.Identity.Helpers;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
+using Platform.Identity.Models;
+using Platform.Identity.Services;
 using Platform.Identity;
 
 namespace Platform.Api.Services.Identity;
@@ -27,6 +29,7 @@ public sealed class MfaService(
     TimeProvider clock,
     ITotpSecretProtector secretProtector,
     IOptions<MfaLockoutOptions> lockout,
+    ICredentialVerifier credentials,
     ILogger<MfaService> logger) : IMfaService
 {
     private const int SecretKeyVersion = 1;
@@ -38,10 +41,12 @@ public sealed class MfaService(
     private readonly TimeProvider _clock = clock;
     private readonly ITotpSecretProtector _secretProtector = secretProtector;
     private readonly MfaLockoutOptions _lockout = lockout.Value;
+    private readonly ICredentialVerifier _credentials = credentials;
     private readonly ILogger<MfaService> _logger = logger;
 
     public async Task<(MfaOutcome Outcome, string? Uri)> EnrollAsync(
         string? rawToken,
+        string? password,
         string correlationId,
         CancellationToken ct)
     {
@@ -52,13 +57,42 @@ public sealed class MfaService(
         if (session is null || !IsActiveSession(session))
             return (MfaOutcome.Unauthorized, null);
 
-        var credentials = await _mfaCredentialsStore.GetAsync(session.UserId, ct);
-        if (credentials?.MfaEnabled == true)
-            return (MfaOutcome.AlreadyEnabled, null);
+        if (string.IsNullOrEmpty(password) || password.Length > CredentialVerifier.MaxPasswordLength)
+            return (MfaOutcome.InvalidRequest, null);
 
         var email = await _mfaCredentialsStore.GetEmailAsync(session.UserId, ct);
         if (email is null)
             return (MfaOutcome.Unavailable, null);
+
+        // IDN-06 (#252) step-up: a session cookie alone must not bind a new authenticator. The password is checked
+        // before any MFA state is read or written, so a wrong one never stores a pending enrollment. CredentialVerifier
+        // charges the IDN-05 account lockout, so the cookie holder cannot guess passwords here without limit.
+        CredentialResult check;
+        try
+        {
+            check = await _credentials.VerifyAsync(email, password, ct);
+        }
+        catch (Exception ex) when (ex is DbException or DbUpdateException)
+        {
+            _logger.LogError(ex, "MFA enrollment step-up could not check the password: the database failed.");
+            return (MfaOutcome.Unavailable, null);
+        }
+
+        if (!check.IsValid || check.AccountId != session.UserId)
+        {
+            // Same answer as every other refusal; only the audit tells a wrong password from a locked account.
+            // The attempt is already charged, so the record must not be lost to a cancelled request.
+            await _audit.MfaEnrollmentRefusedAsync(
+                session.UserId,
+                check.IsLockedOut ? "account_locked" : "invalid_password",
+                correlationId,
+                CancellationToken.None);
+            return (MfaOutcome.Unauthorized, null);
+        }
+
+        var credentials = await _mfaCredentialsStore.GetAsync(session.UserId, ct);
+        if (credentials?.MfaEnabled == true)
+            return (MfaOutcome.AlreadyEnabled, null);
 
         var secret = TotpHelpers.GenerateSecret();
         var encryptedSecret = _secretProtector.Protect(secret);

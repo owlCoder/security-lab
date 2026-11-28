@@ -8,7 +8,8 @@
 
 US-17 pokriva:
 
-- pokretanje enrollment-a samo za postojeću, važeću `Active` sesiju;
+- pokretanje enrollment-a samo za postojeću, važeću `Active` sesiju i uz ponovni unos trenutne lozinke
+  (step-up, #252);
 - generisanje TOTP tajne;
 - formiranje `otpauth://` URI-ja;
 - čuvanje pending enrollment-a bez aktiviranja MFA;
@@ -40,29 +41,55 @@ frontend ga generiše lokalno iz URI-ja.
 
 ```http
 POST /api/auth/mfa/enroll
+Content-Type: application/json
 Cookie: SecurityLab.Session=<active-session>
+
+{ "password": "<trenutna lozinka>" }
 ```
 
 Servis:
 
 1. učitava sesiju preko `ISessionStore`;
 2. prihvata samo neisteklu, neopozvanu sesiju nivoa `Active`;
-3. odbija aktivan MFA;
+3. odbija praznu lozinku ili lozinku dužu od 128 znakova (`400`, pokušaj se ne broji);
 4. učitava email korisnika;
-5. generiše novu tajnu;
-6. šifruje Base32 tajnu ASP.NET Core Data Protection-om;
-7. u jednoj transakciji ponovo proverava sesiju i nalog pod lock-om (videti 4.1), pa čuva ciphertext, verziju
+5. **step-up (#252):** proverava lozinku kroz `ICredentialVerifier` (isti put kao login), pre nego što pročita ili
+   upiše bilo šta od MFA stanja. Pogrešna lozinka i zaključan nalog daju `401 invalid_mfa`, ne čuvaju pending
+   enrollment i pišu odbijanje `auth.mfa.enrollment.started`;
+6. odbija aktivan MFA;
+7. generiše novu tajnu;
+8. šifruje Base32 tajnu ASP.NET Core Data Protection-om;
+9. u jednoj transakciji ponovo proverava sesiju i nalog pod lock-om (videti 4.1), pa čuva ciphertext, verziju
    ključa `1` i rok pending enrollment-a od 10 minuta;
-8. vraća `MfaEnrollResponse` sa `otpauth://` URI-jem.
+10. vraća `MfaEnrollResponse` sa `otpauth://` URI-jem.
 
 URI se vraća samo iz uspešnog enrollment odgovora. Ne čuva se ponovo u bazi
 i ne piše se u audit.
+
+### 3.1 Step-up lozinkom (#252)
+
+Samo `Active` sesija nije dovoljna: ko ima ukraden session cookie mogao bi da uključi MFA sa svojim
+authenticator-om, a vlasnik pri sledećoj prijavi ne bi prošao drugi faktor. Zato enrollment traži trenutnu
+lozinku naloga iz sesije.
+
+- `CredentialVerifier` naplaćuje pokušaj pre hash-a i broji pogrešnu lozinku u lockout naloga (IDN-05,
+  `Identity:Lockout`), isto kao login. Step-up zato nije neograničeno pogađanje lozinke za onoga ko ima cookie.
+  Zaključan nalog odbija i tačnu lozinku, i na enrollment-u i na login-u.
+- Tačna lozinka briše brojač neuspešnih prijava, kao i uspešan login.
+- Lozinka se ne upisuje u log, audit ni odgovor.
+- Potvrda (odeljak 4) ne traži lozinku ponovo: potvrđuje samo pending enrollment, a njega može da napravi samo
+  enrollment koji je prošao step-up.
+
+Lockout po nalogu ne opoziva postojeće sesije. Posle zaključavanja cookie i dalje važi za ostale rute, ali
+enrollment i login odbijaju i tačnu lozinku dok lockout traje.
 
 Mogući API ishodi:
 
 | Ishod | HTTP | Kod |
 |-|-|-|
 | uspeh | 200 | telo sadrži URI |
+| lozinka nedostaje ili je predugačka | 400 | `invalid_request` |
+| pogrešna lozinka ili zaključan nalog | 401 | `invalid_mfa` |
 | MFA već aktivan | 409 | `mfa_already_enabled` |
 | pending enrollment postoji | 409 | `mfa_enrollment_pending` |
 | neautorizovana sesija | 401 | `invalid_mfa` |
@@ -171,6 +198,7 @@ Identity ishoda u Audit katalog:
 | Događaj | Ishodi | Kako se upisuje |
 |-|-|-|
 | `auth.mfa.enrollment.started` | Success | `ITrustedAuditWriter`, posle čuvanja pending enrollment-a (ništa još nije uključeno) |
+| `auth.mfa.enrollment.started` | Failure (`invalid_password`, `account_locked`): odbijen step-up (#252) | `ITrustedAuditWriter`, sa `CancellationToken.None` (pokušaj je već naplaćen) |
 | `auth.mfa.enabled` | Success | `ITransactionalAuditWriter`, u istoj transakciji kao uključivanje |
 | `auth.mfa.enabled` | Failure (`already_enabled`, `no_valid_enrollment`, `invalid_enrollment`, `invalid_code`, `session_inactive`) | `ITrustedAuditWriter` |
 | `auth.mfa.verified` | Success | `ITransactionalAuditWriter`, u istoj transakciji kao consume koraka i promocija sesije |
@@ -189,7 +217,8 @@ Zapis sadrži akter (`User`), nalog kao resurs, ishod, korelacioni ID i najviše
 - `otpauth://` URI;
 - MFA kod;
 - ciphertext;
-- session token.
+- session token;
+- lozinku (ni tačnu ni pogrešnu) iz step-up provere.
 
 ## 7. Verifikacija pri prijavi (US-18)
 
@@ -259,6 +288,14 @@ US-18 i audit testovi (unit testovi u `backend/Platform.Identity.Tests/Services/
 - ključeve u `KeysPath` (`IdentityModuleTests`): nova instanca sa istim direktorijumom dešifruje sačuvanu tajnu,
   a ključevi iz drugog direktorijuma ne.
 
+Step-up (#252) testovi (`MfaServiceEnrollTests`, `MfaStepUpIntegrationTests`) pokrivaju:
+
+- tačnu lozinku (`200`, `otpauth://` URI);
+- pogrešnu lozinku (`401 invalid_mfa`, nema pending enrollment-a, brojač IDN-05 uvećan, MFA stanje se ne čita);
+- lozinku koja nedostaje ili je predugačka (`400`, pokušaj se ne broji);
+- pogrešne lozinke do praga: nalog se zaključava, pa enrollment i login odbijaju i tačnu lozinku;
+- zapise `auth.mfa.enrollment.started` (`Failure`, `invalid_password` i `account_locked`) bez lozinke i e-maila.
+
 ## 9. Budući rad
 
 Recovery kodovi i administratorski MFA reset nisu deo US-17. TOTP nije
@@ -276,11 +313,10 @@ Administratorsko otključavanje (IDN-05, `POST /api/admin/accounts/{id}/unlock`)
 zaključan samo na MFA koraku dobija `409 account_not_locked` i čeka istek `Identity:Mfa:Lockout:LockoutMinutes`.
 Skidanje MFA lockout-a pri otključavanju i test u `AccountUnlockIntegrationTests` pripadaju IDN-05.
 
-Za `mfa/enroll` i `mfa/enroll/confirm` dovoljna je `Active` sesija; lozinka se ne traži ponovo (step-up).
-Ko ima ukraden session cookie može da uključi MFA sa svojim authenticator-om, a vlasnik pri sledećoj prijavi
-ne prolazi drugi faktor. Izlaz iz tog stanja su recovery kodovi (US-31) i administratorski MFA reset (US-32),
-koji nisu deo US-17. Step-up sa lozinkom, uz brojanje pogrešne lozinke u lockout (IDN-05) i novi razlog u
-Audit katalogu, opisan je u #252.
+Step-up lozinkom pre enrollment-a je rešen u #252 (odeljak 3.1). Ostaje da gubitak authenticator-a nema izlaz
+dok ne postoje recovery kodovi (US-31) i administratorski MFA reset (US-32). Isključivanje MFA i ponovni
+enrollment, kada te rute budu dodate, treba da traže isti step-up. HTTP rate limit za `POST /api/auth/mfa/enroll`
+nije uključen; pokušaje ograničava lockout naloga (IDN-05).
 
 Rok `MfaPending` sesije nije deo US-18: ovde je isti kao za `Active` sesiju (`StoreSessionCreator.Lifetime`).
 Poseban, kraći rok za `MfaPending` je kriterijum US-14 (#224).
