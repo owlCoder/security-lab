@@ -13,7 +13,8 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
-import DraftsPage from './pages/DraftsPage'
+import DraftsRoute from './pages/DraftsRoute'
+import { isDraftsApiEnabled } from './api/drafts'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
 import TeacherMetadataPage from './pages/TeacherMetadataPage'
@@ -115,10 +116,10 @@ export default function App() {
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
           <Route path="login-history" element={<LoginHistoryPage />} />
           {/*
-            AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).
-            Ruta postoji samo u razvojnom režimu, ne i u produkcionom buildu.
+            AUT-01: nacrti zadataka. Bez serverskog režima (VITE_DRAFTS_API=true) stranica je demo
+            sa lokalnim stanjem, pa ruta postoji samo u razvojnom režimu, ne i u produkcionom buildu.
           */}
-          {import.meta.env.DEV && <Route path="drafts" element={<DraftsPage />} />}
+          {(import.meta.env.DEV || isDraftsApiEnabled()) && <Route path="drafts" element={<DraftsRoute />} />}
         </Route>
       </Route>
     </Routes>
