@@ -211,10 +211,54 @@ Lokalna provera 6.11.2026:
 - Migracija primenjena na PostgreSQL 17 iz `docker-compose.yml`; `\d lab_visibility.lab_public_task` nema kolonu sa odgovorom.
 - Demo seed upisuje 2 laboratorije, 3 zadatka i 3 odgovora; vrednosti parametara se ne pojavljuju u logu.
 
+## KT2: testovi nad PostgreSQL-om i ponovljiv seed (KT2-09)
+
+Na KT1 su testovi ponašanja radili nad EF InMemory provider-om, koji ne pokazuje stvarni SQL i ne podržava transakcije. Za KT2 isti zahtevi su provereni nad pravim PostgreSQL-om, u CI-ju, sa 0 preskočenih testova.
+
+| Test | Šta dokazuje | Pretnja |
+|---|---|---|
+| `ReaderSql_NeverTouchesEvaluatorKeyTable` | **Negativni test.** `DbCommandInterceptor` hvata svaki SQL javnog reader-a; nijedan ne pominje `lab_evaluator_key`. | T4 |
+| `KeyStoreSql_DoesTouchEvaluatorKeyTable` | Kontrola: hvatanje radi, store čita tabelu ključa. | T4 |
+| `Database_AnswerColumnExistsOnlyInEvaluatorKeyTable` | U `information_schema` prave baze kolona sa „answer“ postoji samo u `lab_evaluator_key`. | T4 |
+| `Reader_ReadsLabFromPostgres_WithoutAnswer` | Reader čita iz baze, `text[]` opcije se vraćaju cele i u redu, JSON nema odgovor. | T3, T4 |
+| `Store_FailedSave_RollsBackAndKeepsOldKey` | **Negativni test.** Upis novog ključa pada na stranom ključu posle brisanja starog; transakcija se poništava i stari ključ ostaje ceo. | T30 |
+| `Store_SaveThenGet_RoundTripsKey`, `Store_Save_ReplacesWholeKey` | Upis i zamena celog ključa. | T30 |
+| `Store_IncompleteKeyInDatabase_IsRejected` | Nepotpun ključ iz baze se odbija. | T30 |
+| `NewLab_KeyFails_NothingIsSaved` | **Negativni test.** Sadržaj i ključ nove laboratorije idu u isti `SaveChanges`; kad ključ padne na stranom ključu, ne ostaje ni sadržaj (nema laboratorije bez ključa). | T30 |
+| `NewLab_ContentAndKeyAreSavedTogether` | Isti put upisa za uspešan slučaj: 1 laboratorija i svi redovi ključa. Ovako upisuje i demo seed. | T30 |
+| `DemoSeed_IsInPostgres_WithKeyInSeparateTable` | Demo seed iz `Program.cs` upisuje 2 laboratorije i 3 reda ključa u bazu. | — |
+| `StudentView_OverPostgres_ReturnsLabWithoutAnswer` | Ceo HTTP tok (sesija, politika, EF reader, PostgreSQL): `200`, odgovor nije u telu. | T1, T4 |
+| `StudentView_OverPostgres_DraftIsNotFound`, `StudentView_OverPostgres_UnknownLabIsNotFound` | Nacrt i nepostojeća laboratorija nad bazom daju isti `404`. | T14 |
+| `Preview_OverPostgres_TeacherSeesDraftWithoutAnswer`, `Preview_OverPostgres_StudentGetsNotFound` | Pregled nad bazom: nastavnik vidi nacrt bez odgovora, student dobija `404`. | T18, T19 |
+
+Fajlovi: `backend/Platform.Tests/LabVisibility/LabVisibilityPostgresTests.cs`, `LabVisibilityPostgresHttpTests.cs`.
+
+**Kako se pokreću.** `scripts/test-labvisibility-postgres.ps1` (po uzoru na LAB-06) diže privremeni `postgres:17-alpine` kontejner na slučajnom portu, sa slučajnom lozinkom, prosleđuje connection string kroz `LABVISIBILITY_TEST_POSTGRES` samo tom procesu, pokreće samo ove testove i pada ako je ijedan preskočen ili pao; kontejner se uvek briše. Isti korak radi u CI-ju. Bez promenljive testovi se preskaču, pa običan `dotnet test` radi i bez Dockera.
+
+```powershell
+dotnet build backend/SecurityLab.slnx --configuration Release
+powershell -ExecutionPolicy Bypass -File scripts/test-labvisibility-postgres.ps1 -NoBuild
+```
+
+**Ponovljiv seed.** `scripts/labvisibility-reset.ps1` jednom komandom vraća lokalnu bazu na demo stanje. Redosled je namerno takav da se ništa ne briše dok sve ostalo nije provereno:
+
+1. Provere bez ikakve izmene: `.env`, `db` servis je `healthy`, build prolazi (ili postoji DLL uz `-NoBuild`), API port je slobodan, i probno brisanje u transakciji koja se odmah poništava (`BEGIN … ROLLBACK`). Ako bilo šta od toga padne, skripta staje i baza ostaje netaknuta.
+2. Brisanje: četiri tabele šeme `lab_visibility` i prazna šema, sa `RESTRICT` (nikad `CASCADE`) u jednoj transakciji. Ako bilo šta van `lab_visibility` zavisi od tih tabela, ili šema sadrži objekat koji skripta ne poznaje, PostgreSQL odbija i ne briše se ništa.
+3. API se jednom pokrene u Development režimu; pravi kod primenjuje migraciju i seed (sadržaj i ključ svake laboratorije u jednoj transakciji).
+4. Provera: 2 laboratorije, 3 zadatka, 3 reda ključa, odgovor samo u `lab_evaluator_key`.
+
+Sve u šemi `lab_visibility` su demo podaci koje seed ponovo pravi. Ako API ne krene posle koraka 2, šema ostaje prazna dok se reset ne pokrene ponovo. Connection string postoji samo za taj proces. `-CheckOnly` izvrši sve provere i probno brisanje, a ne briše ništa.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1 -CheckOnly
+powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1
+```
+
+**Granica HTTP testova.** `LabVisibilityPostgresHttpTests` koriste pravu bazu, prave politike, pravi EF reader i store i demo seed, ali testnu sesiju i testni status naloga (isto kao `LabPreviewHostFactory`). Oni dokazuju integraciju sa PostgreSQL-om, a ne integraciju sa stvarnim IDN sesijama i ACC članstvom; to pokrivaju testovi tih kartica.
+
+
 ## Plan za KT2
 
-Prebaciću članstvo na kursu i stanje laboratorije na ugovore ACC i AUT-01/AUT-06 timova, tako da se objavljeni nacrt upisuje kroz `IEvaluatorKeyStore`, a ne kroz demo seed.
-
-Dodaću integracione testove nad pravim PostgreSQL-om (Testcontainers) za EF reader, store i transakciju u `SaveAsync`, i proveriću da `student-view` i `preview` endpointi rade nad bazom.
-
-Razmotriću dve PostgreSQL uloge, po uzoru na runtime grant-ove AUD tima: javni reader bi se povezivao ulogom koja nema `SELECT` nad `lab_evaluator_key`, a samo `EfEvaluatorKeyStore` ulogom koja ga ima.
+- Urađeno (KT2-09): testovi nad PostgreSQL-om za reader, store i transakciju, oba endpointa nad bazom, ponovljiv seed i CI korak.
+- Članstvo i stanje objave prelaze na ugovore ACC i AUT-01/AUT-06 kroz kartice AUT-04-5 i AUT-07-2; ključ iz nacrta se upisuje kroz `IEvaluatorKeyStore` (AUT-04-4).
+- Otvoreno (opciono, AUT-04-6): dve PostgreSQL uloge, javni reader bez `SELECT` nad `lab_evaluator_key`. Do tada administrator baze vidi tabelu ključa (preostali rizik u threat modelu).
