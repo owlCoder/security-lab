@@ -34,7 +34,9 @@ public sealed class StoreMembershipReaderTests
         store = new InMemoryMembershipStore();
         store.Seed(Course, Student, MemberRole.Student);
         store.Seed(Course, Teacher, MemberRole.Teacher);
-        reader = new StoreMembershipReader(store);
+        
+
+        reader = new StoreMembershipReader(store, new InMemoryDelegationStore(), TimeProvider.System);
 
         // Pravi delovi Tima 3: katalog akcija, politika po ulozi u kursu i podrazumevano odbijanje.
         var resources = new InMemoryResourceDescriptorResolver();
