@@ -47,6 +47,21 @@ public static class LabVisibilityDemoSeed
         ];
     }
 
+    // Dodaje sadržaj i ključ nove laboratorije u ISTI DbContext. Upis se dešava tek na SaveChanges,
+    // koji EF radi u jednoj transakciji (i sam poređa INSERT-e po stranim ključevima): ako ključ
+    // ne može da se upiše, ne upisuje se ni sadržaj, pa laboratorija nikad ne ostane bez ključa.
+    public static void AddLabWithKey(LabVisibilityDbContext db, LabPublicContent content, EvaluatorKey key)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(key);
+        if (key.LabId != content.LabId)
+            throw new ArgumentException("Ključ i sadržaj moraju biti za istu laboratoriju.", nameof(key));
+
+        db.PublicContents.Add(LabVisibilityMapping.ToRow(content));
+        db.EvaluatorKeys.AddRange(LabVisibilityMapping.ToRows(key));
+    }
+
     // Poziva se samo u Development okruženju (Program.cs). Sa connection string-om primeni migracije
     // i upiše demo laboratorije u PostgreSQL; bez njega ih upiše u InMemory skladište.
     public static async Task SeedLabVisibilityDemoAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
@@ -75,17 +90,15 @@ public static class LabVisibilityDemoSeed
             {
                 await db.Database.MigrateAsync(cancellationToken);
 
-                foreach (var (content, _) in labs)
+                foreach (var (content, key) in labs)
                 {
                     if (!await db.PublicContents.AnyAsync(x => x.LabId == content.LabId, cancellationToken))
-                        db.PublicContents.Add(LabVisibilityMapping.ToRow(content));
+                        AddLabWithKey(db, content, key);
                 }
 
+                // Jedan SaveChanges = jedna transakcija: sadržaj i ključ se upišu zajedno ili ništa.
                 await db.SaveChangesAsync(cancellationToken);
             }
-
-            foreach (var (_, key) in labs)
-                await keys.SaveAsync(key, cancellationToken);
 
             logger.LogInformation("LabVisibility: migracije primenjene, demo laboratorije upisane u PostgreSQL.");
         }

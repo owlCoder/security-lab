@@ -75,8 +75,8 @@ try {
         ($_.TestMethod.className -split ',', 2)[0] -like 'Platform.Tests.LabVisibility.LabVisibilityPostgres*'
     } | ForEach-Object { $_.id })
     $databaseResults = @($trx.TestRun.Results.UnitTestResult | Where-Object { $_.testId -in $databaseIds })
-    if ($databaseResults.Count -lt 14 -or @($databaseResults | Where-Object { $_.outcome -ne 'Passed' }).Count -gt 0) {
-        throw 'Expected at least 14 passing LabVisibility PostgreSQL tests (8 store/reader + 6 HTTP).'
+    if ($databaseResults.Count -lt 16 -or @($databaseResults | Where-Object { $_.outcome -ne 'Passed' }).Count -gt 0) {
+        throw 'Expected at least 16 passing LabVisibility PostgreSQL tests (10 store/reader + 6 HTTP).'
     }
 
     Write-Host "LabVisibility PostgreSQL PASS: $($counters.passed)/$($counters.total), database tests: $($databaseResults.Count). Results: $report"

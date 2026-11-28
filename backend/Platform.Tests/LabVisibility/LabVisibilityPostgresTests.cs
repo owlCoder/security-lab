@@ -188,6 +188,49 @@ public class LabVisibilityPostgresTests
             await new EfEvaluatorKeyStore(dbFactory).GetAsync(content.LabId));
     }
 
+    // ---- Sadržaj i ključ zajedno ili ništa ----
+
+    [Test]
+    public async Task NewLab_ContentAndKeyAreSavedTogether()
+    {
+        var dbFactory = new PostgresDbFactory();
+        var content = PublishedLab();
+
+        await using (var db = dbFactory.CreateDbContext())
+        {
+            LabVisibilityDemoSeed.AddLabWithKey(db, content, EvaluatorKey.Create(content, Answers()));
+            await db.SaveChangesAsync();
+        }
+
+        await using var check = dbFactory.CreateDbContext();
+        Assert.That(await check.PublicContents.CountAsync(x => x.LabId == content.LabId), Is.EqualTo(1));
+        Assert.That(await check.EvaluatorKeys.CountAsync(x => x.LabId == content.LabId), Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task NewLab_KeyFails_NothingIsSaved()
+    {
+        // NEGATIVNI TEST: ključ pokazuje na zadatak koji sadržaj nema, pa upis ključa pada na stranom ključu;
+        // isti SaveChanges nosi i sadržaj, pa u bazi ne sme da ostane laboratorija bez ključa.
+        var dbFactory = new PostgresDbFactory();
+        var content = PublishedLab();
+        var otherVersion = LabPublicContent.Create(
+            content.LabId, CourseId, TeacherId, LabVisibilityState.Draft, "Druga verzija", "Cilj",
+            [new PublicTask("t3", 1, "Zadatak koji sadržaj nema?", ["X"])]);
+        var keyForOtherVersion = EvaluatorKey.Create(otherVersion, [new TaskAnswerKey("t3", "X")]);
+
+        await using (var db = dbFactory.CreateDbContext())
+        {
+            LabVisibilityDemoSeed.AddLabWithKey(db, content, keyForOtherVersion);
+            Assert.ThrowsAsync<DbUpdateException>(async () => await db.SaveChangesAsync());
+        }
+
+        await using var check = dbFactory.CreateDbContext();
+        Assert.That(await check.PublicContents.AnyAsync(x => x.LabId == content.LabId), Is.False,
+            "Sadržaj je upisan iako ključ nije: laboratorija bez ključa.");
+        Assert.That(await check.EvaluatorKeys.AnyAsync(x => x.LabId == content.LabId), Is.False);
+    }
+
     // ---- Pomoćne metode ----
 
     private LabPublicContent PublishedLab()

@@ -224,6 +224,8 @@ Na KT1 su testovi ponašanja radili nad EF InMemory provider-om, koji ne pokazuj
 | `Store_FailedSave_RollsBackAndKeepsOldKey` | **Negativni test.** Upis novog ključa pada na stranom ključu posle brisanja starog; transakcija se poništava i stari ključ ostaje ceo. | T30 |
 | `Store_SaveThenGet_RoundTripsKey`, `Store_Save_ReplacesWholeKey` | Upis i zamena celog ključa. | T30 |
 | `Store_IncompleteKeyInDatabase_IsRejected` | Nepotpun ključ iz baze se odbija. | T30 |
+| `NewLab_KeyFails_NothingIsSaved` | **Negativni test.** Sadržaj i ključ nove laboratorije idu u isti `SaveChanges`; kad ključ padne na stranom ključu, ne ostaje ni sadržaj (nema laboratorije bez ključa). | T30 |
+| `NewLab_ContentAndKeyAreSavedTogether` | Isti put upisa za uspešan slučaj: 1 laboratorija i svi redovi ključa. Ovako upisuje i demo seed. | T30 |
 | `DemoSeed_IsInPostgres_WithKeyInSeparateTable` | Demo seed iz `Program.cs` upisuje 2 laboratorije i 3 reda ključa u bazu. | — |
 | `StudentView_OverPostgres_ReturnsLabWithoutAnswer` | Ceo HTTP tok (sesija, politika, EF reader, PostgreSQL): `200`, odgovor nije u telu. | T1, T4 |
 | `StudentView_OverPostgres_DraftIsNotFound`, `StudentView_OverPostgres_UnknownLabIsNotFound` | Nacrt i nepostojeća laboratorija nad bazom daju isti `404`. | T14 |
@@ -238,7 +240,7 @@ dotnet build backend/SecurityLab.slnx --configuration Release
 powershell -ExecutionPolicy Bypass -File scripts/test-labvisibility-postgres.ps1 -NoBuild
 ```
 
-**Ponovljiv seed.** `scripts/labvisibility-reset.ps1` jednom komandom vraća lokalnu bazu na demo stanje: briše samo šemu `lab_visibility`, jednom pokreće API u Development režimu (pravi kod primenjuje migraciju i seed) i proverava 2 laboratorije, 3 zadatka i 3 reda ključa. Druge šeme se ne diraju; connection string postoji samo za taj proces.
+**Ponovljiv seed.** `scripts/labvisibility-reset.ps1` jednom komandom vraća lokalnu bazu na demo stanje: briše samo šemu `lab_visibility`, jednom pokreće API u Development režimu (pravi kod primenjuje migraciju i seed, sadržaj i ključ svake laboratorije u jednoj transakciji) i proverava 2 laboratorije, 3 zadatka i 3 reda ključa. Druge šeme se ne diraju; connection string postoji samo za taj proces.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/labvisibility-reset.ps1
