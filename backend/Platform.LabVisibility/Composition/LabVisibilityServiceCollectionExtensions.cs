@@ -5,6 +5,7 @@ using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
 using Platform.LabVisibility.Application.EvaluatorKeys;
 using Platform.LabVisibility.Application.Preview;
+using Platform.LabVisibility.Application.Publication;
 using Platform.LabVisibility.Application.StudentView;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Auditing;
@@ -72,6 +73,19 @@ public static class LabVisibilityServiceCollectionExtensions
         services.AddSingleton<StubLabPublicationSource>();
         services.AddSingleton<ILabPublicationSource>(
             sp => sp.GetRequiredService<StubLabPublicationSource>());
+
+        // AUT-07 (KT2): objava i arhiviranje menjaju šta student vidi (Cvetojević).
+        services.AddSingleton<EfLabPublicationStateStore>();
+        services.AddSingleton<EfEvaluatorKeyCoverage>();
+        services.AddSingleton<ILabPublicationStateStore>(sp =>
+            LabVisibilityDatabase.IsConfigured(sp)
+                ? sp.GetRequiredService<EfLabPublicationStateStore>()
+                : sp.GetRequiredService<InMemoryLabPublicContentReader>());
+        services.AddSingleton<IEvaluatorKeyCoverage>(sp =>
+            LabVisibilityDatabase.IsConfigured(sp)
+                ? sp.GetRequiredService<EfEvaluatorKeyCoverage>()
+                : sp.GetRequiredService<InMemoryEvaluatorKeyStore>());
+        services.AddScoped<ApplyLabPublication>();
 
         return services;
     }

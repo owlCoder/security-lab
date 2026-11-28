@@ -4,7 +4,7 @@ using Platform.LabVisibility.Domain;
 
 namespace Platform.LabVisibility.Infrastructure.Persistence;
 
-public sealed class InMemoryEvaluatorKeyStore : IEvaluatorKeyStore
+public sealed class InMemoryEvaluatorKeyStore : IEvaluatorKeyStore, IEvaluatorKeyCoverage
 {
     private readonly ConcurrentDictionary<Guid, EvaluatorKey> keys = new();
 
@@ -16,5 +16,17 @@ public sealed class InMemoryEvaluatorKeyStore : IEvaluatorKeyStore
         ArgumentNullException.ThrowIfNull(key);
         keys[key.LabId] = key;
         return ValueTask.CompletedTask;
+    }
+
+    // AUT-07 (KT2): samo ID-jevi zadataka, bez odgovora.
+    public ValueTask<IReadOnlySet<string>> GetCoveredTaskIdsAsync(
+        Guid labId,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlySet<string> taskIds = keys.TryGetValue(labId, out var key)
+            ? key.Answers.Select(answer => answer.TaskId).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+
+        return ValueTask.FromResult(taskIds);
     }
 }

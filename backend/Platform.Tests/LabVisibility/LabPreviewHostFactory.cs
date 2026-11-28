@@ -51,6 +51,12 @@ internal sealed class LabPreviewHostFactory : WebApplicationFactory<Program>
             services.RemoveAll<IEvaluatorKeyStore>();
             services.AddSingleton<IEvaluatorKeyStore>(
                 sp => sp.GetRequiredService<InMemoryEvaluatorKeyStore>());
+            services.RemoveAll<ILabPublicationStateStore>();
+            services.AddSingleton<ILabPublicationStateStore>(
+                sp => sp.GetRequiredService<InMemoryLabPublicContentReader>());
+            services.RemoveAll<IEvaluatorKeyCoverage>();
+            services.AddSingleton<IEvaluatorKeyCoverage>(
+                sp => sp.GetRequiredService<InMemoryEvaluatorKeyStore>());
         });
     }
 
