@@ -21,6 +21,9 @@ function Assert-AuditPostgresResults($resultsDirectory) {
         'Platform.Audit.Tests.AuditRuntimePermissionsTests'
         'Platform.Audit.Tests.AuditHostPostgresTests'
         'Platform.Audit.Tests.PostgresCourseAuditQueryTests'
+        'Platform.Audit.Tests.AccessDenialAuditPostgresTests'
+        'Platform.Audit.Tests.AuditRegressionPostgresTests'
+        'Platform.Audit.Tests.AuditRestorePostgresTests'
     )
     $required = $remaining
     foreach ($file in Get-ChildItem -LiteralPath $resultsDirectory -Filter '*.trx' -Recurse) {
@@ -53,12 +56,14 @@ $resultsDirectory = Join-Path $repositoryRoot "TestResults/audit-s09-$runId"
 $container = $null
 $savedEnvironment = @{}
 foreach ($name in 'POSTGRES_PASSWORD', 'AUDIT_RUNTIME_PASSWORD', 'AUDIT_MIGRATION_CONNECTION_STRING',
-    'AUDIT_TEST_ADMIN_CONNECTION_STRING', 'AUDIT_TEST_RUNTIME_CONNECTION_STRING') {
+    'AUDIT_TEST_ADMIN_CONNECTION_STRING', 'AUDIT_TEST_RUNTIME_CONNECTION_STRING',
+    'AUDIT_TEST_POSTGRES_CONTAINER') {
     $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
 }
 
 Push-Location $repositoryRoot
 try {
+    & (Join-Path $PSScriptRoot 'test-s17-evidence.ps1')
     Get-Command docker -ErrorAction Stop | Out-Null
     if (-not $NoBuild) {
         dotnet build backend/SecurityLab.slnx --configuration Release
@@ -73,6 +78,7 @@ try {
         --env POSTGRES_PASSWORD --env POSTGRES_HOST_AUTH_METHOD=scram-sha-256 `
         --health-cmd 'pg_isready -h 127.0.0.1 -U securitylab_bootstrap -d securitylab_audit_tests' `
         --health-interval 1s --health-timeout 3s --health-retries 30 postgres:17-alpine
+    $env:AUDIT_TEST_POSTGRES_CONTAINER = $container
 
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     do {
@@ -107,8 +113,22 @@ try {
     $env:POSTGRES_PASSWORD = $null
     $env:AUDIT_RUNTIME_PASSWORD = $null
 
-    dotnet test backend/SecurityLab.slnx --configuration Release --no-build `
-        --logger trx --results-directory $resultsDirectory
+    $null = New-Item -ItemType Directory -Path $resultsDirectory
+    $commit = git rev-parse HEAD
+    $changes = @(git status --porcelain)
+    @{
+        commit = $commit
+        dirtyWorkingTree = $changes.Count -gt 0
+        startedAtUtc = [DateTime]::UtcNow.ToString('O')
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $resultsDirectory 'run-context.json') -Encoding utf8
+    try {
+        dotnet test backend/SecurityLab.slnx --configuration Release --no-build `
+            --logger trx --results-directory $resultsDirectory
+    } finally {
+        if (Test-Path -LiteralPath $resultsDirectory) {
+            & (Join-Path $PSScriptRoot 'write-s17-evidence.ps1') -ResultsDirectory $resultsDirectory
+        }
+    }
     Assert-AuditPostgresResults $resultsDirectory
     Write-Output "Audit PostgreSQL fixtures passed. TRX: $resultsDirectory"
 } finally {
