@@ -192,24 +192,41 @@ public class LabVisibilityKt2ContractTests
         }
     }
 
-    [TestCase(true, SaveEvaluatorKeyOutcome.Saved)]
-    [TestCase(false, SaveEvaluatorKeyOutcome.NotFound)]
+    [TestCase(SaveEvaluatorKeyOutcome.Saved)]
+    [TestCase(SaveEvaluatorKeyOutcome.NotFound)]
+    [TestCase(SaveEvaluatorKeyOutcome.Invalid)]
+    [TestCase(SaveEvaluatorKeyOutcome.Published)]
+    [TestCase(SaveEvaluatorKeyOutcome.Unauthenticated)]
     public async Task SaveEvaluatorKey_AuditsAttemptWithoutAnswer(
-        bool isTeacher,
         SaveEvaluatorKeyOutcome expectedOutcome)
     {
-        var actorId = isTeacher ? LabVisibilityDemoSeed.TeacherId : StudentId;
-        var role = isTeacher ? LabVisibilityCourseRole.Teacher : LabVisibilityCourseRole.Student;
         var labId = LabVisibilityDemoSeed.DraftLabId;
+        var teacherId = LabVisibilityDemoSeed.TeacherId;
         var correlationId = Guid.NewGuid().ToString("N");
 
         provider.GetRequiredService<InMemoryCourseMembership>()
-            .Set(LabVisibilityDemoSeed.DemoCourseId, actorId, role);
+            .Set(LabVisibilityDemoSeed.DemoCourseId, teacherId, LabVisibilityCourseRole.Teacher);
+
+        // SetUp već registruje StudentId kao studenta istog kursa.
+        SubjectRef? actor = expectedOutcome switch
+        {
+            SaveEvaluatorKeyOutcome.Unauthenticated => null,
+            SaveEvaluatorKeyOutcome.NotFound => new SubjectRef(StudentId.ToString(), AccountState.Active),
+            _ => new SubjectRef(teacherId.ToString(), AccountState.Active)
+        };
+
+        if (expectedOutcome == SaveEvaluatorKeyOutcome.Published)
+        {
+            provider.GetRequiredService<StubLabPublicationSource>()
+                .Set(new LabPublication(
+                    labId, Guid.NewGuid(), LabPublicationStatus.Published, DateTimeOffset.UtcNow));
+        }
+
+        var taskId = expectedOutcome == SaveEvaluatorKeyOutcome.Invalid ? "unknown-task" : "t1";
 
         await using var scope = provider.CreateAsyncScope();
         var services = scope.ServiceProvider;
         var audit = new RecordingWriteAudit();
-
         var save = new SaveEvaluatorKey(
             services.GetRequiredService<IAccessDecision>(),
             services.GetRequiredService<ILabPublicContentReader>(),
@@ -218,17 +235,19 @@ public class LabVisibilityKt2ContractTests
             audit);
 
         var result = await save.ExecuteAsync(
-            new SaveEvaluatorKeyCommand(labId, [new EvaluatorKeyAnswerInput("t1", SecretAnswer)]),
-            new SubjectRef(actorId.ToString(), AccountState.Active),
+            new SaveEvaluatorKeyCommand(labId, [new EvaluatorKeyAnswerInput(taskId, SecretAnswer)]),
+            actor,
             correlationId);
 
         Assert.That(result.Outcome, Is.EqualTo(expectedOutcome));
-        Assert.That(audit.Events, Has.Count.EqualTo(1));
+        if (expectedOutcome == SaveEvaluatorKeyOutcome.Invalid)
+            Assert.That(result.ErrorCode, Is.EqualTo(SaveEvaluatorKeyErrors.UnknownTask));
 
+        Assert.That(audit.Events, Has.Count.EqualTo(1));
         var entry = audit.Events[0];
         Assert.That(entry.Action, Is.EqualTo("lab.key.write"));
         Assert.That(entry.LabId, Is.EqualTo(labId));
-        Assert.That(entry.ActorId, Is.EqualTo(actorId.ToString()));
+        Assert.That(entry.ActorId, Is.EqualTo(actor?.Id));
         Assert.That(entry.Outcome, Is.EqualTo(expectedOutcome.ToString()));
         Assert.That(entry.CorrelationId, Is.EqualTo(correlationId));
 
