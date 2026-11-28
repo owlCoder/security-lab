@@ -133,6 +133,13 @@ internal static class AuditDraftExamples
 
         yield return (
             new AuditEventDraft(
+                AuditEventTypes.LabVisibilityAccessed,
+                AuditOutcome.Success,
+                Details: Details(("action", "lab.key.read"), ("laboratoryId", TargetAccountId.ToString()))),
+            ServiceContext);
+
+        yield return (
+            new AuditEventDraft(
                 AuditEventTypes.AuditEventsViewed,
                 AuditOutcome.Success,
                 CourseId,

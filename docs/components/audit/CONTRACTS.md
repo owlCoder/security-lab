@@ -67,6 +67,8 @@ in the request context:
 
 - successful login: credentials were verified, the session is not issued yet;
 - the Access adapter: it forwards the subject of an access decision that was already evaluated;
+- the LabVisibility adapter (Team 6, AUT-04, AUT-07), also on ordinary HTTP paths: it forwards the subject
+  that its own access decision already evaluated; the actor comes from the server session, never from the request;
 - background jobs, such as expiry of a delegation: the actor is a service identity.
 
 `AuditContext` must never be built from an HTTP body, query string or arbitrary header. The
@@ -209,6 +211,7 @@ rejected backup code or an attempt-limit denial.
 | `course.delegation.revoked` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
 | `course.delegation.expired` | Memberships (ACC-07), background job | Success | `Service` | required | `Account` (required) | `action`, `delegationId` |
 | `access.denied` | Access, Team 3 (ACC-05), through the host adapter | Denied | `User` or `Anonymous` | optional, only from a trusted resource resolver | optional | `action`, `denialReason`, `policyId`, `policyVersion` |
+| `lab.visibility.accessed` | Lab visibility, Team 6 (AUT-04, AUT-07) | Success, Denied, Failure | Success, Failure: `User` or `Service` (evaluator). Denied: `User`, `Service` or `Anonymous` | optional, only from a trusted resource resolver (`LabPublicContent.CourseId`) | none | `action` and `laboratoryId` (both required), `reasonCode`. A successful `lab.student.view` is not a mandatory audit record (application log only). |
 | `audit.events.viewed` | Audit (AUD-06) | Success | `User` | required | `Course` (required) | `filterType`, `filterOutcome`, `filterFrom`, `filterTo`, `resultCount` |
 
 `reasonCode` is allowed for `Denied` or `Failure` in schemas that define it. It is required for
@@ -236,6 +239,7 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 | `policyId` | `^[a-z][a-z0-9_.-]{0,63}$` |
 | `policyVersion` | `^v[0-9]{1,4}(\.[0-9]{1,4}){0,2}$` |
 | `delegationId` | UUID |
+| `laboratoryId` | UUID |
 | `filterOutcome` | one of `success`, `denied`, `failure` |
 | `filterFrom`, `filterTo`, `lockoutEnd` | UTC timestamp, ISO 8601, ending with `Z` |
 | `resultCount` | integer from 0 to 100000 |
@@ -278,6 +282,7 @@ mistake. A rejected value is never copied into a log, exception message or HTTP 
 | Memberships and delegation (ACC-03, ACC-07) | `course.*` | Not on `main` yet. |
 | Revision publishing (AUD-02) | not in this version | Can add its event type through a catalog change. |
 | Audit query (AUD-06) | `audit.events.viewed` | Our own story S-14/S-15. |
+| Lab visibility, Team 6 (AUT-04, AUT-07) | `lab.visibility.accessed` | `AuditWriterLabVisibilityAudit` calls `ITrustedAuditWriter` with its own 1 s timeout (PR #226). |
 
 
 ## Test double

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Platform.Access.Composition;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
+using Platform.Audit.Contracts;
 using Platform.LabVisibility.Application.EvaluatorKeys;
 using Platform.LabVisibility.Application.Preview;
 using Platform.LabVisibility.Application.StudentView;
@@ -58,7 +59,14 @@ public static class LabVisibilityServiceCollectionExtensions
             sp => sp.GetRequiredService<InMemoryCourseMembership>());
 
         services.AddLogging();
-        services.AddSingleton<ILabVisibilityAudit, LoggerLabVisibilityAudit>();
+        // KT2 (kartica 2): trajni audit kroz AUD modul kada ga host registruje (AddAudit),
+        // inače zapis u log (testovi i alati bez AUD modula).
+        services.AddSingleton<LoggerLabVisibilityAudit>();
+        services.AddSingleton<AuditWriterLabVisibilityAudit>();
+        services.AddSingleton<ILabVisibilityAudit>(sp =>
+            sp.GetRequiredService<IServiceProviderIsService>().IsService(typeof(ITrustedAuditWriter))
+                ? sp.GetRequiredService<AuditWriterLabVisibilityAudit>()
+                : sp.GetRequiredService<LoggerLabVisibilityAudit>());
         services.AddSingleton<EvaluatorKeyReader>();
 
         services.AddScoped<GetStudentLabView>();

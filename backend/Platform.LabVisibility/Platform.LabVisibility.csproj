@@ -9,6 +9,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Platform.Access\Platform.Access.csproj" />
+    <!-- KT2: trajni audit kroz javne ugovore Platform.Audit (ITrustedAuditWriter). -->
+    <ProjectReference Include="..\Platform.Audit\Platform.Audit.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14">
