@@ -21,6 +21,7 @@ public static class AuditEventTypes
     public const string AuthSessionRevoked = "auth.session.revoked";
     public const string AccountStatusChanged = "account.status.changed";
     public const string AccountUnlocked = "account.unlocked";
+    public const string AccountMfaReset = "account.mfa.reset";
     public const string CourseMemberRoleChanged = "course.member.role.changed";
     public const string CourseDelegationGranted = "course.delegation.granted";
     public const string CourseDelegationRevoked = "course.delegation.revoked";

@@ -45,6 +45,12 @@ public static class IdentityAccessActions
     public const string AccountStatusChange = "account.status.change";
 
     /// <summary>
+    /// US-32: an administrator removes the MFA of another account (<c>POST /api/admin/accounts/{id}/mfa/reset</c>).
+    /// Registered in Program.cs with <see cref="MfaResetPolicy"/> (System scope, privileged).
+    /// </summary>
+    public const string MfaReset = "account.mfa.reset";
+
+    /// <summary>
     /// IDN-05: an administrator unlocks a locked account (<c>POST /api/admin/accounts/{id}/unlock</c>).
     /// This is the single action id agreed with REV-05 (#85), which registers it (System scope, privileged) with
     /// <c>RevisionActionPolicy</c>; it is not registered a second time here.
