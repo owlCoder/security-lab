@@ -6,90 +6,48 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Platform.Audit.Contracts;
-using Platform.Identity.Entities;
-using Platform.Identity.Interfaces;
-using Platform.Identity.Persistence;
-using Platform.Identity.Tests.Helpers;
 using Platform.Api.Services.Identity;
-using Testcontainers.PostgreSql;
 using Platform.Identity.Testing;
+using Platform.Identity.Tests.Helpers;
 
-namespace Platform.Identity.Tests.Controllers;
+namespace Platform.Identity.Tests.Integration.Login;
 
 // IDN-05 through the real Platform.Api host: real login, real sessions and real Postgres.
-// Only the mandatory Audit writer is replaced because this fixture isolates lockout behavior
-// and does not provision a separate Audit database.
+// The class host lowers the lockout threshold and lifts the per-IP login limiter, so account lockout is
+// tested on its own.
 [TestFixture]
 [Category("IDN-05")]
-public sealed class LockoutEndpointTests
+[NonParallelizable]
+public sealed class LoginLockoutIntegrationTests : IntegrationTestBase
 {
     private const string Password = "Str0ng-Password!2026";
     private const string WrongPassword = "Wr0ng-Password!2026";
     private const int MaxAttempts = 3;
 
-    private sealed class Factory(string connectionString, string maxAttempts = "3") : WebApplicationFactory<Program>
-    {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
-        {
-            // The real Program supplies the same strict Access policies as production.
-            // Only database/configuration are isolated here; authorization is not replaced.
-            builder.UseEnvironment("Testing");
-            builder.ConfigureLogging(logging => logging.ClearProviders());
-            builder.UseSetting("ConnectionStrings:Identity", connectionString);
-            builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);
-            // These tests exercise account lockout independently of the IP limiter.
-            builder.UseSetting("RateLimiting:Login:PermitLimit", "1000");
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<ITrustedAuditWriter>();
-                services.AddSingleton<ITrustedAuditWriter, SuccessfulAuditWriter>();
-            });
-        }
-    }
-
-    private PostgreSqlContainer _db = null!;
-    private Factory _factory = null!;
-    private string _passwordHash = null!;
+    private WebApplicationFactory<Program> _host = null!;
 
     [OneTimeSetUp]
-    public async Task StartHost()
-    {
-        _db = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await _db.StartAsync();
-
-        _factory = new Factory(_db.GetConnectionString());
-
-        using var scope = _factory.Services.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>().Database.MigrateAsync();
-
-        _passwordHash = scope.ServiceProvider.GetRequiredService<IPasswordHasher>().Hash(Password);
-    }
+    public void CreateLockoutHost() => _host = CreateHost(MaxAttempts.ToString());
 
     [OneTimeTearDown]
-    public async Task StopHost()
-    {
-        await _factory.DisposeAsync();
-        await _db.DisposeAsync();
-    }
+    public async Task DisposeLockoutHost() => await _host.DisposeAsync();
 
     [Test]
-    public async Task Unknown_wrong_and_locked_logins_get_identical_responses()
+    public async Task Login_UnknownWrongOrLockedAccount_ShouldReturnIdenticalResponses()
     {
+        // Arrange
         var (_, wrongEmail) = await CreateStudentAsync();
         var (_, lockedEmail) = await CreateStudentAsync();
         await LockAsync(lockedEmail);
 
+        // Act
         var unknown = await LoginAsync($"nobody-{Guid.NewGuid():N}@example.com", Password);
         var wrong = await LoginAsync(wrongEmail, WrongPassword);
         var lockedWrong = await LoginAsync(lockedEmail, WrongPassword);
         var lockedCorrect = await LoginAsync(lockedEmail, Password);
 
+        // Assert
         Assert.That(unknown.Status, Is.EqualTo(HttpStatusCode.Unauthorized));
         Assert.That(unknown.Body, Does.Contain("invalid_credentials"));
         Assert.That(wrong, Is.EqualTo(unknown));
@@ -98,20 +56,24 @@ public sealed class LockoutEndpointTests
     }
 
     [Test]
-    public async Task The_attempt_that_triggers_the_lockout_looks_like_any_other_failure()
+    public async Task Login_AttemptThatTriggersLockout_ShouldReturnSameResponseAsFirstFailure()
     {
+        // Arrange
         var (_, email) = await CreateStudentAsync();
-
         var first = await LoginAsync(email, WrongPassword);
         await LoginAsync(email, WrongPassword);
+
+        // Act
         var triggering = await LoginAsync(email, WrongPassword);
 
+        // Assert
         Assert.That(triggering, Is.EqualTo(first));
     }
 
     [Test]
-    public async Task Successful_login_resets_the_counter_so_typos_do_not_add_up()
+    public async Task Login_SuccessBetweenFailures_ShouldResetCounter_AndReturn200()
     {
+        // Arrange
         var (_, email) = await CreateStudentAsync();
 
         for (var round = 0; round < 3; round++)
@@ -119,37 +81,43 @@ public sealed class LockoutEndpointTests
             for (var i = 0; i < MaxAttempts - 1; i++)
                 await LoginAsync(email, WrongPassword);
 
-            Assert.That((await LoginAsync(email, Password)).Status, Is.EqualTo(HttpStatusCode.OK));
+            // Act
+            var success = await LoginAsync(email, Password);
+
+            // Assert: typos below the limit never add up across successful logins.
+            Assert.That(success.Status, Is.EqualTo(HttpStatusCode.OK));
         }
     }
 
     [Test]
-    public async Task ManyFailuresForOneAccount_FromDifferentClients_BlockEvenTheCorrectPassword()
+    public async Task Login_FailuresFromDifferentIps_ShouldLockAccount_AndReturn401WithoutSession()
     {
+        // Arrange
         var (id, email) = await CreateStudentAsync();
         for (var i = 0; i < MaxAttempts; i++)
             Assert.That((await LoginFromAsync($"203.0.113.{100 + i}", email, WrongPassword)).Status,
                 Is.EqualTo(StatusCodes.Status401Unauthorized));
 
+        // Act
         var attempt = await LoginFromAsync("203.0.113.200", email, Password);
 
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        var account = await db.Accounts.AsNoTracking().SingleAsync(value => value.Id == id);
+        // Assert
+        var account = await UserTestData.GetAsync(Factory, id);
         Assert.Multiple(() =>
         {
-            Assert.That(account.LockoutEnd, Is.GreaterThan(DateTimeOffset.UtcNow));
+            Assert.That(account!.LockoutEnd, Is.GreaterThan(DateTimeOffset.UtcNow));
             Assert.That(attempt.Status, Is.EqualTo(StatusCodes.Status401Unauthorized));
             Assert.That(attempt.Body, Does.Contain("invalid_credentials"));
             Assert.That(attempt.RetryAfter, Is.Empty, "Only IP throttling exposes Retry-After.");
             Assert.That(attempt.Cookie, Does.Not.Contain(SessionCookie.Name));
         });
-        Assert.That(await db.Sessions.AnyAsync(value => value.UserId == id), Is.False);
+        Assert.That(await SessionTestData.GetForUserAsync(Factory, id), Is.Empty);
     }
 
     [Test]
-    public async Task AccountBlock_AppliesToUnknownEmail_Identically()
+    public async Task Login_LockedAccountAndUnknownEmail_ShouldReturnIdenticalResponses()
     {
+        // Arrange
         var (_, email) = await CreateStudentAsync();
         var unknownEmail = $"nobody-{Guid.NewGuid():N}@example.com";
         for (var i = 0; i < MaxAttempts; i++)
@@ -158,10 +126,13 @@ public sealed class LockoutEndpointTests
             await LoginFromAsync($"203.0.114.{100 + i}", unknownEmail, WrongPassword);
         }
 
+        // Act
         // There is no account row for an unknown address. Its public response must still
         // match a locked account, including when the correct password is supplied.
         var known = await LoginFromAsync("203.0.113.200", email, Password);
         var unknown = await LoginFromAsync("203.0.114.200", unknownEmail, Password);
+
+        // Assert
         Assert.Multiple(() =>
         {
             Assert.That(known.Status, Is.EqualTo(StatusCodes.Status401Unauthorized));
@@ -172,20 +143,30 @@ public sealed class LockoutEndpointTests
     }
 
     [Test]
-    public void Host_refuses_to_start_with_an_invalid_lockout_setting()
+    public void Startup_InvalidLockoutSetting_ShouldThrowOptionsValidationException()
     {
-        using var factory = new Factory(_db.GetConnectionString(), maxAttempts: "0");
+        // Arrange
+        using var host = CreateHost(maxAttempts: "0");
 
-        Assert.Catch<OptionsValidationException>(() => factory.CreateClient());
+        // Act & Assert
+        Assert.Catch<OptionsValidationException>(() => host.CreateClient());
     }
+
+    private static WebApplicationFactory<Program> CreateHost(string maxAttempts) =>
+        Factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxAttempts);
+            // These tests exercise account lockout independently of the IP limiter.
+            builder.UseSetting("RateLimiting:Login:PermitLimit", "1000");
+        });
 
     private async Task<(int Status, string? ContentType, string CacheControl, string Body, string Cookie, string RetryAfter)>
         LoginFromAsync(string remoteIp, string email, string password)
     {
         var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { email, password }));
-        using var tokenClient = _factory.CreateClient();
+        using var tokenClient = _host.CreateClient();
         var csrf = await CsrfPair.FetchAsync(tokenClient);
-        var context = await _factory.Server.SendAsync(http =>
+        var context = await _host.Server.SendAsync(http =>
         {
             http.Request.Method = HttpMethods.Post;
             csrf.ApplyTo(http.Request);
@@ -204,7 +185,7 @@ public sealed class LockoutEndpointTests
     private async Task<(HttpStatusCode Status, string? ContentType, string? CacheControl, string Body)> LoginAsync(
         string email, string password)
     {
-        using var client = _factory.CreateCsrfClient();
+        using var client = _host.CreateCsrfClient();
         using var response = await client.PostAsJsonAsync("/api/auth/login", new { email, password });
         return (
             response.StatusCode,
@@ -219,22 +200,9 @@ public sealed class LockoutEndpointTests
             await LoginAsync(email, WrongPassword);
     }
 
-    private async Task<(Guid Id, string Email)> CreateStudentAsync()
+    private static async Task<(Guid Id, string Email)> CreateStudentAsync()
     {
-        var id = Guid.NewGuid();
-        var email = $"lockout-{id:N}@example.com";
-        await CreateAccountAsync(id, email);
-        return (id, email);
-    }
-
-    private async Task CreateAccountAsync(Guid id, string email)
-    {
-        var account = new UserAccount(id, email);
-        account.SetPasswordHash(_passwordHash);
-
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
-        db.Accounts.Add(account);
-        await db.SaveChangesAsync();
+        var account = await UserTestData.AddAsync(Factory, $"lockout-{Guid.NewGuid():N}@example.com", Password);
+        return (account.Id, account.Email);
     }
 }
