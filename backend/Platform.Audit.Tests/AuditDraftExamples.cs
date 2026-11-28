@@ -37,6 +37,7 @@ internal static class AuditDraftExamples
         yield return (
             new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
             AnonymousContext);
+        yield return (new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied), AnonymousContext);
 
         yield return (
             new AuditEventDraft(
@@ -65,7 +66,43 @@ internal static class AuditDraftExamples
                 Resource: TargetAccount),
             UserContext);
 
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnrollmentStarted,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnabled,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Success,
+                Resource: TargetAccount),
+            UserContext);
+
+        yield return (
+            new AuditEventDraft(
+                AuditEventTypes.AuthSessionRevoked,
+                AuditOutcome.Success,
+                Resource: TargetAccount,
+                Details: Details(
+                    ("revocationCause", "user_request"),
+                    ("revokedHandle", "66666666-6666-6666-6666-666666666666"))),
+            UserContext);
+
         yield return (StatusChange(), UserContext);
+
+        yield return (Unlock(), UserContext);
+
+        yield return (Rotation(), UserContext);
+
         foreach (var eventType in new[] { AuditEventTypes.RevisionSubmitted, AuditEventTypes.RevisionApproved,
                      AuditEventTypes.RevisionReturned })
             yield return (new AuditEventDraft(eventType, AuditOutcome.Success, CourseId,
@@ -120,6 +157,24 @@ internal static class AuditDraftExamples
             outcome,
             Resource: TargetAccount,
             Details: details ?? Details(("oldStatus", "active"), ("newStatus", "blocked")));
+
+    public static AuditEventDraft Unlock(
+        AuditOutcome outcome = AuditOutcome.Success,
+        IReadOnlyDictionary<string, string>? details = null) =>
+        new(
+            AuditEventTypes.AccountUnlocked,
+            outcome,
+            Resource: TargetAccount,
+            Details: details ?? Details(("lockoutEnd", "2026-11-23T10:15:00Z")));
+
+    public static AuditEventDraft Rotation(
+        AuditOutcome outcome = AuditOutcome.Success,
+        IReadOnlyDictionary<string, string>? details = null) =>
+        new(
+            AuditEventTypes.SessionRotated,
+            outcome,
+            Resource: TargetAccount,
+            Details: details ?? Details(("trigger", "login")));
 
     public static IReadOnlyDictionary<string, string> Details(params (string Key, string Value)[] entries) =>
         entries.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);

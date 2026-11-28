@@ -18,6 +18,7 @@ D3 and D6 in [DECISIONS.md](DECISIONS.md) and the contract in [CONTRACTS.md](CON
 | Team 1, Identity login | IDN-02 | Where `auth.login` and `auth.logout` are written, which actor is used, behaviour when the audit write fails | Members 9 and 3 |
 | Team 2, Identity account status | IDN-03 | Moving `account.status.change` to the shared contract, reason codes instead of free text, transaction | Members 9, 3 and 2 |
 | IDN-05 owner (rate limiting) | IDN-05 | Whether and how often `auth.login.throttled` is written | Member 9 |
+| IDN-05 owners (#270) | IDN-05, SEC-04 | Review `auth.mfa.throttled`, its frequency and the `account.unlocked.lockoutKind` values; decide whether `both` needs separate expiry fields | Member 9 |
 | Membership and delegation owner | ACC-03, ACC-07 | Who owns them; a reader for current membership and delegation (AUD-06); producing `course.*` events | Members 9 and 5 |
 | Owners of AUD-02..05, AUD-07 and ADM-01, ADM-05, ADM-07 | AUD, ADM | Who owns them; correlation (AUD-04); retention and archive | Members 9, 10, 2 and 7 |
 | Course assistant | | Events without a course, administrator view, KT1/KT2 dates | Member 1 (dates), member 9 (scope) |
@@ -37,7 +38,7 @@ Checked on `main`, commit `0a4f3d1`. These are facts that the proposals below de
 | F3 | `IActionCatalog` and `IAccessPolicyRegistry` only read. `Register` exists only on `InMemoryActionCatalog` and `InMemoryAccessPolicyRegistry`. Identity resolves these concrete classes after `Build()` and calls `Register`. | `Platform.Identity/Composition/IdentityAccessRegistration.cs` | Other modules depend on Access infrastructure classes. Registration happens after the container is built, so a duplicate is found only when that code runs. |
 | F4 | When a policy returns `false`, the decision is `Deny` with reason `PolicyError`. The same reason is used when the policy throws. | `DefaultDenyAccessDecision.cs` | An `access.denied` record cannot tell a normal refusal from a broken policy. |
 | F5 | `SubjectRef.Id` is a `string` (the demo uses `"demo-student"`). `AuditActor.Id` is a `Guid?`. | `Platform.Access/Domain/Models/SubjectRef.cs`, `Platform.Audit/Contracts/AuditActor.cs` | The forwarder needs a rule for subjects whose ID is not an account GUID. |
-| F6 | Identity has its own `IAuditWriter` (`void Write(AuditEvent)`), registered as the singleton `LoggerAuditWriter`, which writes to `ILogger`. The caller sets actor, time, outcome as a string and a free-text detail. | `Platform.Api/Services/Identity/IAuditWriter.cs`, `Adapters.cs` | Conflicts with decision A3 (actor and time come from the server, not the caller) and with AUD-03 (no free text). A log line is not a guaranteed audit record. |
+| F6 | Identity has its own `IAuditWriter` (`void Write(AuditEvent)`), registered as the singleton `LoggerAuditWriter`, which writes to `ILogger`. The caller sets actor, time, outcome as a string and a free-text detail. | `Platform.Api/Services/Identity/IAuditWriter.cs`, `Adapters.cs` | Conflicts with decision A3 (actor and time come from the server, not the caller) and with AUD-03 (no free text). A log line is not a guaranteed audit record. **Resolved:** login and logout moved to `IdentityAuditProducer` (PR #113), MFA moved there too and the old interface, `LoggerAuditWriter` and `AuditEvent` were removed (PR #196). |
 | F7 | `ChangeAccountStatus` writes `account.status.change` (catalog: `account.status.changed`) after `accounts.Save`, with detail `Old->New reason=<free text up to 200 characters>`. | `Platform.Api/Services/Identity/ChangeAccountStatus.cs` | Name mismatch, free text, and no transaction between the change and its record. |
 | F8 | `LoginAccount` writes no audit record. `SessionValidationMiddleware` writes `session.validation`, which is not in the catalog. | `LoginAccount.cs`, `Middlewares/SessionValidationMiddleware.cs` | AUD-01 requires a record of login. A new event type needs a catalog change (decision A4). |
 | F9 | Correlation IDs come from different places: `HttpContext.TraceIdentifier` in the session middleware, `Guid.NewGuid()` in the Access demo endpoint. | `Program.cs`, `SessionValidationMiddleware.cs` | The same request cannot be followed from the HTTP call to the decision and the audit record (AUD-04). |
@@ -151,6 +152,14 @@ Audit persistence is unavailable) is pending confirmation from the Team 1 Identi
 PR #148 supplies the separate IDN-03 account-status transaction and S-16 rollback proof described
 in S11-06; the two changes share the same Audit contracts and composition.
 
+IDN-06 (event types and schemas from #243, MFA flow in #232) adds `auth.mfa.enrollment.started`, `auth.mfa.enabled`
+and `auth.mfa.verified`. MFA enabled and MFA verified are written through `ITransactionalAuditWriter`
+in the same transaction as the identity change (no record, no commit, `503`); refusals go through
+`ITrustedAuditWriter` and stay refusals when the write fails. Every refusal carries a `reasonCode`
+from the list in CONTRACTS.md (producer methods): a wrong or replayed code is `Failure`, the attempt
+limit is `Denied` with `attempt_limit`. With this, Identity has no audit
+path outside the shared contract.
+
 `account.status.changed` (IDN-03), from `ChangeAccountStatus`:
 
 | `ChangeStatusOutcome` | Audit outcome | Actor | `reasonCode` |
@@ -181,6 +190,15 @@ Audit component agree a short list of codes.
 - `auth.login.throttled` (IDN-05): one record per refused request is the default. If the volume
   is too high, the IDN-05 owner and member 9 agree a documented limit; no silent sampling. The
   client IP address is not stored without a separate data-minimization decision.
+- `auth.mfa.throttled` (#270 proposal): IDN-05 owns the HTTP integration and frequency.
+  Propose one write attempt per request refused by the MFA HTTP policy, without silent sampling.
+  Only `Denied` with `Anonymous` and server correlation is accepted; no account, course, IP or
+  details. It is distinct from the per-account MFA attempt-limit event. The producer and catalog
+  are prepared; the HTTP callback is still pending. Audit failure must preserve the 429.
+- `account.unlocked.lockoutKind` (#270 proposal): `password`, `mfa` or `both`, Success only.
+  The existing password-only unlock now uses the factory and emits `password` transactionally.
+  MFA clearing remains pending. Team 12 must confirm the event/detail contract and whether the
+  latest cleared `lockoutEnd` suffices for `both` or a separate MFA expiry is needed.
 - `session.validation` is not in the catalog. Either it is added with a schema and a test, or it
   stays a technical log entry. Decision for the session owner and member 8.
 - When the audit write of a login fails, the behaviour of authentication is decided by the

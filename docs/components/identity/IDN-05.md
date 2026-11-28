@@ -13,6 +13,10 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
 
 - IP limiter odbija zahtev pre provere lozinke sa `429 Too Many Requests`, `Retry-After`
   u sekundama, `Cache-Control: no-store`, `X-Correlation-ID` i kodom `rate_limited`.
+- CSRF provera (US-15, [`IDN-02_CSRF.md`](IDN-02_CSRF.md)) radi pre limitera. Prijava bez
+  ispravnog `X-CSRF-TOKEN` dobija `403 csrf_invalid`, ne racuna se u limit, ne stize do
+  provere lozinke i ne pravi `auth.login.throttled`, cak i kada je klijent vec ogranicen
+  (`403` umesto `429`). Takva prijava ostavlja samo `Information` zapis u aplikacionom logu.
 - Brojac neuspeha i kraj blokade naloga cuvaju se u `identity.accounts`.
   `CredentialVerifier` preko `ICredentialStore` rezervise pokusaj pre skupog hasha;
   `EfCredentialStore` koristi atomske SQL UPDATE naredbe i proverava blokadu ponovo
@@ -37,7 +41,9 @@ neuspesnih prijava. Prijava koristi postojeci IDN-02 tok, sesije i Identity skla
 flowchart LR
   U[Klijent] -->|HTTPS| C[Correlation middleware]
   C --> R[Routing]
-  R --> A[ACC-05: RequireAccess identity.login i registrovana Public politika]
+  R --> X[US-15: CSRF provera]
+  X -->|Bez ispravnog tokena: 403 csrf_invalid| U
+  X --> A[ACC-05: RequireAccess identity.login i registrovana Public politika]
   A --> F[ForwardedHeaders: samo poznati proxy]
   F --> L[IP sliding-window limiter]
   L <--> I[(Brojaci po IP / IPv6 /64 u memoriji)]
@@ -121,3 +127,46 @@ Za deljeni IP limit potreban je deljeni store. Blokada naloga je trajna u Identi
 bazi i deli se izmedju instanci. Podesavanje poverljivog proxy-ja pripada deployment
 konfiguraciji. Ova ispravka obuhvata IDN-05 i provere REV-01/REV-02/REV-05 ruta;
 ne menja autorizaciju ostalih timova niti opsta ACC-05 pravila.
+
+## Issue #270: MFA Audit ugovor
+
+Audit dopuna predlaže Timu 12 novi `auth.mfa.throttled` (`Denied`, `Anonymous`,
+bez resursa, kursa i detalja) za HTTP odbijanje na `mfa/verify` i `mfa/enroll/confirm`.
+`IdentityAuditProducer.MfaThrottledAsync` prima samo serversku korelaciju; ne čita
+sesiju, nalog, IP adresu, tijelo zahtjeva, TOTP kod ili tajnu. Ovo nije događaj
+`auth.mfa.verified/Denied` sa `attempt_limit`, koji opisuje MFA brojač po nalogu.
+
+`IdentityAuditProducer.CreateAccountUnlockedDraft(targetId, passwordLockoutEnd,
+mfaLockoutEnd)` pravi uspješan `account.unlocked` sa `lockoutKind` (`password`,
+`mfa`, `both`) i `lockoutEnd` kao najkasnijim uklonjenim rokom u UTC. Ulazi moraju
+biti stvarni rokovi blokada uklonjenih u transakciji, a ne vrijednosti iz HTTP
+zahtjeva. Ako nijedna blokada nije uklonjena, metoda odbija pravljenje događaja.
+Detalj `lockoutKind` je dodatni, opcion u katalogu radi kompatibilnosti postojećih
+producenata i istorijskih zapisa; novi tok otključavanja treba uvijek da ga šalje.
+
+Postojeći password-only `UnlockAccount` sada koristi ovu factory metodu i
+upisuje `lockoutKind=password` u istoj transakciji. Duplirani timestamp helper
+je uklonjen. HTTP limiter i uklanjanje MFA blokade još nisu povezani. Preostala integracija u #270:
+
+- Otključavanje: store vraća uklonjene rokove za lozinku i MFA; servis poziva
+  factory, piše kroz `ITransactionalAuditWriter` u istoj transakciji i commit radi
+  samo za `IsRecorded`. Testirati MFA-only, password-only, obje blokade i rollback
+  pri grešci audita; zatim uspješnu prijavu novim važećim TOTP kodom.
+- HTTP limiter: posebna MFA politika i `RetryAfterSeconds` grana; na njenom
+  `OnRejected` pozvati `MfaThrottledAsync` umjesto `LoginThrottledAsync`, uz isti
+  ograničeni pokušaj upisa, odvojeni scope i serversku korelaciju kao kod prijave.
+  Nedostupan audit ne mijenja već nastali 429. Odbijeni zahtjev ne poziva MFA
+  servis i ne povećava brojač kodova. Testirati obje rute i `Retry-After`.
+- Tim 12: pregled novog događaja i dozvoljenih vrijednosti `lockoutKind` prije
+  spajanja. Nisu potrebne promjene Audit baze niti internih store/domain tipova.
+
+Ugovorni testovi su `MfaLockoutAuditContractTests`; oni ne dokazuju budući HTTP
+429 ili uklanjanje MFA blokade. `UnlockAccountTests` i HTTP/PostgreSQL test u
+`AccountUnlockIntegrationTests` provjeravaju da postojeći password-only tok
+stvarno upisuje `lockoutKind=password` zajedno sa uklonjenim rokom. Katalog ostaje
+kompatibilan sa starim zapisima bez novog detalja; novi uspješni tokovi treba da
+koriste factory kako bi slali i `lockoutKind` i `lockoutEnd`.
+
+Za Tim 12 ostaje eksplicitna odluka da li je za `both` dovoljan najkasniji
+`lockoutEnd`, ili je potreban i poseban MFA rok. Trenutni prijedlog šalje samo
+najkasniji rok i ne uvodi dodatno polje bez dogovora.

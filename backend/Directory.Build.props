@@ -1,0 +1,10 @@
+<Project>
+  <!--
+    US-22 (IDN-06): outside Development the API does not start without a certificate-protected Data Protection key
+    ring. Every test project gets backend/TestShared/MfaTestKeyRing.cs, whose module initializer sets
+    Identity__DataProtection__* once per test process, so no test host has to configure it.
+  -->
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('Tests'))">
+    <Compile Include="$(MSBuildThisFileDirectory)TestShared/MfaTestKeyRing.cs" Link="Shared/MfaTestKeyRing.cs" />
+  </ItemGroup>
+</Project>

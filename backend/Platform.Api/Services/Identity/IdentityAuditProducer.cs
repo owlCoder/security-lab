@@ -1,3 +1,7 @@
+using System.Data.Common;
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
 using Microsoft.Extensions.Logging;
@@ -11,8 +15,49 @@ namespace Platform.Api.Services.Identity;
 /// </summary>
 public sealed class IdentityAuditProducer(
     ITrustedAuditWriter writer,
+    ITransactionalAuditWriter transactionalWriter,
     ILogger<IdentityAuditProducer> logger)
 {
+    /// <summary>
+    /// SEC-04: a refused MFA HTTP request, not a failed code or the account attempt limit.
+    /// The caller supplies server correlation only; request and account data are deliberately excluded.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaThrottledAsync(
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied),
+            AnonymousContext(correlationId),
+            cancellationToken);
+
+    /// <summary>
+    /// Builds the successful unlock record from lockouts actually cleared by the store. The caller must write
+    /// this draft with ITransactionalAuditWriter in the unlock transaction and commit only after IsRecorded.
+    /// lockoutEnd is the latest cleared end, preserving the existing timestamp field for older readers.
+    /// </summary>
+    public static AuditEventDraft CreateAccountUnlockedDraft(
+        Guid targetId,
+        DateTimeOffset? passwordLockoutEnd,
+        DateTimeOffset? mfaLockoutEnd)
+    {
+        if (targetId == Guid.Empty)
+            throw new ArgumentException("A confirmed account ID is required.", nameof(targetId));
+        if (passwordLockoutEnd is null && mfaLockoutEnd is null)
+            throw new ArgumentException("At least one cleared lockout is required.", nameof(passwordLockoutEnd));
+
+        var kind = passwordLockoutEnd is null ? "mfa" : mfaLockoutEnd is null ? "password" : "both";
+        var end = passwordLockoutEnd ?? mfaLockoutEnd!.Value;
+        if (mfaLockoutEnd is { } mfaEnd && mfaEnd > end)
+            end = mfaEnd;
+        return new AuditEventDraft(
+            AuditEventTypes.AccountUnlocked,
+            AuditOutcome.Success,
+            Resource: Account(targetId),
+            Details: Details(
+                ("lockoutKind", kind),
+                ("lockoutEnd", end.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture))));
+    }
+
     public ValueTask<AuditWriteResult> LoginThrottledAsync(
         string correlationId,
         CancellationToken cancellationToken = default) =>
@@ -24,12 +69,14 @@ public sealed class IdentityAuditProducer(
     public ValueTask<AuditWriteResult> LoginSucceededAsync(
         Guid userId,
         string correlationId,
+        string? sourceAddress = null,
         CancellationToken cancellationToken = default) =>
         WriteAsync(
             new AuditEventDraft(
                 AuditEventTypes.AuthLogin,
                 AuditOutcome.Success,
-                Resource: Account(userId)),
+                Resource: Account(userId),
+                Details: LoginDetails(sourceAddress)),
             UserContext(userId, correlationId),
             cancellationToken);
 
@@ -37,6 +84,7 @@ public sealed class IdentityAuditProducer(
         string reasonCode,
         string correlationId,
         Guid? confirmedUserId = null,
+        string? sourceAddress = null,
         CancellationToken cancellationToken = default,
         bool actorConfirmed = false) =>
         WriteAsync(
@@ -44,7 +92,7 @@ public sealed class IdentityAuditProducer(
                 AuditEventTypes.AuthLogin,
                 AuditOutcome.Failure,
                 Resource: confirmedUserId is Guid userId ? Account(userId) : null,
-                Details: Details(("reasonCode", reasonCode))),
+                Details: LoginDetails(sourceAddress, reasonCode)),
             actorConfirmed && confirmedUserId is Guid id
                 ? UserContext(id, correlationId)
                 : AnonymousContext(correlationId),
@@ -56,6 +104,126 @@ public sealed class IdentityAuditProducer(
         CancellationToken cancellationToken = default) =>
         WriteAsync(
             new AuditEventDraft(AuditEventTypes.AuthLogout, AuditOutcome.Success),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaEnrollmentStartedAsync(
+        Guid userId,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnrollmentStarted,
+                AuditOutcome.Success,
+                Resource: Account(userId)),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    /// <summary>
+    /// IDN-06 (US-17): MFA was enabled. Written in the caller's transaction; the caller commits the change only
+    /// when this returns <see cref="AuditWriteResult.IsRecorded"/>.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaEnabledAsync(
+        Guid userId,
+        string correlationId,
+        DbTransaction transaction,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnabled,
+                AuditOutcome.Success,
+                Resource: Account(userId)),
+            UserContext(userId, correlationId),
+            transaction,
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaEnableFailedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaEnabled,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    /// <summary>
+    /// IDN-06 (US-18): the second factor was verified and the session is being promoted. Written in the caller's
+    /// transaction; the caller commits only when this returns <see cref="AuditWriteResult.IsRecorded"/>.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaVerifiedAsync(
+        Guid userId,
+        string correlationId,
+        DbTransaction transaction,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Success,
+                Resource: Account(userId)),
+            UserContext(userId, correlationId),
+            transaction,
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaVerifyFailedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> MfaVerifyDeniedByAttemptLimitAsync(
+        Guid userId,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthMfaVerified,
+                AuditOutcome.Denied,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", "attempt_limit"))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> SessionRevokedAsync(
+        Guid userId,
+        Guid revokedHandle,
+        string revocationCause,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthSessionRevoked,
+                AuditOutcome.Success,
+                Resource: Account(userId),
+                Details: Details(
+                    ("revocationCause", revocationCause),
+                    ("revokedHandle", revokedHandle.ToString("D")))),
+            UserContext(userId, correlationId),
+            cancellationToken);
+
+    public ValueTask<AuditWriteResult> SessionRevokeFailedAsync(
+        Guid userId,
+        string reasonCode,
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(
+                AuditEventTypes.AuthSessionRevoked,
+                AuditOutcome.Failure,
+                Resource: Account(userId),
+                Details: Details(("reasonCode", reasonCode))),
             UserContext(userId, correlationId),
             cancellationToken);
 
@@ -97,14 +265,32 @@ public sealed class IdentityAuditProducer(
                 : AnonymousContext(correlationId),
             cancellationToken);
 
-    private async ValueTask<AuditWriteResult> WriteAsync(
+    private ValueTask<AuditWriteResult> WriteAsync(
         AuditEventDraft draft,
         AuditContext context,
+        CancellationToken cancellationToken) =>
+        GuardAsync(draft, context, () => writer.WriteAsync(draft, context, cancellationToken), cancellationToken);
+
+    private ValueTask<AuditWriteResult> WriteAsync(
+        AuditEventDraft draft,
+        AuditContext context,
+        DbTransaction transaction,
+        CancellationToken cancellationToken) =>
+        GuardAsync(
+            draft,
+            context,
+            () => transactionalWriter.WriteAsync(draft, context, transaction, cancellationToken),
+            cancellationToken);
+
+    private async ValueTask<AuditWriteResult> GuardAsync(
+        AuditEventDraft draft,
+        AuditContext context,
+        Func<ValueTask<AuditWriteResult>> write,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await writer.WriteAsync(draft, context, cancellationToken);
+            var result = await write();
             if (!result.IsRecorded)
             {
                 logger.LogError(
@@ -142,6 +328,33 @@ public sealed class IdentityAuditProducer(
     private static IReadOnlyDictionary<string, string> Details(
         params (string Key, string Value)[] entries) =>
         entries.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+
+    // IDN-22: auth.login details; without a usable source address a success keeps no details at all.
+    private static IReadOnlyDictionary<string, string>? LoginDetails(
+        string? sourceAddress,
+        string? reasonCode = null)
+    {
+        var details = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (reasonCode is not null)
+            details["reasonCode"] = reasonCode;
+        if (NormalizeSourceAddress(sourceAddress) is string address)
+            details["sourceAddress"] = address;
+        return details.Count == 0 ? null : details;
+    }
+
+    // IDN-22: the audit catalog takes only a plain IPv4 or IPv6 address (AuditDetailFormat.IpAddress), so an
+    // IPv4-mapped address becomes IPv4 and a zone id is dropped. A value that is not an address is left out:
+    // the login is still audited, only without its source address. IPv4 must round-trip, because TryParse
+    // also reads short forms such as "203.0.113" as a different address.
+    private static string? NormalizeSourceAddress(string? sourceAddress)
+    {
+        if (!IPAddress.TryParse(sourceAddress, out var address)
+            || (address.AddressFamily == AddressFamily.InterNetwork && address.ToString() != sourceAddress))
+            return null;
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        return new IPAddress(address.GetAddressBytes()).ToString();
+    }
 
     private static string Status(AccountStatus status) => status switch
     {

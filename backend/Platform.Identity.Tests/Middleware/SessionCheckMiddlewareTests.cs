@@ -2,10 +2,12 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Platform.Access.AspNet;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
+using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Services.Identity;
 using Moq;
 
@@ -163,6 +165,35 @@ public class SessionCheckMiddlewareTests
     [TestCase("/api/laboratories")]
     [TestCase("/api/kt1/info")]
     [TestCase("/api/access/demo-deny")]
+    public async Task DevelopmentModuleRoute_RevokedSessionCookie_Returns401_AndClearsTheCookie(string path)
+    {
+        var context = ProtectedRequest(path, Environments.Development);
+        SessionReturns("revoked-token", null);
+        context.Request.Headers.Cookie = $"{SessionCookie.Name}=revoked-token";
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(_nextCalled, Is.False);
+        Assert.That(context.Response.StatusCode, Is.EqualTo(401));
+        Assert.That(context.Response.Headers.SetCookie.ToString(), Does.Contain($"{SessionCookie.Name}=;"));
+    }
+
+    [Test]
+    public async Task DevelopmentModuleRoute_ValidSessionCookie_CallsNext_AndStoresSession()
+    {
+        var context = ProtectedRequest("/api/laboratories", Environments.Development);
+        SessionReturns("valid-token", new ValidateSession(Guid.NewGuid(), Guid.NewGuid(), AuthenticationLevel.Active));
+        context.Request.Headers.Cookie = $"{SessionCookie.Name}=valid-token";
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(_nextCalled, Is.True);
+        Assert.That(context.Items[SessionCheckMiddleware.SessionItemKey], Is.InstanceOf<ValidateSession>());
+    }
+
+    [TestCase("/api/laboratories")]
+    [TestCase("/api/kt1/info")]
+    [TestCase("/api/access/demo-deny")]
     public async Task ModuleRouteOutsideDevelopment_NoCookie_Returns401(string path)
     {
         var context = ProtectedRequest(path, Environments.Production);
@@ -179,6 +210,19 @@ public class SessionCheckMiddlewareTests
     public async Task OtherRouteInDevelopment_NoCookie_Returns401(string path)
     {
         var context = ProtectedRequest(path, Environments.Development);
+
+        await _middleware.Invoke(context, _sessions.Object);
+
+        Assert.That(_nextCalled, Is.False);
+        Assert.That(context.Response.StatusCode, Is.EqualTo(401));
+    }
+
+    [Test]
+    public async Task LabLocalizationRouteInDevelopment_NoCookie_Returns401()
+    {
+        var context = ProtectedRequest($"/api/laboratories/{Guid.NewGuid()}/content", Environments.Development);
+        context.SetEndpoint(new Endpoint(null,
+            new EndpointMetadataCollection(new RequireAccessAttribute(LabLocalizationActions.Entry)), "lab-content"));
 
         await _middleware.Invoke(context, _sessions.Object);
 

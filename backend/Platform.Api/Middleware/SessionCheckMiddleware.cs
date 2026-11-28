@@ -1,13 +1,16 @@
 using Microsoft.AspNetCore.Authorization;
+using Platform.Access.AspNet;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
+using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Services.Sessions;
 
 namespace Platform.Api.Middleware;
 
 public class SessionCheckMiddleware
 {
-    public const string SessionItemKey = "session";
+    public const string SessionItemKey = SessionHttpContextItems.Session;
     public const string InvalidSessionCode = "session_invalid";
 
     private readonly RequestDelegate _next;
@@ -41,9 +44,14 @@ public class SessionCheckMiddleware
         // Development-only routes of other modules that authenticate callers themselves or are anonymous demos:
         // /api/laboratories and its /api/labs alias (LAB-01 test header), /api/kt1 (ACC-04/ADM-08 synthetic KT1 cookie)
         // /api/access/demo-deny (Access default-deny demo), and /api/courses with /api/materials (Team 21 test header).
-        if (context.RequestServices is not null
+        // IDN-07: the bypass applies only to requests without a session cookie. A request that presents one is
+        // validated like any other, so a revoked or expired session is refused here too, never silently accepted.
+        if (string.IsNullOrEmpty(token)
+            && context.RequestServices is not null
             && context.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() == true
-            && (context.Request.Path.StartsWithSegments("/api/laboratories")
+            && ((context.Request.Path.StartsWithSegments("/api/laboratories")
+                // LAB-07: sadržaj i prevodi traže pravu sesiju (LabCaller), i u Developmentu.
+                && endpoint.Metadata.GetMetadata<IAccessRequirementMetadata>()?.Action != LabLocalizationActions.Entry)
                 || (context.Request.Path.StartsWithSegments("/api/labs")
                 && context.Request.Path.Value?.TrimEnd('/').EndsWith("/student-view", StringComparison.OrdinalIgnoreCase) != true
                 // AUT-07: pregled pre objave takođe traži pravu sesiju (LabCaller), i u Developmentu.

@@ -24,7 +24,9 @@ public enum AuditPresence
 /// <param name="OnlyForOutcomes">Outcomes with which the field may appear, or null for all.</param>
 public sealed record AuditDetailField(
     AuditDetailFormat Format,
-    IReadOnlySet<AuditOutcome>? OnlyForOutcomes = null);
+    IReadOnlySet<AuditOutcome>? OnlyForOutcomes = null,
+    IReadOnlySet<AuditOutcome>? RequiredForOutcomes = null,
+    IReadOnlyDictionary<AuditOutcome, IReadOnlySet<string>>? AllowedValuesByOutcome = null);
 
 public enum AuditDetailFormat
 {
@@ -61,5 +63,8 @@ public enum AuditDetailFormat
     /// <summary>Integer from 0 to 100000.</summary>
     Count,
     Sha256,
-    RevisionNumber
+    RevisionNumber,
+
+    /// <summary>Plain IPv4 (dotted decimal) or IPv6 address, at most 45 characters, without a zone id.</summary>
+    IpAddress
 }

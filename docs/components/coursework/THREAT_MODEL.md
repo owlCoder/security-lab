@@ -44,3 +44,39 @@ administrative changes require their own durable producer event. Delivery of
 those outbox records to central Audit is still pending. Identity revocation and
 the final administration commit are not a distributed transaction; see the
 explicit consistency limit in `KT2.md`.
+
+
+## KT2 increment 3 — provider and operator boundaries
+
+| Asset | Misuse/threat | Control | Test/evidence |
+|---|---|---|---|
+| Current course scope | Stale grants keep working after archive/delete/provider outage | Fresh ACC-01 read-only lookup in policy and before own commit; rollback on final failure | CatalogChangesDenyExistingCookieWithoutRevealingCourseExistence; CourseArchivedDuringMutationRollsBackBeforeCommit |
+| Root authority | Untrusted/missing account/course; duplicate or replacement root | Explicit schema-owner CLI, active provider checks, per-course lock, same-root idempotency, no HTTP bootstrap | BootstrapRejectsUntrustedOrInactiveProviderRecords; BootstrapCannotReplaceAnExistingRoot; ConcurrentBootstrapCreatesOneRootAndOneEvent |
+| Root audit | Bootstrap succeeds without producer record | Own metadata/root/operator event in one transaction | BootstrapAuditFailureRollsBackBothRootAndSettings |
+| Audit delivery | Central outage/crash causes loss or duplicate events | Immutable outbox, stable IDs, acknowledged-only receipts; retry and no forged type mapping | RealCentralAuditAcknowledgesDelegationAndRevocationAndDeduplicatesCrashRetry; AuditOutageLeavesDeliveryUnacknowledgedAndRetrySucceeds; UnmappedSettingsEventsAreRetainedWithoutInventingCentralTypes |
+| Attempt answers | IDOR, role/header injection, missing membership provider | Real session, server metadata, shared membership reader, central read policies plus concrete application checks | Acc04ForeignAndMissingStayIdenticalIncludingAttOutage; Acc04MissingMembershipProviderFailsClosedInsteadOfUsingDemoMembership; Acc04ValidSyntheticCookieDoesNotAuthenticateTheRealSessionApi |
+| Draft history | Stale/racing writes; owner changed after authorization | Revalidate current authorized scope, bind entire ATT snapshot; require atomic provider CAS/audit receipt | Acc04ConcurrentSameVersionWritesHaveOneWinner; Acc04OwnerChangedAfterCentralDecisionNeverReceivesTheAnswer; Acc04SubmittedAndCompletedAnswersRemainImmutable |
+| Service credential and availability | Provider redirect, metadata with answer, oversized/stalled response | Fixed HTTPS origin, separate server credential, no redirects/cookies, strict DTO/size and full-response timeout | AttemptProviderAdapterTests |
+| Session freshness | Existing session revoked while request is in progress | Fresh real session check before provider mutation; before returning a read | Acc04RevokedSessionDuringDecisionDoesNotDispatchAProviderWrite |
+
+Trust boundaries are browser→session/API, consumer→ATT/membership/course providers,
+operator→schema-owner bootstrap, and durable outbox→central Audit. ATT/membership
+positive tests are contract doubles until their real modules are available; their
+CAS/audit guarantees are a provider obligation. No distributed transaction is claimed
+across Identity, catalog, remote ATT, membership and administrative storage. Other
+teams' shared policies and data are preserved.
+
+
+## KT2 increment 4 — live demonstration boundary
+
+| Asset | Threat | Control | Evidence |
+|---|---|---|---|
+| Existing project/provider state | A demonstration migrates or deletes a real database | Default isolated Docker server; explicit dedicated-server opt-in; GUID-named created database; child environment contains only fixture connections; Production content root is a private temporary directory | DemoFixture initialization/cleanup and live report; partial initialization failure smoke check |
+| HTTPS credentials | Test client accepts any certificate or prints session/password values | Per-run private PFX, localhost/IP SAN, exact certificate/host/port pin, negative pin check; no OS trust import; JSON evidence contains status/boolean checks only | Live TLS check and session cookie/body checks |
+| Revoked administrative grant | A restart or cookie refresh hides stale-authority behavior | Separate real Kestrel restart; unchanged captured cookie; one persisted delegate session; no post-grant/revocation sign-in | Same-cookie live read/write denial and restart/state assertions |
+| CI integrity | Green result with no live scenario or stale evidence | Strict fresh JSON validation; minimum HTTP/state checks; requires same-cookie, restart, successful cleanup and zero failed checks | demo-coursework-live.ps1; new focused CI step |
+
+The demo is a separate test executable, not an enabled production seed/status/root
+endpoint. Temporary certificate/process/database resources belong only to its run.
+It demonstrates real ADM providers on this main; it makes no ATT/membership or
+browser/UI deployment claim. No global certificate-validation setting is changed.

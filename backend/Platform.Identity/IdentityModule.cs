@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Platform.Identity.Composition;
 using Platform.Identity.Interfaces;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 
 namespace Platform.Identity;
@@ -20,11 +24,23 @@ public static class IdentityModule
 
         services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
 
+        // US-22: where the keys are kept and how they are encrypted at rest is set only by AddMfaKeyRing
+        // (Program.cs), which needs the environment to refuse a start without a protected key ring.
+        services.AddDataProtection().SetApplicationName(MfaKeyRingRegistration.ApplicationName);
+        // IDN-06: no plain IDataProtector is registered; only MFA gets the MFA purpose.
+        services.AddSingleton<ITotpSecretProtector, DataProtectionTotpSecretProtector>();
+
         // IDN-05: an invalid lockout setting stops the service from starting.
         services.AddOptions<IdentityLockoutOptions>()
             .Bind(configuration.GetSection(IdentityLockoutOptions.Section))
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<IdentityLockoutOptions>, IdentityLockoutOptionsValidator>();
+
+        // US-18: the MFA lockout has its own section and stricter limits; an invalid value stops the start.
+        services.AddOptions<MfaLockoutOptions>()
+            .Bind(configuration.GetSection(MfaLockoutOptions.Section))
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<MfaLockoutOptions>, MfaLockoutOptionsValidator>();
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
@@ -33,6 +49,8 @@ public static class IdentityModule
         services.AddScoped<IAccountStatusReader, EfAccountStatusReader>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
         services.AddScoped<ISessionStore, SessionStore>();
+        services.AddScoped<IMfaCredentialsStore, EfMfaCredentialsStore>();
+        services.AddScoped<IExternalIdentityLinker, ExternalIdentityLinker>();
 
         return services;
     }

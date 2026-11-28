@@ -91,6 +91,10 @@ public class ChangeAccountStatusTests
                 return Task.FromResult(store.ActiveSessions.GetValueOrDefault(account.Id));
             }
 
+            // IDN-05 unlock is covered by UnlockAccountTests; a status change never clears a lockout.
+            public Task<DateTimeOffset?> ClearLockoutAsync(UserAccount account, DateTimeOffset now, CancellationToken ct = default) =>
+                throw new NotSupportedException();
+
             public Task CommitAsync(CancellationToken ct = default)
             {
                 foreach (var (id, status) in _pendingStatus) store.Accounts[id].Status = status;
@@ -135,7 +139,7 @@ public class ChangeAccountStatusTests
         var audit = new FakeAudit();
         var sut = new ChangeAccountStatus(
             new FakeIdentity(caller),
-            new AdminOnlyAccessDecision(new FakeAdmins(AdminId)),
+            new AdminOnlyAccountAdministrationDecision(new FakeAdmins(AdminId)),
             store, audit, new FakeCorrelation(correlationId),
             NullLogger<ChangeAccountStatus>.Instance);
 

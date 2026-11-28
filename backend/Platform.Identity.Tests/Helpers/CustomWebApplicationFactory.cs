@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Platform.Audit.Contracts;
+using Platform.Audit.Infrastructure.Persistence;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Integration;
 
@@ -35,6 +37,17 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
             {
                 options.UseNpgsql(TestDatabaseFixture.ConnectionString);
             });
+
+            // Program's AddAudit captures configuration before this callback; Development .env/user secrets
+            // can override UseSetting above. Replace the captured context registration as well, so Audit
+            // reads cannot escape the shared container. Child ConfigureTestServices can still supply the
+            // restricted runtime connection for real-writer/failure scenarios in the same database.
+            services.RemoveAll<AuditDbContext>();
+            services.RemoveAll<DbContextOptions<AuditDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<AuditDbContext>>();
+            services.AddDbContext<AuditDbContext>(options =>
+                options.UseNpgsql(TestDatabaseFixture.ConnectionString,
+                    postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
         });
         builder.ConfigureTestServices(services =>
         {

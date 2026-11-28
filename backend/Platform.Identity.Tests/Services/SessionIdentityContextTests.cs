@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Http;
 using Platform.Api.Enums.Identity;
-using Platform.Api.Middleware;
 using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Services.Sessions;
 
 namespace Platform.Identity.Tests.Services;
 
@@ -32,7 +32,7 @@ public class SessionIdentityContextTests
     {
         var userId = Guid.NewGuid();
         var handle = Guid.NewGuid();
-        _context.Items[SessionCheckMiddleware.SessionItemKey] = new ValidateSession(handle, userId, AuthenticationLevel.Active);
+        _context.Items[SessionHttpContextItems.Session] = new ValidateSession(handle, userId, AuthenticationLevel.Active);
 
         var caller = _identity.Current;
 
@@ -47,7 +47,7 @@ public class SessionIdentityContextTests
     public void MfaPendingSession_IsNotAuthenticated_ButHasUserId()
     {
         var userId = Guid.NewGuid();
-        _context.Items[SessionCheckMiddleware.SessionItemKey] = new ValidateSession(Guid.NewGuid(), userId, AuthenticationLevel.MfaPending);
+        _context.Items[SessionHttpContextItems.Session] = new ValidateSession(Guid.NewGuid(), userId, AuthenticationLevel.MfaPending);
 
         var caller = _identity.Current;
 

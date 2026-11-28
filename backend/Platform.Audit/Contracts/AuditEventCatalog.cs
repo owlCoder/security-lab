@@ -23,6 +23,28 @@ public static class AuditEventCatalog
     private static readonly AuditDetailField ReasonCode = new(
         AuditDetailFormat.Code,
         new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet());
+    private static readonly AuditDetailField FailureReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Failure }.ToFrozenSet());
+    private static readonly AuditDetailField MfaEnabledFailureReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Failure }.ToFrozenSet(),
+        new[] { AuditOutcome.Failure }.ToFrozenSet(),
+        ValuesByOutcome((AuditOutcome.Failure, Codes(
+            "invalid_code",
+            "no_valid_enrollment",
+            "already_enabled",
+            "invalid_enrollment",
+            "session_inactive"))));
+    private static readonly AuditDetailField MfaVerifiedReasonCode = new(
+        AuditDetailFormat.Code,
+        new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet(),
+        new[] { AuditOutcome.Denied, AuditOutcome.Failure }.ToFrozenSet(),
+        ValuesByOutcome(
+            (AuditOutcome.Failure, Codes("invalid_code", "replayed_code", "invalid_secret", "session_inactive")),
+            (AuditOutcome.Denied, Codes("attempt_limit"))));
+    private static readonly IReadOnlySet<string> RevocationCauses =
+        Codes("user_request", "mfa_attempts_exceeded");
 
     // Privileged changes: denied for an anonymous caller too, failed only for an authenticated one.
     private static readonly IReadOnlyDictionary<AuditOutcome, IReadOnlySet<AuditActorKind>> PrivilegedChange =
@@ -39,7 +61,10 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             AuditPresence.Optional,
             AuditResourceTypes.Account,
-            Fields(("reasonCode", ReasonCode))),
+            Fields(
+                ("reasonCode", ReasonCode),
+                // IDN-22: full client address, masked by the reader of the login history.
+                ("sourceAddress", new AuditDetailField(AuditDetailFormat.IpAddress)))),
 
         new AuditEventSchema(
             AuditEventTypes.AuthLogout,
@@ -51,6 +76,14 @@ public static class AuditEventCatalog
 
         new AuditEventSchema(
             AuditEventTypes.AuthLoginThrottled,
+            Outcomes((AuditOutcome.Denied, Anonymous)),
+            AuditPresence.Forbidden,
+            AuditPresence.Forbidden,
+            null,
+            Fields()),
+        // HTTP rejection before MFA verification; no account identity is inferred from a request.
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaThrottled,
             Outcomes((AuditOutcome.Denied, Anonymous)),
             AuditPresence.Forbidden,
             AuditPresence.Forbidden,
@@ -89,6 +122,48 @@ public static class AuditEventCatalog
             Fields()),
 
         new AuditEventSchema(
+            AuditEventTypes.AuthMfaEnrollmentStarted,
+            Outcomes((AuditOutcome.Success, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields()),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaEnabled,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", MfaEnabledFailureReasonCode))),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaVerified,
+            Outcomes(
+                (AuditOutcome.Success, User),
+                (AuditOutcome.Failure, User),
+                (AuditOutcome.Denied, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(("reasonCode", MfaVerifiedReasonCode))),
+
+        new AuditEventSchema(
+            AuditEventTypes.AuthSessionRevoked,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("revocationCause", new AuditDetailField(
+                    AuditDetailFormat.Code,
+                    AllowedValuesByOutcome: ValuesByOutcome(
+                        (AuditOutcome.Success, RevocationCauses),
+                        (AuditOutcome.Failure, RevocationCauses)))),
+                ("revokedHandle", new AuditDetailField(AuditDetailFormat.Uuid)),
+                ("reasonCode", FailureReasonCode))),
+
+        new AuditEventSchema(
             AuditEventTypes.AccountStatusChanged,
             PrivilegedChange,
             AuditPresence.Forbidden,
@@ -97,6 +172,35 @@ public static class AuditEventCatalog
             Fields(
                 ("oldStatus", new AuditDetailField(AuditDetailFormat.AccountStatus)),
                 ("newStatus", new AuditDetailField(AuditDetailFormat.AccountStatus)),
+                ("reasonCode", ReasonCode))),
+
+        // IDN-05: administrator unlock. lockoutEnd is the lockout end that was cleared.
+        new AuditEventSchema(
+            AuditEventTypes.AccountUnlocked,
+            PrivilegedChange,
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("lockoutEnd", new AuditDetailField(
+                    AuditDetailFormat.UtcTimestamp,
+                    new[] { AuditOutcome.Success }.ToFrozenSet())),
+                ("lockoutKind", new AuditDetailField(
+                    AuditDetailFormat.Code,
+                    new[] { AuditOutcome.Success }.ToFrozenSet(),
+                    AllowedValuesByOutcome: ValuesByOutcome(
+                        (AuditOutcome.Success, Codes("password", "mfa", "both"))))),
+                ("reasonCode", ReasonCode))),
+
+        // IDN-11: session identifier rotation. Never carries the token, its hash or the session handle.
+        new AuditEventSchema(
+            AuditEventTypes.SessionRotated,
+            Outcomes((AuditOutcome.Success, User), (AuditOutcome.Denied, User), (AuditOutcome.Failure, User)),
+            AuditPresence.Forbidden,
+            AuditPresence.Required,
+            AuditResourceTypes.Account,
+            Fields(
+                ("trigger", new AuditDetailField(AuditDetailFormat.Code)),
                 ("reasonCode", ReasonCode))),
 
         new AuditEventSchema(
@@ -183,6 +287,13 @@ public static class AuditEventCatalog
             : new[] { "authorId", "operationId", "contentHash" }).ToFrozenSet(StringComparer.Ordinal));
 
     private static IReadOnlySet<AuditActorKind> Kinds(params AuditActorKind[] kinds) => kinds.ToFrozenSet();
+
+    private static IReadOnlySet<string> Codes(params string[] values) =>
+        values.ToFrozenSet(StringComparer.Ordinal);
+
+    private static IReadOnlyDictionary<AuditOutcome, IReadOnlySet<string>> ValuesByOutcome(
+        params (AuditOutcome Outcome, IReadOnlySet<string> Values)[] entries) =>
+        entries.ToFrozenDictionary(entry => entry.Outcome, entry => entry.Values);
 
     private static IReadOnlyDictionary<AuditOutcome, IReadOnlySet<AuditActorKind>> Outcomes(
         params (AuditOutcome Outcome, IReadOnlySet<AuditActorKind> Actors)[] entries) =>

@@ -13,5 +13,18 @@ services:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       retries: 12
+   # IDN-08: local OIDC provider for development only. Started only with: docker compose --profile oidc up -d keycloak
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: ["oidc"]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-}
+      OIDC_TEST_USER_PASSWORD: ${OIDC_TEST_USER_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
 volumes:
   pgdata:

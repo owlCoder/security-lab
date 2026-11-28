@@ -18,6 +18,8 @@ public sealed record LabContentView(
 /// Reads a laboratory in the requested language (LAB-07). The revision and its evaluator are
 /// chosen before the language is applied, so every language shows the same revision and is
 /// graded by the same evaluator: only the text differs.
+/// The default-language (Serbian) text is the revision's own text; other languages come from
+/// stored translations and fall back to it.
 /// It does not check who is asking: the caller must authorise the read first.
 /// </summary>
 public sealed class GetLabContent(ILabRevisionReader revisions, ILabLocalizationRepository localizations)
@@ -31,16 +33,24 @@ public sealed class GetLabContent(ILabRevisionReader revisions, ILabLocalization
         var revision = await revisions.FindCurrentForLabAsync(labId, ct)
             ?? throw new DomainRuleException(LocalizationErrorCodes.NotFound);
 
-        var localization = await localizations.GetAsync(revision.RevisionId, language, ct)
-            ?? await localizations.GetAsync(revision.RevisionId, LabLanguages.Default, ct)
-            ?? throw new DomainRuleException(LocalizationErrorCodes.NotFound);
+        if (language != LabLanguages.Default &&
+            await localizations.GetAsync(revision.RevisionId, language, ct) is { } translation)
+        {
+            return new LabContentView(
+                revision.RevisionId,
+                revision.EvaluatorVersion,
+                translation.Language,
+                translation.Title,
+                translation.Description,
+                translation.Instructions);
+        }
 
         return new LabContentView(
             revision.RevisionId,
             revision.EvaluatorVersion,
-            localization.Language,
-            localization.Title,
-            localization.Description,
-            localization.Instructions);
+            LabLanguages.Default,
+            revision.Text.Title,
+            revision.Text.Description,
+            revision.Text.Instructions);
     }
 }

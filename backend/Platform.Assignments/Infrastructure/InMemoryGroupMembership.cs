@@ -10,24 +10,24 @@ public sealed class InMemoryGroupMembership : IGroupMembership
 
     public void Add(string courseId, string groupId, string studentId)
     {
-        if (string.IsNullOrWhiteSpace(courseId))
-        {
-            throw new ArgumentException("Course ID is required.", nameof(courseId));
-        }
-
-        if (string.IsNullOrWhiteSpace(groupId))
-        {
-            throw new ArgumentException("Group ID is required.", nameof(groupId));
-        }
-
-        if (!PrincipalId.IsValid(studentId))
-        {
-            throw new ArgumentException("Student ID is not valid.", nameof(studentId));
-        }
+        ValidateMembership(courseId, groupId, studentId);
 
         lock (_sync)
         {
             _members.Add((courseId, groupId, studentId));
+        }
+    }
+
+    // Removes exactly one membership; the next check already denies access.
+    // Returns false when there was nothing to remove. Invalid input throws,
+    // so a mistyped removal cannot look like a successful one.
+    public bool Remove(string courseId, string groupId, string studentId)
+    {
+        ValidateMembership(courseId, groupId, studentId);
+
+        lock (_sync)
+        {
+            return _members.Remove((courseId, groupId, studentId));
         }
     }
 
@@ -49,6 +49,24 @@ public sealed class InMemoryGroupMembership : IGroupMembership
         lock (_sync)
         {
             return ValueTask.FromResult(_members.Contains((courseId, groupId, studentId)));
+        }
+    }
+
+    private static void ValidateMembership(string courseId, string groupId, string studentId)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            throw new ArgumentException("Course ID is required.", nameof(courseId));
+        }
+
+        if (string.IsNullOrWhiteSpace(groupId))
+        {
+            throw new ArgumentException("Group ID is required.", nameof(groupId));
+        }
+
+        if (!PrincipalId.IsValid(studentId))
+        {
+            throw new ArgumentException("Student ID is not valid.", nameof(studentId));
         }
     }
 }

@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import CreateLabForm from './CreateLabForm'
 
+vi.mock('../../services/courseService', () => ({
+  courseService: { listCourses: vi.fn().mockResolvedValue([{ id: 'course-456', code: 'SEC101', name: 'Bezbednost', status: 'Active' }]) },
+}))
+
 const student = { id: 'ana', role: 'Student' } as const
 const teacher = { id: 'marko', role: 'Teacher' } as const
 
@@ -10,7 +14,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function submitTitle(title: string) {
+async function submitTitle(title: string) {
+  await screen.findByRole('option', { name: 'SEC101 — Bezbednost' })
   fireEvent.change(screen.getByLabelText('Naslov laboratorije'), { target: { value: title } })
   // submit forme je isto što i Enter u polju ili klik na dugme
   fireEvent.submit(screen.getByRole('button', { name: 'Kreiraj laboratoriju' }))
@@ -21,7 +26,7 @@ describe('LAB-01/LAB-07 forma za kreiranje', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ title: 'Access denied' }), { status: 403 })))
     render(<CreateLabForm user={student} />)
 
-    submitTitle('Moja laboratorija')
+    await submitTitle('Moja laboratorija')
 
     expect((await screen.findByRole('alert')).textContent).toContain('Nemate dozvolu')
   })
@@ -30,18 +35,18 @@ describe('LAB-01/LAB-07 forma za kreiranje', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'INVALID_TITLE' }), { status: 400 })))
     render(<CreateLabForm user={teacher} />)
 
-    submitTitle('Naslov')
+    await submitTitle('Naslov')
 
     expect((await screen.findByRole('alert')).textContent).toContain('najviše 200 znakova')
     expect(screen.getByLabelText('Naslov laboratorije').getAttribute('aria-invalid')).toBe('true')
   })
 
-  it('prazan naslov se ne šalje serveru', () => {
+  it('prazan naslov se ne šalje serveru', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     render(<CreateLabForm user={teacher} />)
 
-    submitTitle('   ')
+    await submitTitle('   ')
 
     expect(fetchMock).not.toHaveBeenCalled()
     expect(screen.getByRole('alert').textContent).toContain('Unesite naslov')
@@ -51,7 +56,7 @@ describe('LAB-01/LAB-07 forma za kreiranje', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'srv-42' }), { status: 201 })))
     render(<CreateLabForm user={teacher} />)
 
-    submitTitle('Nova laboratorija')
+    await submitTitle('Nova laboratorija')
 
     expect((await screen.findByRole('status')).textContent).toContain('srv-42')
   })
@@ -60,7 +65,7 @@ describe('LAB-01/LAB-07 forma za kreiranje', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 501 })))
     render(<CreateLabForm user={teacher} />)
 
-    submitTitle('Nova laboratorija')
+    await submitTitle('Nova laboratorija')
 
     const message = await screen.findByRole('status')
     expect(message.textContent).toContain('HTTP 501')

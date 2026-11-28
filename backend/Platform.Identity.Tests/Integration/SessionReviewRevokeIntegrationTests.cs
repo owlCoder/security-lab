@@ -10,6 +10,7 @@ using Platform.Api.Models.Identity;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Composition;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -217,7 +218,7 @@ public class SessionReviewRevokeIntegrationTests : IntegrationTestBase
     // Helpers
 
     private static HttpClient NewClient(WebApplicationFactory<Program> factory) =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        factory.CreateCsrfClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
 
     private static string StatusUrl(Guid accountId) => $"/api/admin/accounts/{accountId}/status";
 

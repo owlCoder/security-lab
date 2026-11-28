@@ -1,6 +1,12 @@
+using System.Net;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Platform.Identity.Persistence;
 using Platform.Identity.Tests.Helpers;
+using Platform.Identity.Testing;
 
 namespace Platform.Identity.Tests.Integration;
 
@@ -16,7 +22,7 @@ public abstract class IntegrationTestBase
     public void BaseClassSetup()
     {
         Factory = new CustomWebApplicationFactory<Program>();
-        Client = Factory.CreateClient();
+        Client = Factory.CreateCsrfClient();
     }
 
     [OneTimeTearDown]
@@ -58,5 +64,26 @@ public abstract class IntegrationTestBase
         var scope = Factory.Services.CreateScope();
         return scope.ServiceProvider.GetRequiredService<TService>();
     }
+
+    /// <summary>
+    /// A variant of <see cref="Factory"/> whose requests come from <paramref name="clientAddress"/>. TestServer
+    /// leaves <c>Connection.RemoteIpAddress</c> empty, so a startup filter sets it before the app's pipeline runs.
+    /// </summary>
+    protected static WebApplicationFactory<Program> HostWithClientAddress(IPAddress clientAddress) =>
+        Factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddSingleton<IStartupFilter>(new ClientAddressStartupFilter(clientAddress))));
     #endregion
+
+    private sealed class ClientAddressStartupFilter(IPAddress clientAddress) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, nextMiddleware) =>
+            {
+                context.Connection.RemoteIpAddress = clientAddress;
+                return nextMiddleware(context);
+            });
+            next(app);
+        };
+    }
 }

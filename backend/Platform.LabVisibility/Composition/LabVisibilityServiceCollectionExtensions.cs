@@ -11,6 +11,7 @@ using Platform.LabVisibility.Infrastructure.Auditing;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Persistence;
 using Platform.LabVisibility.Infrastructure.Policies;
+using Platform.LabVisibility.Infrastructure.Publication;
 
 namespace Platform.LabVisibility.Composition;
 
@@ -65,6 +66,13 @@ public static class LabVisibilityServiceCollectionExtensions
         // AUT-07: pregled pre objave (Cvetojević)
         services.AddScoped<PreviewStudentView>();
 
+        // KT2 ugovori (docs/contracts/LabVisibility-KT2.md):
+        // upis ključa (Gajić, kartica 5) i stanje objave od AUT-01/REV (stub do njihovog adaptera).
+        services.AddScoped<ISaveEvaluatorKey, SaveEvaluatorKey>();
+        services.AddSingleton<StubLabPublicationSource>();
+        services.AddSingleton<ILabPublicationSource>(
+            sp => sp.GetRequiredService<StubLabPublicationSource>());
+
         return services;
     }
 
@@ -105,6 +113,14 @@ public static class LabVisibilityServiceCollectionExtensions
                 "lab",
                 true));
 
+        // KT2: upis evaluator ključa (Gajić, kartica 5). Do tada politika odbija sve.
+        services.AddAccessAction<EvaluatorKeyWritePolicy>(
+            new ActionDefinition(
+                LabVisibilityActions.KeyWrite,
+                ActionScope.Course,
+                "lab",
+                true));
+
         return services;
     }
-}
+}

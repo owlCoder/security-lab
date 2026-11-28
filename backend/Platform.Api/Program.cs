@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Team21.Acc.Api;
 using Platform.Api.Security.RevisionAuthorization;
 using Platform.Api.Security.AccessAudit;
@@ -6,19 +7,25 @@ using Platform.Api.Security.IdentityAccess;
 using Platform.Api.Modules.Kt1;
 using Platform.Api.Modules.Competencies;
 using Platform.Api.Modules.Administration.Api;
+
+using Platform.Api.Modules.Access.Api;
 using Platform.Api.Modules.RevisionReviews;
+using Platform.Api.Modules.SessionSecurity;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
+
 using Platform.LaboratoryPersistence.Composition;
 using Platform.Api.Modules.Laboratories;
-
+using Platform.Api.Modules.LabLocalization;
+using Platform.Api.Modules.Identity.Federation;
 using Platform.Access.Application.Options;
+using Platform.Access.AspNet;
 using Platform.Access.Composition;
 using Platform.Access.Contracts;
 using Platform.Access.Domain.Constants;
 using Platform.Access.Domain.Enums;
 using Platform.Access.Domain.Models;
-using Platform.Access.AspNet;
+using Platform.Api.Authorization;
 using Platform.Api.Development;
 using Platform.Api.Endpoints;
 using Platform.Api.Endpoints.Identity;
@@ -30,11 +37,13 @@ using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Identity.Composition;
 using Platform.Competencies.Composition;
 using Platform.Authoring.Application;
 using Platform.Identity;
-using Platform.Identity.Entities;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
@@ -42,11 +51,12 @@ using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.Api.Modules.Membership;
 using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
+using Platform.Prerequisites.Application;
+using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
 
-// Oba modula imaju IAccessDecision, zato koristimo alias.
-using IdentityAccessDecision = Platform.Api.Interfaces.Identity.IAccessDecision;
-using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 using LabVisibilityCourseRole = Platform.LabVisibility.Contracts.CourseRole;
+using PlatformAccessDecision = Platform.Access.Contracts.IAccessDecision;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddTeam21Acc();
@@ -66,6 +76,7 @@ if (builder.Environment.IsDevelopment())
 // ACC-02: clanstvo u kursu (Platform.Membership); radnja i politika se prijavljuju pre AddAccessControl() (strogi ACC-05).
 builder.Services.AddMembership(builder.Environment);
 
+var attemptsEnabled = builder.Services.AddRuntimeAttempts(builder.Configuration);
 builder.Services.AddCentralAccessAudit();
 builder.Services.AddRevisionAuthorization();
 builder.Services.AddRevisionAccessPolicies();
@@ -85,6 +96,8 @@ builder.Services.AddIdentityModule();
 
 // IDN-02: prijava, odjava i sesije
 builder.Services.AddIdentityModule(builder.Configuration);
+// IDN-06: trajan i sertifikatom šifrovan key ring za TOTP tajne; van Development-a start pada bez njega.
+builder.Services.AddMfaKeyRing(builder.Configuration, builder.Environment);
 
 if (builder.Environment.IsDevelopment())
 {
@@ -111,11 +124,23 @@ builder.Services.AddAuthoring();
 builder.Services.AddLabVisibility();
 builder.Services.AddIdentityRateLimiting(builder.Configuration);
 builder.Services.AddControllers();
+// US-15 / SEC-03: antiforgery makes and checks the CSRF token pair. AuthController writes the cookie itself with
+// Secure always on (CsrfToken.Options), so SameAsRequest only keeps antiforgery from refusing plain HTTP in dev and tests.
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = CsrfToken.HeaderName;
+    options.Cookie.Name = CsrfToken.CookieName;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    // The token is read only from X-CSRF-TOKEN. The check runs before the ADM-08 body size limit and every other
+    // module limit, so antiforgery must never read (buffer) a form body to look for the token there.
+    options.SuppressReadingTokenFromFormBody = true;
+});
+builder.Services.AddSingleton<IAntiforgeryAdditionalDataProvider, CsrfSessionBinding>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddLaboratoriesPersistence(
-    builder.Configuration.GetConnectionString("Laboratories"));
+builder.Configuration.GetConnectionString("Laboratories"));
 builder.Services.AddRevisionReviews();
 builder.Services.AddRevisionSecurityPersistence(builder.Configuration.GetConnectionString("Laboratories"));
 
@@ -146,18 +171,24 @@ builder.Services.AddLabVisibilityAccess();
 // IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
 builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
-builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
-builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
+builder.Services.AddSingleton<IAccountAdministrationDecision, AdminOnlyAccountAdministrationDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
+// IDN-05: administrator unlock (account.unlock, registered by REV-05), same store and transaction as IDN-03.
+builder.Services.AddScoped<UnlockAccount>();
 builder.Services.AddScoped<ILoginService, LoginService>();
+// IDN-08: login via an external OIDC identity
+builder.Services.AddScoped<IFederatedLoginService, FederatedLoginService>();
+var oidcEnabled = builder.Services.AddOidcFederation(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IMfaService, MfaService>();
 builder.Services.AddScoped<IdentityAuditProducer>();
 
 // IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
 builder.Services.AddIdentityAuthenticationAccess();
 builder.Services.AddIdentitySessionAccess();
+builder.Services.AddSessionSecurity();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -165,23 +196,39 @@ builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, Se
 builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
-builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddLaboratories(builder.Environment, builder.Configuration);
 builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))
 {
     builder.Services.AddLaboratoryPersistence(builder.Configuration);
     builder.Services.AddScoped<ILaboratoryRepository, PostgresLaboratoryRepository>();
+    builder.Services.AddScoped<IPrerequisiteRepository, LabPrerequisiteStoreAdapter>();
 }
 else if (builder.Environment.IsDevelopment())
 {
     builder.Services.AddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
+    builder.Services.AddSingleton<IPrerequisiteRepository, InMemoryPrerequisiteRepository>();
 }
 else
 {
     // Keep unrelated API routes available, but never silently write laboratories to memory.
     builder.Services.AddSingleton<ILaboratoryRepository, UnavailableLaboratoryRepository>();
+    builder.Services.AddSingleton<IPrerequisiteRepository, UnavailablePrerequisiteRepository>();
 }
+
+// LAB-06: prerequisite access service
+builder.Services.AddScoped<
+    IPrerequisiteAccessService,
+    PrerequisiteAccessService>();
+
+// LAB-06: fail-closed provider until real completion data is integrated
+builder.Services.AddSingleton<
+    ICompletedLaboratories,
+    NoCompletedLaboratories>();
+
+// LAB-07: lokalizacija laboratorija
+builder.Services.AddLabLocalizationModule();
 
 // Kreiranje aplikacije
 var administrationEnabled = builder.Services.AddPersistentCourseAdministration(builder.Configuration);
@@ -197,22 +244,51 @@ builder.Services.AddSingleton(new AccessConfigurationOptions
     }
 });
 builder.Services.AddPrg04CompetencyOperations();
+
+// LAB-06: registracija akcija i politike autorizacije
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.add",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.remove",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
+builder.Services.AddAccessAction<PrerequisiteModificationPolicy>(
+    new ActionDefinition(
+        "prerequisites.read",
+        ActionScope.Course,
+        "laboratory",
+        true));
+
 builder.Services.AddAccessControl();
 builder.Services.AddRevisionRequestIdentity();
 if (kt1Enabled) builder.Services.AddKt1RequestIdentity();
+if (attemptsEnabled) builder.Services.AddAttemptResourceResolution();
 
 //AUT-06: register the resolver that identifies the caller from the validated session
 builder.Services.AddKeyedScoped<IRequestSubjectResolver, AuthoringSessionSubjectResolver>("AuthoringSession");
 AuthoringAccessSubjectProvider.Register(builder.Services);
-if (administrationEnabled) builder.Services.AddAdministrationRequestIdentity();
+if (administrationEnabled || attemptsEnabled) builder.Services.AddAdministrationRequestIdentity();
 builder.Services.AddPrg04RequestIdentity();
 
 var app = builder.Build();
+
 app.UseRouting();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
 app.UseCorrelationContext();
-if (administrationEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
+// US-15 / SEC-03: right after routing and correlation, before session checks, Access, rate limiting, audit and
+// authentication, so a refused request has no side effect (US-14: the session is not extended). The token is bound
+// to the session cookie (CsrfSessionBinding), not to HttpContext.User.
+app.UseMiddleware<CsrfProtectionMiddleware>();
+if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationResponseMiddleware>();
 // Preserve KT1's non-enumerating public denial contract using the same central decider.
 if (kt1Enabled) app.UseMiddleware<Kt1AccessContractMiddleware>();
 // Identity and catalog routes retain their invalid-session response before ACC-05 checks access.
@@ -223,11 +299,16 @@ app.UseWhen(
 app.UseWhen(AuthoringAccessSubjectProvider.AppliesTo, authoring => authoring.UseMiddleware<SessionCheckMiddleware>());
 
 app.UseAccessControl();
-if (administrationEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
+if (administrationEnabled || attemptsEnabled) app.UseMiddleware<AdministrationBodyLimitMiddleware>();
 
 
 // Identity Rate Limiting
 app.UseIdentityRateLimiting();
+
+// IDN-08: the OIDC handler processes /api/auth/oidc/callback here. KT1 adds the same middleware itself.
+if (oidcEnabled && !kt1Enabled)
+    app.UseAuthentication();
+
 if (kt1Enabled)
 {
     app.UseAuthentication();
@@ -300,7 +381,9 @@ app.UseWhen(
 
 app.MapControllers();
 if (administrationEnabled) app.MapPersistentCourseAdministration();
+if (attemptsEnabled) app.MapRuntimeAttempts();
 app.MapLaboratories();
+app.MapLabLocalizationModule();
 app.MapCompetencyEndpoints();
 app.MapCatalog(app.Configuration);
 app.MapTeam21Acc();
