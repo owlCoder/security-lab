@@ -6,13 +6,16 @@ using Platform.Access.Domain.Models;
 using Platform.Api.Modules.Laboratories.Api;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
+using Platform.LabMetadata;
+using Platform.LaboratoryPersistence.Application;
 
 namespace Platform.Api.Modules.Laboratories;
 
 public static class LaboratoriesModule
 {
    // Registracija servisa modula
-    public static IServiceCollection AddLaboratories(this IServiceCollection services, IHostEnvironment environment)
+    public static IServiceCollection AddLaboratories(this IServiceCollection services, IHostEnvironment environment,
+        IConfiguration? configuration = null)
     {
         services.AddHttpContextAccessor();
 
@@ -23,6 +26,26 @@ public static class LaboratoriesModule
         services.TryAddSingleton<ILaboratoryRepository, InMemoryLaboratoryRepository>();
         services.AddScoped<LaboratoryService>();
         services.AddScoped<LaboratorySearchService>();
+
+        if (environment.IsDevelopment())
+        {
+            // Metadata routes use the central course-role policy. Bridge only the local demo
+            // membership/resource sources; production keeps its configured central providers.
+            services.TryAddSingleton<Platform.Access.Contracts.IMembershipReader, DevelopmentLaboratoryMembershipReader>();
+            services.TryAddSingleton<Platform.Access.Contracts.IResourceDescriptorResolver, DevelopmentLaboratoryResourceDescriptorResolver>();
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuration?.GetConnectionString("Authoring")))
+        {
+            services.TryAddScoped<ILaboratoryMetadataRepository, PersistentMetadataRepository>();
+        }
+        else if (environment.IsDevelopment())
+        {
+            services.TryAddSingleton<
+                ILaboratoryMetadataRepository,
+                InMemoryLaboratoryMetadataRepository>();
+            services.TryAddScoped<ILaboratoryMetadataStore, MetadataCatalogStore>();
+        }
 
         if (environment.IsDevelopment())
         {
@@ -62,7 +85,9 @@ public static class LaboratoriesModule
         }
 
         services.AddScoped<IAccessSubjectProvider>(sp =>
-            new LaboratorySubjectProvider(CreateInnerSubjectProvider(sp, original)));
+            new LaboratorySubjectProvider(
+                CreateInnerSubjectProvider(sp, original),
+                sp.GetRequiredService<IHostEnvironment>()));
     }
 
     private static IAccessSubjectProvider CreateInnerSubjectProvider(IServiceProvider sp, ServiceDescriptor? original) =>
@@ -77,6 +102,11 @@ public static class LaboratoriesModule
     public static IEndpointRouteBuilder MapLaboratories(this IEndpointRouteBuilder app)
     {
         app.MapLaboratoriesEndpoints();
+
+        app.MapLaboratoryMetadataEndpoints();
+
         return app;
     }
+
+
 }

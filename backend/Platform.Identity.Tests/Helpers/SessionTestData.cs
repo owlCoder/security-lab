@@ -11,6 +11,21 @@ namespace Platform.Identity.Tests.Helpers;
 
 public static class SessionTestData
 {
+    public static async Task<List<Session>> GetForUserAsync(
+        CustomWebApplicationFactory<Program> factory, Guid userId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        return await db.Sessions.AsNoTracking().Where(session => session.UserId == userId).ToListAsync();
+    }
+
+    public static async Task<int> CountAsync(CustomWebApplicationFactory<Program> factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        return await db.Sessions.CountAsync();
+    }
+
     public static async Task<(string RawToken, Session Session)> CreateAsync(
         CustomWebApplicationFactory<Program> factory,
         Guid userId,
