@@ -9,10 +9,13 @@ import {
 import type { CreateDraftData, LabType } from './DraftTypes'
 
 type Props = {
-  onCreate: (draft: CreateDraftData) => void
+  /** Vraća true kada je nacrt kreiran. Polja forme se brišu tek tada. */
+  onCreate: (draft: CreateDraftData) => Promise<boolean>
+  submitting?: boolean
+  error?: string
 }
 
-export default function CreateDraftForm({ onCreate }: Props) {
+export default function CreateDraftForm({ onCreate, submitting = false, error = '' }: Props) {
   const [title, setTitle] = useState('')
   const [goal, setGoal] = useState('')
   const [type, setType] = useState<LabType>(DEFAULT_LAB_TYPE)
@@ -24,8 +27,9 @@ export default function CreateDraftForm({ onCreate }: Props) {
     setType(DEFAULT_LAB_TYPE)
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (submitting) return
 
     const cleanTitle = title.trim()
 
@@ -36,13 +40,13 @@ export default function CreateDraftForm({ onCreate }: Props) {
 
     setTitleError(false)
 
-    onCreate({
+    const created = await onCreate({
       title: cleanTitle,
       goal: goal.trim(),
       type,
     })
 
-    resetForm()
+    if (created) resetForm()
   }
 
   const titleDescribedBy = titleError
@@ -113,8 +117,14 @@ export default function CreateDraftForm({ onCreate }: Props) {
         </select>
       </div>
 
-      <button type="submit">
-        Kreiraj nacrt
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
+
+      <button type="submit" disabled={submitting} aria-busy={submitting}>
+        {submitting ? 'Kreiranje…' : 'Kreiraj nacrt'}
       </button>
     </form>
   )

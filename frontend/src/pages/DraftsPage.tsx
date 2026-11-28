@@ -2,33 +2,33 @@ import { useState } from 'react'
 import '../components/drafts/drafts.css'
 import CreateDraftForm from '../components/drafts/CreateDraftForm'
 import DraftList from '../components/drafts/DraftList'
+import { useDrafts } from '../components/drafts/useDrafts'
 import { labTypeLabel } from '../components/drafts/DraftTypes'
-import type { CreateDraftData, Draft } from '../components/drafts/DraftTypes'
+import type { CreateDraftData } from '../components/drafts/DraftTypes'
+import type { DraftsGateway } from '../api/drafts'
 
-// DEMO: nacrti postoje samo u stanju stranice, ništa se ne šalje serveru.
-// ID i status zapravo dodeljuje server, pa ova funkcija nestaje kad se stranica poveže.
-function createLocalDraft(data: CreateDraftData): Draft {
-  return {
-    ...data,
-    id: crypto.randomUUID(),
-    status: 'Draft',
-  }
+type Props = {
+  gateway: DraftsGateway
 }
 
-export default function DraftsPage() {
-  const [drafts, setDrafts] = useState<Draft[]>([])
+export default function DraftsPage({ gateway }: Props) {
+  const {
+    drafts, loadState, loadError, creating, createError, create, reload, clearCreateError,
+  } = useDrafts(gateway)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   // Izvodi se iz liste, ne čuva se kopija koja može da zastari.
   const selectedDraft = drafts.find(draft => draft.id === selectedId) ?? null
 
-  function handleCreate(data: CreateDraftData) {
-    setDrafts(currentDrafts => [...currentDrafts, createLocalDraft(data)])
-    setShowCreateForm(false)
+  async function handleCreate(data: CreateDraftData): Promise<boolean> {
+    const created = await create(data)
+    if (created) setShowCreateForm(false)
+    return created
   }
 
   function handleToggleForm() {
+    clearCreateError()
     setShowCreateForm(current => !current)
     setSelectedId(null)
   }
@@ -46,13 +46,19 @@ export default function DraftsPage() {
         </button>
       </div>
 
-      <p className="drafts-demo" role="status">
-        <strong>Demo režim:</strong> nacrti se ne čuvaju na serveru i nestaju
-        nakon osvežavanja stranice.
-      </p>
+      {!gateway.persistsOnServer && (
+        <p className="drafts-demo" role="status">
+          <strong>Demo režim:</strong> nacrti se ne čuvaju na serveru i nestaju
+          nakon osvežavanja stranice.
+        </p>
+      )}
 
       {showCreateForm && (
-        <CreateDraftForm onCreate={handleCreate} />
+        <CreateDraftForm
+          onCreate={handleCreate}
+          submitting={creating}
+          error={createError}
+        />
       )}
 
       {selectedDraft && (
@@ -67,10 +73,23 @@ export default function DraftsPage() {
         </section>
       )}
 
-      <DraftList
-        drafts={drafts}
-        onOpen={setSelectedId}
-      />
+      {loadState === 'loading' && (
+        <p aria-live="polite">Učitavanje nacrta…</p>
+      )}
+
+      {loadState === 'error' && (
+        <div>
+          <p className="error-text" role="alert">{loadError}</p>
+          <button type="button" onClick={reload}>Pokušaj ponovo</button>
+        </div>
+      )}
+
+      {loadState === 'ready' && (
+        <DraftList
+          drafts={drafts}
+          onOpen={setSelectedId}
+        />
+      )}
     </section>
   )
 }
