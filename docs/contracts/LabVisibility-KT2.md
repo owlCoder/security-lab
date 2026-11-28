@@ -3,10 +3,10 @@
 | | |
 |-|-|
 | **Vlasnik** | Tim 6, `Platform.LabVisibility` (AUT-04, AUT-07) |
-| **Verzija** | 0.1 (DRAFT dok ga AUT-01/AUT-06 i REV timovi ne potvrde u PR-u) |
+| **Verzija** | 0.2 (deo 2 potvrdili AUT-01/AUT-06; za REV predlog dok ne potvrdi) |
 | **Zahtevi** | AUT-04, AUT-07, LAB-04, ACC-05, AUD-03 |
 
-Do potvrde susednog tima u pregledanom PR-u, svako ime i pravilo ispod je predlog.
+Deo 2 su potvrdili AUT-01/AUT-06 (tabela „Potrošači i potvrda“). Dok REV ne potvrdi, `ILabPublicationSource` i polja `LabPublication` su za REV predlog.
 
 ## 1. Upis evaluator ključa
 
@@ -88,6 +88,27 @@ public interface ILabPublicationSource
 | Objava bez potpunog ključa | odbija se kod nas (`ApplyLabPublication`, kartica 7) i ide u audit |
 | Arhivirana laboratorija | student dobija 404; nastavnik i dalje ima pregled |
 
+### Primena stanja kod nas (AUT-07, kartica 7)
+
+`ApplyLabPublication.ExecuteAsync(labId, actorId, correlationId, ct)` pita `ILabPublicationSource` za stanje i primenjuje ga na naš javni sadržaj. Od tog stanja zavisi da li student vidi laboratoriju.
+
+| Kod vlasnika objave | Kod nas | Ishod | Audit |
+|-|-|-|-|
+| `Published`, a mi imamo nacrt i ključ pokriva tačno sve zadatke | `Published` | `Published` | `lab.publication.publish`, uspeh |
+| `Published`, a ključ nedostaje ili ne pokriva neki zadatak | ostaje `Draft` | `Rejected`, `key_incomplete` | `lab.publication.publish`, `key_incomplete` |
+| `Archived`, a mi imamo objavljenu | `Archived` | `Archived` | `lab.publication.archive`, uspeh |
+| svaki drugi prelaz (npr. `Archived` → `Published`) | bez promene | `Rejected`, `invalid_transition` | da |
+| stanje se promenilo između čitanja i upisa | bez promene | `Rejected`, `state_changed` | da |
+| isto stanje kao kod nas | bez promene | `Unchanged` | ne |
+| `null` ili nemamo sadržaj te laboratorije | bez promene | `NotFound` | ne |
+
+| Interni ugovor | Šta radi |
+|-|-|
+| `IEvaluatorKeyCoverage.GetCoveredTaskIdsAsync(labId)` | vraća samo ID-jeve zadataka koji imaju odgovor; odgovori se ne čitaju |
+| `ILabPublicationStateStore.TryChangeStateAsync(labId, expected, next)` | menja stanje samo ako je trenutno `expected` (`UPDATE … WHERE state = expected`); vraća `false` ako nije |
+
+Rezultat i audit nose samo ishod i kod razloga, nikad sadržaj ni odgovore. Testovi: `ApplyLabPublicationTests`, `LabPublicationFlowHttpTests`.
+
 ### Stub dok adapter ne postoji
 
 `StubLabPublicationSource` (KT2, stavka 5):
@@ -104,6 +125,6 @@ public interface ILabPublicationSource
 
 | Tim | Šta treba da potvrdi | Stanje |
 |-|-|-|
-| AUT-01/AUT-06 (`Platform.Authoring`) | ključ se ne čuva u nacrtu; ID nacrta = `labId` | čeka |
-| REV | `ILabPublicationSource` ili događaj o objavi sa istim poljima | čeka |
+| AUT-01/AUT-06 (`Platform.Authoring`) | ključ se ne čuva u nacrtu; ID nacrta = `labId` | potvrđeno (tim 11, komentar na PR #225): ključ se ne čuva u nacrtu, `labId` je stabilan; adapter do 30.11 |
+| REV | `ILabPublicationSource` ili događaj o objavi sa istim poljima | čeka odgovor |
 | Tim 6, frontend (Ferjuc) | JSON oblik `PUT /evaluator-key` | dogovoreno |
