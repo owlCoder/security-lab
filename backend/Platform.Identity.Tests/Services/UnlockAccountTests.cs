@@ -235,7 +235,7 @@ public class UnlockAccountTests
     [Test]
     public async Task SessionWithoutFullAuthentication_IsUnauthenticated()
     {
-        var (sut, store, _) = Build(new CallerIdentity(false, AdminId, AuthLevel.Active, new Guid()));
+        var (sut, store, _) = Build(new CallerIdentity(false, AdminId, AuthLevel.MfaPending, new Guid()));
 
         var outcome = await sut.ExecuteAsync(StudentId);
 
