@@ -19,8 +19,8 @@
   - Attempts never reference a draft; they are bound to an immutable published revision (REV-03), so draft edits cannot change a started attempt.
   - Publication (REV-01/REV-02) will read draft content through this module. Not implemented here.
 - **Implementation status:**
-  - Implemented and tested: `LabContent`, `LabDraft`, `LabTemplate`, `DraftService`, `TemplateCatalogService`, built-in templates, optimistic concurrency, Access policy and registration, `GET` template list and `POST` copy-template endpoints, in-memory draft store.
-  - Planned, not implemented: PostgreSQL repository, endpoints to read and edit a draft with an owner check (AUT-01 backend), audit events, course-role backed author check, course binding (LAB-03), structured steps (AUT-02), parameter validation (AUT-03).
+  - Implemented and tested: `LabContent`, `LabDraft`, `LabTemplate`, `DraftService`, `TemplateCatalogService`, built-in templates, optimistic concurrency, Access policy and registration, `GET` template list and `POST` copy-template endpoints, PostgreSQL draft repository with migration (KT2; in-memory store remains the fallback when no connection string is configured).
+  - Planned, not implemented: endpoints to read and edit a draft with an owner check (AUT-01 backend), audit events, course-role backed author check, course binding (LAB-03), structured steps (AUT-02), parameter validation (AUT-03).
 
 ## Endpoints
 
@@ -48,11 +48,12 @@ flowchart LR
   SVC --> TR[[ITemplateRepository]]
   TR --> BT[Built-in templates - read-only]
   SVC --> DR[[IDraftRepository]]
-  DR --> MEM[InMemoryDraftStore - temporary]
-  MEM -. planned .-> DB[(PostgreSQL)]
+  DR -->|ConnectionStrings:Authoring set| PG[PostgresDraftRepository]
+  PG --> DB[(PostgreSQL schema authoring_drafts)]
+  DR -.->|no connection string: dev and tests| MEM[InMemoryDraftStore]
 ```
 
-Layers inside `backend/Platform.Authoring`: `Domain` (rules, no dependencies), `Application` (use cases, ports, access policy), `Infrastructure` (adapters: built-in templates, in-memory store, configuration-backed author directory), `Composition` (`AddAuthoring()` and `RegisterAuthoringAccess()`, called from `Program.cs`). The HTTP layer lives in `backend/Platform.Api/Endpoints/AuthoringEndpoints.cs`, next to the identity endpoints.
+Layers inside `backend/Platform.Authoring`: `Domain` (rules, no dependencies), `Application` (use cases, ports, access policy), `Infrastructure` (adapters: built-in templates, in-memory store, `Persistence/` with the PostgreSQL repository and migrations, configuration-backed author directory), `Composition` (`AddAuthoring()`, `AddAuthoringPersistence()` and `RegisterAuthoringAccess()`, called from `Program.cs`). The HTTP layer lives in `backend/Platform.Api/Endpoints/AuthoringEndpoints.cs`, next to the identity endpoints.
 
 ## Data flow diagram
 
@@ -64,7 +65,7 @@ flowchart LR
   P2 -->|deny: 401 or 403| API
   P2 -->|allow| P3((Use case: check again, validate, apply))
   P3 -->|read| TS[(Built-in templates, read-only)]
-  P3 -->|add| DS[(Drafts, in memory)]
+  P3 -->|add| DS[(Drafts, PostgreSQL authoring_drafts)]
   P3 -->|result or error code| API
   API -->|JSON with correlation id| T
   DS -. "published later as immutable revision (REV-01)" .-> RV[(Revisions - other component)]
@@ -72,7 +73,15 @@ flowchart LR
 
 Trust boundary: everything left of the API is untrusted. The caller identity is resolved on the server, the platform access decision runs before any data is read or changed, and the use case checks authorization again (defence in depth).
 
-**Implemented vs planned:** the whole flow above is implemented and tested with the real Access module; the draft store is in memory and temporary. The PostgreSQL store, the link to revisions and audit events are planned.
+**Implemented vs planned:** the whole flow above is implemented and tested with the real Access module; drafts are stored in PostgreSQL when `ConnectionStrings:Authoring` is set (in memory otherwise). The link to revisions and audit events are planned.
+
+## Persistence (KT2)
+
+- **Where:** table `authoring_drafts.drafts` (id, owner, source template, status, title, goal, lab type, version). The schema is separate from `authoring`, which belongs to Platform.LaboratoryPersistence together with its own `__EFMigrationsHistory` table. Templates are built in and are not stored.
+- **Concurrency:** a save is one conditional `UPDATE ... WHERE id AND version = previous`. A stale or simultaneous second edit changes no row and gives `CONFLICT`; a missing draft gives `NOT_FOUND`. A duplicate id gives `CONFLICT` and never overwrites.
+- **Integrity:** rows are rebuilt through the domain factories, so a corrupted row cannot produce an invalid draft. The row holds no credentials, tokens or student answers.
+- **Migration:** `dotnet ef migrations add <Name> --project backend/Platform.Authoring --output-dir Infrastructure/Persistence/Migrations` with `AUTHORING_MIGRATION_CONNECTION_STRING` set (not committed). In Development the API applies pending migrations at start-up; elsewhere migration is an explicit operation (`AuthoringPersistenceExtensions.MigrateAuthoringDatabaseAsync`).
+- **Configuration:** `ConnectionStrings:Authoring` (user secrets or environment variable `ConnectionStrings__Authoring`, never in Git).
 
 ## Security requirements
 
@@ -119,7 +128,13 @@ Stop the API (`Ctrl+C`) and restart it with `"22222222-2222-2222-2222-2222222222
 
 - **Changed files / commit / pull request:** `backend/Platform.Authoring`, `backend/Platform.Authoring.Tests`, `backend/Platform.Api/Endpoints/AuthoringEndpoints.cs`, three wiring lines in `backend/Platform.Api/Program.cs`, the project reference and the development settings; this document.
 - **Run instructions:** `dotnet test backend/Platform.Authoring.Tests/Platform.Authoring.Tests.csproj --configuration Release` (or `dotnet test backend/SecurityLab.slnx`).
-- **Tests and results:** 84 NUnit test cases (content validation, draft rules, template copy, use cases, author directory, policy, access check, in-memory store, DI validation, and the endpoint boundary with the real Access module). Record the actual run result and date here after running locally.
+- **Tests and results:** 98 NUnit test cases: 89 without a database (content validation, draft rules, template copy, use cases, author directory, policy, access check, in-memory store, DI validation, and the endpoint boundary with the real Access module) and 9 storage tests in `Persistence/PostgresDraftRepositoryTests.cs` that run only when `AUTHORING_TEST_CONNECTION_STRING` points to a PostgreSQL (otherwise skipped). Run on 2026-11-26 with PostgreSQL: total 98, failed 0, succeeded 98, skipped 0.
+- **Running the storage tests:**
+  ```powershell
+  docker run -d --name authoring-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=securitylab -p 5433:5432 postgres:17
+  $env:AUTHORING_TEST_CONNECTION_STRING = "Host=localhost;Port=5433;Database=securitylab;Username=postgres;Password=dev"
+  dotnet test backend/Platform.Authoring.Tests/Platform.Authoring.Tests.csproj --configuration Release
+  ```
 - **Dependencies on other components:**
   - Platform.Access (decision, catalog, policy registry): in use.
   - Identity (`IRequestSubjectResolver`, real sessions): development subject only; a real login replaces it without changing this component.
@@ -127,4 +142,4 @@ Stop the API (`Ctrl+C`) and restart it with `"22222222-2222-2222-2222-2222222222
   - Audit: no authoring events yet.
   - AUT-01 backend: draft read/edit endpoints and the owner policy.
   - Revisions (REV): consumer of draft content.
-- **Next steps:** PostgreSQL repository and migration; draft read/edit endpoints with an ownership policy (AUT-01); audit events; course-role author check; AUT-02/AUT-03 content (steps, parameters); hand-off of draft content to REV-01/REV-02.
+- **Next steps:** draft read/edit endpoints with an ownership policy (AUT-01); audit events; course-role author check; AUT-02/AUT-03 content (steps, parameters); hand-off of draft content to REV-01/REV-02.
