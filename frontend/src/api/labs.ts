@@ -131,17 +131,17 @@ export async function toFailure(res: Response): Promise<ApiFailure> {
 }
 
 /**
- * LAB-01 kreiranje laboratorije. Šalje se samo naslov: ID dodeljuje server,
- * pa ga klijent nikad ne šalje.
+ * LAB-01 kreiranje laboratorije. Naslov i izabrani kurs idu serveru; ID dodeljuje
+ * server, pa ga klijent nikad ne šalje.
  */
-export async function createLab(title: string, user: TestUser): Promise<CreateLabOutcome> {
+export async function createLab(title: string, courseId: string, user: TestUser): Promise<CreateLabOutcome> {
   let res: Response
   try {
     res = await csrfFetch(`${LABS_BASE_PATH}/`, {
       method: 'POST',
       headers: headersFor(user, true),
       credentials: 'same-origin',
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, courseId }),
     })
   } catch {
     return { kind: 'error' }

@@ -10,6 +10,7 @@ using Platform.Api.Modules.Administration.Api;
 
 using Platform.Api.Modules.Access.Api;
 using Platform.Api.Modules.RevisionReviews;
+using Platform.Api.Modules.SessionSecurity;
 using Platform.Api.Modules.Laboratories.Application;
 using Platform.Api.Modules.Laboratories.Infrastructure;
 
@@ -42,8 +43,9 @@ using Platform.Authoring.Composition;
 using Platform.Competencies.Composition;
 using Platform.Authoring.Application;
 using Platform.Identity;
-using Platform.Identity.Entities;
+using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
+using Platform.Identity.Persistence.Mfa;
 using Platform.Identity.Services;
 using Platform.LabVisibility.Composition;
 using Platform.LabVisibility.Contracts;
@@ -167,7 +169,6 @@ builder.Services.AddLabVisibilityAccess();
 // IDN-03: status naloga se pise u identity.accounts (isti izvor koji cita prijava), u jednoj transakciji sa opozivom sesija i Audit zapisom.
 builder.Services.AddScoped<IAccountStatusStore, EfAccountStatusStore>();
 builder.Services.AddScoped<ISessionManager, SessionManager>();
-builder.Services.AddSingleton<IAuditWriter, LoggerAuditWriter>();
 builder.Services.AddSingleton<IAdminDirectory, ConfigAdminDirectory>();
 builder.Services.AddSingleton<IdentityAccessDecision, AdminOnlyAccessDecision>();
 builder.Services.AddScoped<ChangeAccountStatus>();
@@ -179,11 +180,13 @@ builder.Services.AddScoped<IFederatedLoginService, FederatedLoginService>();
 var oidcEnabled = builder.Services.AddOidcFederation(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IMfaService, MfaService>();
 builder.Services.AddScoped<IdentityAuditProducer>();
 
 // IDN-03: politika i subjekat iz sesije za centralni ACC-05 middleware (pre AddAccessControl).
 builder.Services.AddIdentityAuthenticationAccess();
 builder.Services.AddIdentitySessionAccess();
+builder.Services.AddSessionSecurity();
 
 builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, SessionIdentityContext>();
 
@@ -191,7 +194,7 @@ builder.Services.AddScoped<Platform.Api.Interfaces.Identity.IIdentityContext, Se
 builder.Services.AddScoped<LabCaller>();
 
 // Laboratories modul
-builder.Services.AddLaboratories(builder.Environment);
+builder.Services.AddLaboratories(builder.Environment, builder.Configuration);
 builder.Services.AddCatalog(builder.Configuration);
 // Use the official LAB-01 repository contract. Never silently persist to memory in production.
 if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Authoring")))

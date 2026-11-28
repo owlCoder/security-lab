@@ -16,8 +16,10 @@ import RevisionListPage from './pages/RevisionListPage'
 import DraftsPage from './pages/DraftsPage'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
+import TeacherMetadataPage from './pages/TeacherMetadataPage'
 import CompetenciesPage from './pages/CompetenciesPage'
 import SessionsPage from './pages/SessionsPage'
+import LoginHistoryPage from './pages/LoginHistoryPage'
 
 function LoginRoute() {
   const navigate = useNavigate()
@@ -96,19 +98,22 @@ export default function App() {
         <Route index element={<>
           <LandingPage />
           <HealthStatus />
-          
+
           <CourseworkKt1 />
           <LabsSection />
           <CoursesPage />
           <LabVisibilitySection />
-          
           <AuthoringSection />
+
         </>} />
+        <Route path="teacher/labs/new" element={<TeacherMetadataPage />} />
+        <Route path="teacher/labs/:labId/edit" element={<TeacherMetadataPage />} />
         <Route path="login" element={<LoginRoute />} />
         <Route element={<ProtectedRoute />}>
           <Route path="laboratories/:laboratoryId/competencies" element={<CompetenciesPage />} />
           <Route path="account/sessions" element={<SessionsPage />} />
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          <Route path="login-history" element={<LoginHistoryPage />} />
           {/*
             AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).
             Ruta postoji samo u razvojnom režimu, ne i u produkcionom buildu.

@@ -2,7 +2,7 @@
 
 **Team:** 1
 **Student:** Denis Đuriš / PR 14/2023
-**Specification requirements:** IDN-02 (primary), IDN-06, ACC-05, SEC-01, SEC-03, AUD-01, AUD-03. Consumers: IDN-03, IDN-07. Depends on IDN-01 (user entity), IDN-05 (attempt limiting), AUD (`IAuditWriter`) and ADM-02 (migrations).
+**Specification requirements:** IDN-02 (primary), IDN-06, ACC-05, SEC-01, SEC-03, AUD-01, AUD-03. Consumers: IDN-03, IDN-07. Depends on IDN-01 (user entity), IDN-05 (attempt limiting), AUD (Audit module contract, AUD-01) and ADM-02 (migrations).
 
 ## Responsibilities and current status
 
@@ -10,7 +10,7 @@
 - **Logout (IDN-02): implemented.** The API revokes the session identified by the presented cookie and deletes the cookie. Calling logout without a usable session is idempotent.
 - **Session validation (IDN-02): implemented.** Protected endpoints validate the cookie against the session store; revoked, expired, unknown, or missing sessions receive `401`. Last activity is updated on successful validation.
 - **Identity context: implemented.** `IIdentityContext.Current` is populated from the session validated by middleware. A `MfaPending` identity is not authenticated, but middleware itself does not restrict it to MFA endpoints.
-- **MFA (IDN-06): planned, not implemented.** Login currently creates every successful session as `Active`. MFA enrollment, verification, policy, TOTP secret storage, and MFA-specific endpoints do not exist.
+- **MFA (IDN-06): enrollment and verification implemented (US-17, US-18), mandatory MFA policy not (US-19).** A user with an `Active` session can enroll TOTP (`POST /api/auth/mfa/enroll`, `.../enroll/confirm`). Login of an account with MFA enabled creates a `MfaPending` session, which `POST /api/auth/mfa/verify` replaces with a new `Active` session (new token, IDN-11) after a valid code. Replay protection and the MFA lockout are enforced with conditional `UPDATE`s. Details: [IDN-02_TOTP_MFA.md](IDN-02_TOTP_MFA.md).
 
 ### Contracts and integrations
 
@@ -19,8 +19,9 @@
 | `IIdentityContext` | we provide | Implemented by `SessionIdentityContext`; see [contract](../../contracts/IIdentityContext.md). |
 | `ISessionManager` | we provide | Database-backed validation, revocation, and listing; see [contract](../../contracts/ISessionManagement.md). |
 | `ISessionCreator` | internal dependency | Implemented by `StoreSessionCreator`; creates sessions through `ISessionStore`. |
-| `IAuditWriter` | we use, owned by AUD | `LoggerAuditWriter` writes structured application logs. Login and logout record events; no secrets are included. |
-| Account status | we use, owned by IDN-03 | `LoginService` denies non-active accounts. IDN-03 requests revocation on blocked/archived status, but currently does not await the asynchronous revocation call. Its account repository remains in-memory. |
+| Audit (`ITrustedAuditWriter`, `ITransactionalAuditWriter`) | we use, owned by AUD | `IdentityAuditProducer` maps login, logout and MFA outcomes to the Audit catalog (`auth.login`, `auth.logout`, `auth.mfa.*`) in `audit.audit_events`. MFA enabled and MFA verified are written in the identity transaction: no record, no commit. No secrets are included. |
+| Account status | we use, owned by IDN-03 | `LoginService` denies non-active accounts. IDN-03 writes the status to `identity.accounts` and revokes all sessions of a blocked or archived account in the same transaction (`EfAccountStatusStore`). |
+| Access control | we use, owned by ACC-05 | Every endpoint declares an action (`RequireAccess`); MFA uses `identity.mfa.enroll`, `identity.mfa.enroll.confirm` and `identity.mfa.verify`. |
 | Attempt limiting | we use, owned by IDN-05 | Per-account lockout runs inside `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md). |
 | User credentials | we use, owned by IDN-01 | `ICredentialVerifier`/`EfCredentialStore` read the account and password hash; passwords are checked with the configured BCrypt hasher. ASP.NET Core Identity is not used. |
 
@@ -34,7 +35,8 @@ Not our responsibility: user registration (IDN-01), account status rules (IDN-03
 | Identity DbContext, schema, and migrations | US-02 | Implemented. |
 | Session entity, token generation, and database store | US-03 | Implemented. Raw tokens are returned only for the cookie; SHA-256 hashes are stored. |
 | Login, logout, and request session check | US-04, US-05, US-06 | Implemented. |
-| MFA enrollment, verification, and policy | US-17, US-18, US-19 | Planned. |
+| MFA enrollment and verification | US-17, US-18 | Implemented (`MfaService`, `identity.mfa_credentials`). |
+| Mandatory MFA policy for selected groups | US-19 | Not implemented. |
 
 ## Implemented component architecture
 
@@ -62,8 +64,18 @@ flowchart LR
   Logout --> DB
 
   Consumers -->|status change revocation| Manager
-  Login --> Audit[LoggerAuditWriter]
+
+  Browser -->|POST mfa/enroll, enroll/confirm, verify| Auth
+  Auth --> Mfa[MfaService]
+  Mfa --> MfaStore[IMfaCredentialsStore / EfMfaCredentialsStore]
+  MfaStore --> DB
+  Mfa --> Store
+  Login -->|mfa_enabled?| MfaStore
+
+  Login --> Audit[IdentityAuditProducer]
   Logout --> Audit
+  Mfa --> Audit
+  Audit --> AuditDB[("PostgreSQL: audit.audit_events")]
 ```
 
 `SessionCookie` centralizes cookie name and options: HttpOnly, Secure, SameSite Strict, path `/`, and the session expiration. `StoreSessionCreator` currently issues sessions with an eight-hour absolute lifetime. `SessionStore` generates a new token and stores its SHA-256 hash with the session. `SessionCheckMiddleware` reads the cookie, bypasses endpoints marked `AllowAnonymous`, and otherwise calls `ISessionManager.ValidateAsync`.
@@ -93,20 +105,21 @@ The cookie token and its hash, passwords, and password hashes are not included i
 - Only a SHA-256 token hash is stored in the database. Session validation checks revocation and expiry on each protected request.
 - `MfaPending` maps to `IsAuthenticated == false` in `IIdentityContext`.
 - Session revocation by public handle checks both owner id and handle; `false` is returned for both unknown and foreign handles.
-- Login and logout audit events do not include passwords, tokens, or hashes.
+- Login, logout and MFA audit records do not include passwords, tokens, hashes, TOTP secrets or codes.
+- MFA (US-17, US-18): TOTP secrets are stored protected with ASP.NET Core Data Protection; a step is accepted once (also under parallel requests); wrong codes are counted atomically and lock the second factor at the threshold; a locked second factor refuses even a correct code with the same `401 invalid_mfa`.
+- A `MfaPending` session gives no Access subject, so ACC-05 denies it everywhere except `POST /api/auth/mfa/verify` (and the public login/logout actions).
 
 ### Not implemented or not enforced by this component yet
 
-- IDN-06 MFA policy, enrollment, verification, TOTP storage, and routing of `MfaPending` sessions to MFA-only endpoints are not implemented. Current successful login sessions are `Active`.
-- `SessionCheckMiddleware` validates the session but does not enforce authentication level or endpoint authorization. Consumers must check `IIdentityContext.Current` and `IsAuthenticated`; it is not a global default-deny authorization policy.
+- IDN-06 mandatory MFA for selected groups (US-19) is not implemented: MFA is opt-in.
+- `SessionCheckMiddleware` validates the session but does not enforce authentication level itself; endpoint authorization is the central ACC-05 middleware (`RequireAccess`).
+- CSRF (SEC-03) is in US-15: every state-changing request needs a token bound to the session, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md).
 - The session lifetime is currently an eight-hour absolute lifetime; configurable lifetime and inactivity expiration are not implemented.
 - `ISessionManager.RevokeAllForUser` accepts `reason` but currently does not use or audit it.
-- The IDN-03 account repository is in-memory; its account status changes are not persisted across application restarts.
-- IDN-03 currently invokes `RevokeAllForUser` without awaiting its task. Revocation may complete after the status-change response, and failures are not observed by that caller.
 
 ## Test evidence and local verification
 
-Identity tests cover login, logout, credential checking, session validation and middleware behavior, and identity mapping, including `MfaPending` being unauthenticated. Tests are in `backend/Platform.Identity.Tests`.
+Identity tests cover login, logout, credential checking, session validation and middleware behavior, identity mapping (including `MfaPending` being unauthenticated) and MFA (unit tests of `MfaService` in `Services/Mfa/`: enroll, confirm, verify, lockout and audit; the PostgreSQL tests in `Integration/Mfa/`: enrollment, verification, lockout, audit, writes racing a block or revocation, and the end-to-end flow). Tests are in `backend/Platform.Identity.Tests`.
 
 From the repository root:
 
@@ -117,8 +130,6 @@ dotnet test backend\Platform.Identity.Tests\Platform.Identity.Tests.csproj
 
 ## Next steps
 
-1. Confirm account-status persistence with IDN-03.
-2. Implement IDN-06 MFA policy, enrollment, verification, and endpoint restrictions before claiming MFA protection.
-3. Add explicit authorization controls where required by ACC-05. CSRF (SEC-03) is done in US-15, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md).
-4. Align session lifetime and inactivity behavior with US-14.
-5. Keep this document and the contract docs synchronized with code and tests.
+1. Implement the mandatory MFA policy for selected groups (US-19).
+2. Align session lifetime and inactivity behavior with US-14.
+3. Keep this document and the contract docs synchronized with code and tests.

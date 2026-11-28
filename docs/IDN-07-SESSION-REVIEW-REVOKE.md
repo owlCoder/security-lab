@@ -13,11 +13,13 @@
   - An authenticated user requests their sessions with `GET /api/auth/sessions`.
   - `SessionCheckMiddleware` validates the session cookie before the controller is executed.
   - `SessionController` obtains the caller identity from `IIdentityContext` and requests sessions for that identity only.
-  - `SessionManager` excludes revoked and expired sessions and filters by the authenticated user's identifier.
+  - `SessionManager` excludes revoked, expired and `MfaPending` sessions and filters by the authenticated user's identifier.
   - The response contains the session handle, creation time, last-activity time, and expiration time.
   - Missing, invalid, or unauthenticated sessions are rejected with `401 Unauthorized`.
   - An authenticated user revokes one of their own sessions with `DELETE /api/auth/sessions/{handle}`, using a handle from the list response. The caller is always taken from the validated session, never from client input.
   - A handle that belongs to another user and a handle that does not exist both return `404 session_not_found` with the same body, so the response does not reveal that another user's session exists.
+  - A revoke writes `auth.session.revoked`: `Success` with `revocationCause=user_request` and `revokedHandle`, or `Failure` with `reasonCode=not_found`; the actor is the caller from the validated session, the resource is the caller's account, and the correlation ID comes from `ICorrelationContext` (or a generated ID if its value is invalid), not a caller-controlled header. The event never contains a session cookie, token, password, or other secret. If an audit write fails, `IdentityAuditProducer` logs it and returns `Unavailable`; `SessionController` ignores that result, so the response remains `204` for a successful revoke or `404 session_not_found` for an unknown or foreign handle. See [the Audit contract](components/audit/CONTRACTS.md).
+  - Revocation on account block or deactivation (IDN-03) is audited through `account.status.changed`.
   - The next request that carries a revoked or expired session is rejected by `SessionCheckMiddleware` with `401` and the stable code `session_invalid`. The rejected cookie is cleared and the response is `no-store`. This holds for the revoked session itself too, so revoking the current session ends it immediately.
   - Revoking one session leaves the user's other sessions valid.
   - 401 and 403 stay separate: no valid session is `401`, a valid session without permission is `403`. A session that was revoked gets `401` on the next request, not `403`, even on a permission-checked route.
@@ -37,7 +39,7 @@
 
   - `SessionController`, `GET /api/auth/sessions` and `DELETE /api/auth/sessions/{handle}` are implemented. Since ACC-05 both actions are gated by the central Access middleware: `[RequireAccess("identity.session.list")]` and `[RequireAccess("identity.session.revoke")]`, both with `SessionSelfServicePolicy` (an active signed-in account, no resource). The subject comes from the server-side session (`IdentitySessionSubjectProvider`), so the policy can only ever apply to the caller's own sessions; the controller still repeats the `401` check and ownership is still enforced by `ISessionManager.RevokeSession`. The routes are no longer `[DelegatedAuthorization]` and are not in the delegated route inventory of `ApiEndpointCoverageTests`.
   - `SessionCheckMiddleware` also runs ahead of the Access middleware for the routes of this module (`UseWhen` in `Program.cs`, recognised by their `RequireAccess` action). Without it Access would answer a bad session with its generic `401`, and the stable `session_invalid` code and the cleared cookie would be lost. A valid session without permission keeps Access's `403` (`ProblemDetails`). The later `SessionCheckMiddleware` pass reuses the validated session from `HttpContext.Items`.
-  - `SessionManager.ListForUser` filters by user ownership, revocation, and expiration.
+  - `SessionManager.ListForUser` filters by user ownership, authentication level (`Active` only), revocation, and expiration.
   - `SessionManager.RevokeSession` revokes one session only when it belongs to the given owner. `Session.IsActiveAt` is the single definition of "not revoked and not expired"; there is no schema change and no migration.
   - `SessionManager` takes an optional `TimeProvider`. Validation, listing and both revoke methods read it, so expiry and revocation times are tested with a fake clock (`SessionManagerValidationTests`).
   - Development bypass: in the `Development` environment `SessionCheckMiddleware` lets `/api/laboratories`, `/api/labs` (except `student-view` and `preview`), `/api/kt1`, `/api/courses`, `/api/materials` and `/api/access/demo-deny` through when the request carries **no** session cookie, because those modules authenticate callers themselves or are anonymous demos. A request that does present the session cookie is validated like any other, so a revoked or expired session gets `401` there too (and the cookie is cleared). In `Production` the bypass does not exist and every route that runs the middleware refuses a revoked session.
@@ -117,7 +119,7 @@ flowchart TB
     D2 -->|CallerIdentity and UserId| P2
     P2 -->|authenticated UserId| P3
     P3 -->|ListForUser| P4
-    P4 -->|UserId, not revoked, not expired| D1
+    P4 -->|UserId, Active, not revoked, not expired| D1
     D1 -->|handle and session timestamps| P4
     P4 -->|SessionInfo list| P5
     P5 -->|200 JSON and no-store| Actor
@@ -127,7 +129,7 @@ flowchart TB
 
 Trust boundary: cookie and HTTP request data comes from the untrusted client zone. Session validation, caller identity, ownership filtering, and response construction are enforced in the application zone. The identity database is a separate data zone. The raw token is not stored; only its hash is persisted for validation.
 
-Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == userId`, `RevokedAt == null`, and `ExpiresAt > now`. The endpoint has no client-controlled user identifier, so a caller cannot select another user's sessions by changing a request parameter.
+Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == userId`, `AuthLevel == Active`, `RevokedAt == null`, and `ExpiresAt > now`. The endpoint has no client-controlled user identifier, so a caller cannot select another user's sessions by changing a request parameter.
 
 ## Security requirements
 
@@ -155,6 +157,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   | User requests their sessions | manager receives the caller's `UserId` and cancellation token | `ActiveCaller_ReturnsOwnSessions` |
   | Revoked session belongs to the user | `RevokedAt == null` filter | `ListForUser_ReturnsOnlyUnrevokedUnexpiredSessionsForRequestedUser` |
   | Expired session belongs to the user | `ExpiresAt > now` filter | `ListForUser_ReturnsOnlyUnrevokedUnexpiredSessionsForRequestedUser` |
+  | `MfaPending` session belongs to the user (IDN-06) | `AuthLevel == Active` filter | `ListForUser_LeavesOutMfaPendingSessions` |
   | Active session belongs to another user | `UserId == userId` filter | `ListForUser_ReturnsOnlyUnrevokedUnexpiredSessionsForRequestedUser` |
   | Response contains credential material | `SessionInfo` has no token, hash, or cookie property | `SessionInfo_ExposesNoTokenOrHash`, `ListSessions_ReturnsOnlyTheCallersActiveSessions_WithoutCredentialMaterial` |
   | Request without a session cookie | `401 session_invalid`, no cookie to clear | `ProtectedRoute_WithoutCookie_Returns401SessionInvalid_AndHasNoCookieToClear` |
@@ -166,6 +169,9 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   | User revokes another of their sessions | `204`; the revoked one is refused at once, the caller's session stays valid | `RevokeOtherSession_RejectsItImmediately_AndKeepsTheCallersSessionValid` |
   | User revokes the session they are using | `204`; the same cookie is refused on the next request | `RevokeCurrentSession_RejectsTheSameCookieOnTheNextRequest` |
   | Revoke with another user's handle (IDOR, SEC-01) | `404 session_not_found`, same body as an unknown handle, nothing revoked | `RevokeSessionOfAnotherUser_Returns404_IndistinguishableFromUnknown_AndRevokesNothing` |
+  | Successful revoke | `auth.session.revoked` is `Success` with `revocationCause=user_request` and the revoked handle | `RevokeSession_OwnedSession_Returns204AndUsesCallerId` (`SessionControllerTests`), `SessionRevoked_UsesSuccessCauseHandleAccountResourceAndUserActor` (`IdentityAuditProducerTests`), `LoginAndRevokeHttpFlow_ValidSession_PersistsSessionRevokedWithRequestCorrelation` (`IdentityAuditIntegrationTests`) |
+  | Unknown or foreign handle | Audited as `Failure` with `reasonCode=not_found`; still returns `404 session_not_found` | `RevokeSession_UnknownOrForeignHandle_ReturnsSame404` (`SessionControllerTests`), `SessionRevokeFailed_UsesFailureReasonAndAccountResource` (`IdentityAuditProducerTests`) |
+  | Audit event contains credentials or secrets | No session cookie, token, password, or other credential material is accepted or written | `ProducerMethods_DoNotAcceptOrWriteCredentialMaterial` (`IdentityAuditProducerTests`) |
 
 ## Evidence of work
 
@@ -177,6 +183,9 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   - `backend/Platform.Identity/Entities/Session.cs`
   - `backend/Platform.Api/Security/IdentityAccess/` (`IdentityAccessActions.cs`, `IdentitySessionAccessRegistration.cs`, `IdentitySessionSubjectProvider.cs`, `SessionSelfServicePolicy.cs`) and `backend/Platform.Api/Program.cs` (ACC-05 alignment, #185 and #200)
   - `backend/Platform.Identity.Tests/Controllers/SessionControllerTests.cs`
+  - `backend/Platform.Identity.Tests/Services/IdentityAuditProducerTests.cs`
+  - `backend/Platform.Identity.Tests/Integration/Audit/IdentityAuditIntegrationTests.cs`
+  - `docs/components/audit/CONTRACTS.md`
   - `backend/Platform.Identity.Tests/Middleware/SessionCheckMiddlewareTests.cs`
   - `backend/Platform.Identity.Tests/Services/SessionManagerTests.cs`
   - `backend/Platform.Identity.Tests/Services/SessionManagerValidationTests.cs`
@@ -189,12 +198,14 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
 
   ```bash
   dotnet test backend/Platform.Identity.Tests/Platform.Identity.Tests.csproj \
-    --filter "FullyQualifiedName~SessionControllerTests|FullyQualifiedName~SessionCheckMiddlewareTests|FullyQualifiedName~SessionManagerTests|FullyQualifiedName~SessionManagerValidationTests|FullyQualifiedName~SessionReviewRevokeIntegrationTests"
+    --filter "FullyQualifiedName~SessionControllerTests|FullyQualifiedName~SessionCheckMiddlewareTests|FullyQualifiedName~SessionManagerTests|FullyQualifiedName~SessionManagerValidationTests|FullyQualifiedName~SessionReviewRevokeIntegrationTests|FullyQualifiedName~IdentityAuditProducerTests|FullyQualifiedName~IdentityAuditIntegrationTests"
   ```
 
 - Tests and results:
 
   - `SessionControllerTests` use a mocked `ISessionManager` to test controller behavior and authorization branches.
+  - `IdentityAuditProducerTests` verify session-revoke audit event shape and that producer methods do not accept or write credential material.
+  - `IdentityAuditIntegrationTests` cover the real login-and-revoke HTTP flow and persistence of `auth.session.revoked` with the request correlation ID, using the shared PostgreSQL Testcontainers database and restricted Audit runtime role.
   - `SessionManagerTests` and `SessionManagerValidationTests` use the real `SessionManager` with an isolated EF Core InMemory context to test ownership, revocation, expiration, account status, and projection behavior.
   - `SessionCheckMiddlewareTests` test the middleware branches with a mocked `ISessionManager`.
   - `SessionReviewRevokeIntegrationTests` send real HTTP requests through the whole pipeline to the real `SessionManager` and PostgreSQL. They confirm that no session is `401 session_invalid`, a valid session without permission is `403`, a revoked session is `401` on its next request (also in the `Production` environment) while the caller's other sessions stay valid, and another user's handle is `404`. The `403` route is the IDN-03 admin endpoint `PUT /api/admin/accounts/{id}/status`.
@@ -206,6 +217,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
 
   - The integration tests cover the routes of this component (`/api/auth/*`) and the IDN-03 admin route. Routes guarded by the ACC-05 `[RequireAccess]` middleware (for example REV-05 revision approval) resolve the caller through `RevisionSessionSubjectProvider`, which calls the same `ISessionManager.ValidateAsync`. Their 401 and 403 behavior is covered by `ReviewAuthorizationTests` (REV-05), which uses a test session manager, so it was run but not changed here.
 
-- Next steps:
+- Decision on `MfaPending` sessions (IDN-06):
 
-  - Confirm with the IDN-02 team whether `MfaPending` sessions should be included in the session list. The current query filters revocation and expiration but not `AuthLevel` (TODO in `SessionManager.ListForUser`, depends on IDN-06 / TYP-05).
+  - The list shows only `Active` sessions. The user story asks for the sessions the user currently has access from, and an `MfaPending` session (password accepted, TOTP code not yet given) has no access to any protected route. `SessionInfo` and the frontend stay unchanged.
+  - Such a session is not listed and cannot be revoked from the list. It ends when it expires, when the user completes the second factor (it becomes `Active` and is listed), or when the MFA lockout revokes it after too many wrong codes.

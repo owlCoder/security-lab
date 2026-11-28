@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createLab, MAX_TITLE_LENGTH } from '../../api/labs'
 import type { TestUser } from '../../api/labs'
 import { failureLines, requestIdOf, statusOf } from './messages'
+import { courseService } from '../../services/courseService'
+import type { Course } from '../../types/course'
 import ResultMessage from './ResultMessage'
 import type { ResultTone } from './ResultMessage'
 
@@ -14,9 +16,28 @@ type Result = { tone: ResultTone; lines: string[]; status?: number; requestId?: 
 
 export default function CreateLabForm({ user }: Props) {
   const [title, setTitle] = useState('')
+  const [courses, setCourses] = useState<Course[]>([])
+  const [courseId, setCourseId] = useState('')
+  const [coursesLoading, setCoursesLoading] = useState(true)
+  const [coursesError, setCoursesError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
   const [titleError, setTitleError] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    courseService.listCourses()
+      .then(items => {
+        if (cancelled) return
+        const active = items.filter(course => course.status === 'Active')
+        setCourses(active)
+        if (active.length === 1) setCourseId(active[0].id)
+        if (active.length === 0) setCoursesError('Nema aktivnih kurseva na kojima možete napraviti laboratoriju.')
+      })
+      .catch(() => { if (!cancelled) setCoursesError('Nije moguće učitati kurseve.') })
+      .finally(() => { if (!cancelled) setCoursesLoading(false) })
+    return () => { cancelled = true }
+  }, [])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -28,10 +49,14 @@ export default function CreateLabForm({ user }: Props) {
       return
     }
 
+    if (!courseId) {
+      setResult({ tone: 'error', lines: ['Izaberite kurs za laboratoriju.'] })
+      return
+    }
     setTitleError(false)
     setSubmitting(true)
     setResult(null)
-    const outcome = await createLab(title, user)
+    const outcome = await createLab(title, courseId, user)
     setSubmitting(false)
 
     if (outcome.kind === 'created') {
@@ -70,7 +95,16 @@ export default function CreateLabForm({ user }: Props) {
         </p>
       </div>
 
-      <button type="submit" disabled={submitting}>
+      <div className="labs-field">
+        <label htmlFor="labs-course">Kurs</label>
+        <select id="labs-course" value={courseId} required disabled={coursesLoading || courses.length === 0} onChange={e => setCourseId(e.target.value)}>
+          <option value="">{coursesLoading ? 'Učitavanje kurseva...' : 'Izaberite kurs'}</option>
+          {courses.map(course => <option key={course.id} value={course.id}>{course.code} — {course.name}</option>)}
+        </select>
+        {coursesError && <p role="alert">{coursesError}</p>}
+      </div>
+
+      <button type="submit" disabled={submitting || coursesLoading || !courseId || Boolean(coursesError)}>
         {submitting ? 'Kreiranje…' : 'Kreiraj laboratoriju'}
       </button>
       {result && <ResultMessage {...result} />}

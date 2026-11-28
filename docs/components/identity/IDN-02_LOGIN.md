@@ -8,10 +8,10 @@
 
 | Result | Status | Body | Cookie |
 |-|-|-|-|
-| Success | `200` | `{ "userId": "<guid>" }` | `SecurityLab.Session` is set |
+| Success | `200` | `{ "userId": "<guid>", "mfaRequired": false }`; `mfaRequired` is `true` when the account has MFA enabled and the session is `MfaPending`, so the client asks for the TOTP code (`POST /api/auth/mfa/verify`, IDN-06) | `SecurityLab.Session` is set |
 | Wrong password, unknown e-mail, account without password, blocked or archived account | `401` | `{ "code": "invalid_credentials" }` (identical for all of them) | none |
 | Missing, empty or too long input (e-mail over 320, password over 128 characters), or not valid JSON | `400` | `{ "code": "invalid_request" }` (invalid JSON gets the standard ASP.NET problem details) | none |
-| Session could not be stored (database error) | `503` | `{ "code": "login_unavailable" }` | none |
+| Session could not be stored, or the MFA state could not be read (database error) | `503` | `{ "code": "login_unavailable" }` | none |
 | No valid CSRF token in `X-CSRF-TOKEN` (US-15, see [`IDN-02_CSRF.md`](./IDN-02_CSRF.md)) | `403` | `{ "code": "csrf_invalid" }` | none |
 
 Cookie `SecurityLab.Session`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, expires with the session. The session token is **never** in the response body. A successful login also sets a new readable CSRF token `__Host-SecurityLab.CsrfToken` for the new session, because the CSRF token is bound to the session (US-15). Responses carry `Cache-Control: no-store`.
@@ -25,8 +25,8 @@ curl -i -X POST https://localhost:5080/api/auth/login -H "Content-Type: applicat
 1. `LoginService` (`Platform.Api/Services/Identity`) validates the input and calls `ICredentialVerifier` (`Platform.Identity/Interfaces`, implemented by `CredentialVerifier` in `Platform.Identity/Services`).
 2. The verifier trims and lower-cases the e-mail, reads `identity.accounts` and checks the password with BCrypt (`IPasswordHasher`, work factor 12, SHA-384 pre-hash so long passwords are not cut at 72 bytes). The hash check also runs for unknown e-mails (dummy hash), so timing does not show which e-mails exist.
 3. Only an `Active` account gets a session. Blocked and archived accounts get the same `401` as a wrong password; the real reason is only in the audit event.
-4. `ISessionCreator.CreateAsync(userId, AuthenticationLevel.Active)` creates a new session every time (session fixation protection). `StoreSessionCreator` saves it through `ISessionStore` in `identity.sessions`, with a lifetime of 8 hours until US-14 moves it into configuration.
-5. An audit event `auth.login` is written (`success`, `failure` or `denied`) with the correlation id `HttpContext.TraceIdentifier`. It never contains the e-mail, password, hash or token.
+4. `ISessionCreator.CreateAsync(userId, level)` creates a new session every time; the level is `MfaPending` when the account has MFA enabled (`identity.mfa_credentials`, IDN-06), otherwise `Active` (a new session also protects against session fixation). `StoreSessionCreator` saves it through `ISessionStore` in `identity.sessions`, with a lifetime of 8 hours until US-14 moves it into configuration.
+5. An audit event `auth.login` is written to the Audit module through `IdentityAuditProducer` (Success, or Failure with a `reasonCode` such as `invalid_credentials`, `account_locked`, `account_blocked`), with the server correlation id. It never contains the e-mail, password, hash or token. If the success record cannot be written, the new session is revoked and the answer is `503`.
 
 ## Database
 
@@ -48,7 +48,7 @@ To create a hash for a seed user or a test: `new BCryptPasswordHasher().Hash(pas
 ## Known limitations
 
 - Per-account lockout (IDN-05) is in `CredentialVerifier`, see [IDN-05 lockout](IDN-05-lockout.md).
-- No MFA: every successful login is `Active` until an MFA policy (IDN-06, US-12) exists.
+- MFA is opt-in: an account with MFA enabled gets a `MfaPending` session and must pass `POST /api/auth/mfa/verify` ([IDN-02_TOTP_MFA.md](IDN-02_TOTP_MFA.md)). Mandatory MFA for selected groups (US-19) does not exist yet.
 - No registration (IDN-01): accounts exist only through seeding or direct database work.
 - The login does not revoke a session that was sent with the request.
 - `SessionCheckMiddleware` (US-06) validates the session, but `IIdentityContext` is still the stub.

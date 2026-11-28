@@ -106,12 +106,13 @@ public sealed class SessionManager(PlatformIdentityDbContext db, TimeProvider? t
 
         var now = clock.GetUtcNow();
         return await db.Sessions
+            // IDN-07 lists the sessions the user currently has access from. An MfaPending session (password
+            // accepted, second factor not yet, IDN-06) gives no access, so it is not listed.
             .Where(session =>
-                session.UserId == userId && 
+                session.UserId == userId &&
+                session.AuthLevel == AuthLevel.Active &&
                 session.RevokedAt == null &&
-                    session.ExpiresAt > now)     // TODO: Once the MFA/session state model is finalized (IDN-06 / TYP-05),
-                                                 // consider whether only fully authenticated sessions (AuthLevel.Active)
-                                                 // should be included in this list
+                session.ExpiresAt > now)
             .Select(session => new SessionInfo(
                 session.SessionHandle,
                 session.CreatedAt,

@@ -21,6 +21,7 @@ export default function AppShell() {
       {user && <div className="site-nav-links">
         <Link to="/access-demo">Laboratory</Link>
         <Link to="/account/sessions">Sessions</Link>
+        <Link to="/login-history">Istorija prijava</Link>
         <button type="button" className="secondary" onClick={() => void handleLogout()}>
           Log out
         </button>

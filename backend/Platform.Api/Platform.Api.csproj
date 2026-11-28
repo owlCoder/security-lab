@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Platform.Identity.Tests" />
+    <InternalsVisibleTo Include="Platform.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +21,7 @@
     <ProjectReference Include="..\Platform.Authoring\Platform.Authoring.csproj" />
     <ProjectReference Include="..\Platform.Competencies\Platform.Competencies.csproj" />
     <ProjectReference Include="..\Platform.LabLocalization\Platform.LabLocalization.csproj" />
+    <ProjectReference Include="..\Platform.SessionSecurity\Platform.SessionSecurity.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -159,7 +159,37 @@ with `EventIdConflict` and never replaces the stored record.
    event to the outbox), so that a cancelled HTTP request does not lose the record.
 4. **Never put into a draft:** passwords (even wrong ones), tokens, cookies, session identifiers,
    `Authorization` headers, evaluation keys, student answers, request or response bodies, typed
-   login names or any free text.
+   login names or any free text. For MFA, a TOTP code, Base32 secret, `otpauth://` URI, ciphertext
+   or session value MUST NOT appear in a draft or an alarm.
+5. **Successful MFA state changes:** `auth.mfa.enabled` and `auth.mfa.verified` with `Success`
+   MUST be written through `ITransactionalAuditWriter` in the same transaction as the state
+   change. Without `Recorded`, the transaction MUST NOT commit and the response MUST be `503`.
+6. **Rejected MFA attempts:** a rejection MUST stay a rejection even when the audit write fails.
+   An audit failure MUST NOT turn a denied attempt into a successful operation.
+
+## Identity producer methods (US-23)
+
+| Method | Event type | Outcome | Allowed `reasonCode` |
+|-|-|-|-|
+| `MfaEnrollmentStartedAsync` | `auth.mfa.enrollment.started` | Success | none |
+| `MfaEnabledAsync` | `auth.mfa.enabled` | Success | none |
+| `MfaEnableFailedAsync` | `auth.mfa.enabled` | Failure | required: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive` |
+| `MfaVerifiedAsync` | `auth.mfa.verified` | Success | none |
+| `MfaVerifyFailedAsync` | `auth.mfa.verified` | Failure | required: `invalid_code`, `replayed_code`, `invalid_secret`, `session_inactive` |
+| `MfaVerifyDeniedByAttemptLimitAsync` | `auth.mfa.verified` | Denied | required: `attempt_limit` |
+| `SessionRevokedAsync` | `auth.session.revoked` | Success | none; uses `revocationCause=user_request` and `revokedHandle` |
+| `SessionRevokeFailedAsync` | `auth.session.revoked` | Failure | `not_found` and other stable codes |
+
+The Identity producer never accepts an MFA code, secret, TOTP secret, `otpauth://` URI, password,
+cookie, token or other credential. `correlationId` comes from `ICorrelationContext` in HTTP flows,
+as used by `SessionController` and `LogoutService`; it must not come from a caller-controlled header.
+
+### MFA outcome semantics
+
+A wrong or replayed TOTP code is a `Failure`, like a wrong password in `auth.login`. Hitting the
+attempt limit is `Denied`, like `auth.login.throttled`. In contrast, `auth.mfa.backup_code.rejected`
+is always `Denied`; AUD-06 filters by outcome therefore keep a rejected TOTP code distinct from a
+rejected backup code or an attempt-limit denial.
 
 ## Event catalog (schema version 1)
 
@@ -168,6 +198,10 @@ with `EventIdConflict` and never replaces the stored record.
 | `auth.login` | Identity (IDN-02) | Success, Failure | Success: `User`. Failure: `Anonymous`, or `User` when the credentials were valid but the account is not active | forbidden | optional `Account` (the account that logged in) | `reasonCode` |
 | `auth.logout` | Identity (IDN-02) | Success | `User` | forbidden | none | none |
 | `auth.login.throttled` | Identity (IDN-05) | Denied | `Anonymous` | forbidden | none | none |
+| `auth.mfa.enrollment.started` | Identity (IDN-06) | Success | `User` | forbidden | `Account` (required) | none |
+| `auth.mfa.enabled` | Identity (IDN-06) | Success, Failure | `User` | forbidden | `Account` (required) | `reasonCode` required on Failure: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive` |
+| `auth.mfa.verified` | Identity (IDN-06) | Success, Failure, Denied | `User` (recognized after password verification, MFA-pending session) | forbidden | `Account` (required) | `reasonCode` required on Failure: `invalid_code`, `replayed_code`, `invalid_secret`, `session_inactive`; on Denied: `attempt_limit` |
+| `auth.session.revoked` | Identity (IDN-07) | Success, Failure | `User` | forbidden | `Account` (required) | `revocationCause` (`user_request`, `mfa_attempts_exceeded`), `revokedHandle` (optional), `reasonCode` (Failure only, free Code) |
 | `account.status.changed` | Identity (IDN-03), Admin (ADM-01) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `oldStatus`, `newStatus`, `reasonCode` |
 | `account.unlocked` | Identity (IDN-05, administrator unlock) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `lockoutEnd` (Success only), `reasonCode` |
 | `course.member.role.changed` | Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
@@ -177,8 +211,12 @@ with `EventIdConflict` and never replaces the stored record.
 | `access.denied` | Access, Team 3 (ACC-05), through the host adapter | Denied | `User` or `Anonymous` | optional, only from a trusted resource resolver | optional | `action`, `denialReason`, `policyId`, `policyVersion` |
 | `audit.events.viewed` | Audit (AUD-06) | Success | `User` | required | `Course` (required) | `filterType`, `filterOutcome`, `filterFrom`, `filterTo`, `resultCount` |
 
-`reasonCode` is only allowed when the outcome is `Denied` or `Failure`. An empty GUID is never a
-valid `CourseId`.
+`reasonCode` is allowed for `Denied` or `Failure` in schemas that define it. It is required for
+`auth.mfa.enabled` on `Failure`, and for `auth.mfa.verified` on `Failure` or `Denied`; neither event
+requires it on `Success`, and the closed values for each outcome are shown below. In other schemas,
+`reasonCode` remains optional and uses the free Code format. For `auth.session.revoked`, it remains
+Failure-only and free Code. `auth.mfa.enrollment.started` has no `reasonCode`. An empty GUID is
+never a valid `CourseId`.
 
 The catalog is `AuditEventCatalog` in `Platform.Audit.Contracts`, so producers can see what each
 type allows. The checks are done by the internal `AuditDraftValidator` in
@@ -188,7 +226,9 @@ type allows. The checks are done by the internal `AuditDraftValidator` in
 
 | Key | Format |
 |-|-|
-| `reasonCode` | code: `^[a-z][a-z0-9_]{0,31}$`, for example `invalid_credentials`, `account_blocked`, `account_locked` (IDN-05: `auth.login` Failure while the account is temporarily locked), `forbidden`, `not_found` |
+| `reasonCode` | Code: `^[a-z][a-z0-9_]{0,31}$`. Closed lists: `auth.mfa.enabled` Failure: `invalid_code`, `no_valid_enrollment`, `already_enabled`, `invalid_enrollment`, `session_inactive`; `auth.mfa.verified` Failure: `invalid_code`, `replayed_code`, `invalid_secret`, `session_inactive`; Denied: `attempt_limit`. Other events (including `auth.session.revoked`) retain free Code values. |
+| `revocationCause` | Closed list: `user_request`, `mfa_attempts_exceeded` (Code format). |
+| `revokedHandle` | UUID |
 | `oldStatus`, `newStatus` | one of `active`, `blocked`, `archived` |
 | `oldRole`, `newRole` | one of `none`, `student`, `teacher`, `assistant` |
 | `action`, `filterType` | action or event type: `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$`, at most 64 characters (same rule as `ActionId` in `Platform.Access`) |
@@ -233,14 +273,12 @@ mistake. A rejected value is never copied into a log, exception message or HTTP 
 
 | Team / module | Events | Current state |
 |-|-|-|
-| Identity, Teams 1 and 2 (IDN-02, IDN-03, IDN-05) | `auth.*`, `account.status.changed` | Has its own `IAuditWriter` in `Platform.Api.Services.Identity`, which writes to `ILogger`. Needs an agreed adapter or a switch to this contract. |
+| Identity, Teams 1 and 2 (IDN-02, IDN-03, IDN-05, IDN-06) | `auth.*`, `account.status.changed`, `account.unlocked` | Uses this contract. `IdentityAuditProducer` maps login, logout and MFA outcomes (`ITrustedAuditWriter`; MFA enabled and MFA verified through `ITransactionalAuditWriter` in the identity transaction). Status change and unlock write through `ITransactionalAuditWriter`. The old `LoggerAuditWriter` is removed. |
 | Access, Team 3 (ACC-05, ACC-08) | `access.denied` | Calls `IAccessAuditWriter`; today `NullAccessAuditWriter`. Connected by the host adapter (S-13). |
 | Memberships and delegation (ACC-03, ACC-07) | `course.*` | Not on `main` yet. |
 | Revision publishing (AUD-02) | not in this version | Can add its event type through a catalog change. |
 | Audit query (AUD-06) | `audit.events.viewed` | Our own story S-14/S-15. |
 
-Two interfaces named `IAuditWriter` exist in different namespaces. In `Program.cs` use an alias,
-as is already done for the two `IAccessDecision` interfaces.
 
 ## Test double
 
@@ -273,7 +311,7 @@ Planned tests in `backend/Platform.Audit.Tests`, each with its negative case:
 
 | # | Question | Owner |
 |-|-|-|
-| 1 | Does Identity switch to this contract or keep its own interface behind an adapter? `ChangeAccountStatus` currently writes a free-text administrator reason into `Detail`, which conflicts with AUD-03; the proposal is a `reasonCode` instead. | Member 9 with Teams 1 and 2 (D1) |
+| 1 | ~~Does Identity switch to this contract or keep its own interface behind an adapter?~~ Settled: Identity uses this contract (login, logout, MFA through `IdentityAuditProducer`; status change and unlock with `reasonCode` through `ITransactionalAuditWriter`), and its own interface is removed (PR #196). | Member 9 with Teams 1 and 2 (D1) |
 | 2 | Shared transaction or transactional outbox for privileged changes. | Members 2, 3 and 9 with producers (D3) |
 | 3 | Is `auth.login` with valid credentials on a blocked account recorded with a `User` actor? (Proposed: yes; the identity is confirmed, the login is refused.) | Members 3, 8 and 9 with Team 1 |
 | 4 | Who sees events without a course (global or administrator view)? Proposed: nobody through the teacher API. | Members 5, 7 and 9 with the assistant (D4) |
@@ -289,6 +327,7 @@ Agreements with the consumers and producers listed above are tracked in
 |-|-|-|
 | 0.1 | 2026-11-03 | Initial draft for review (S-02) |
 | 0.1 | 2026-11-23 | `account.unlocked` event type added (IDN-05, administrator unlock), with the new detail key `lockoutEnd`. Additive change: existing event types and producers are not affected, the schema version stays 1 |
+| 0.1 | 2026-11-26 | US-23: required outcome-specific MFA `reasonCode` values and closed MFA/revocation cause lists. Additive change; schema version stays 1 |
 
 ## REV-05 integration (2026-11-06)
 
