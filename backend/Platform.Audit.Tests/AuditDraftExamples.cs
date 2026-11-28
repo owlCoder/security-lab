@@ -37,6 +37,7 @@ internal static class AuditDraftExamples
         yield return (
             new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
             AnonymousContext);
+        yield return (new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied), AnonymousContext);
 
         yield return (
             new AuditEventDraft(
@@ -99,7 +100,6 @@ internal static class AuditDraftExamples
         yield return (StatusChange(), UserContext);
 
         yield return (Unlock(), UserContext);
-        yield return (new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied), AnonymousContext);
 
         foreach (var eventType in new[] { AuditEventTypes.RevisionSubmitted, AuditEventTypes.RevisionApproved,
                      AuditEventTypes.RevisionReturned })

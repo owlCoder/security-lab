@@ -41,11 +41,12 @@ public sealed class IdentityAuditProducer(
         if (targetId == Guid.Empty)
             throw new ArgumentException("A confirmed account ID is required.", nameof(targetId));
         if (passwordLockoutEnd is null && mfaLockoutEnd is null)
-            throw new ArgumentException("At least one cleared lockout is required.");
+            throw new ArgumentException("At least one cleared lockout is required.", nameof(passwordLockoutEnd));
 
         var kind = passwordLockoutEnd is null ? "mfa" : mfaLockoutEnd is null ? "password" : "both";
-        var end = passwordLockoutEnd is { } password && (mfaLockoutEnd is null || password >= mfaLockoutEnd.Value)
-            ? password : mfaLockoutEnd!.Value;
+        var end = passwordLockoutEnd ?? mfaLockoutEnd!.Value;
+        if (mfaLockoutEnd is { } mfaEnd && mfaEnd > end)
+            end = mfaEnd;
         return new AuditEventDraft(
             AuditEventTypes.AccountUnlocked,
             AuditOutcome.Success,

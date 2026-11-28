@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Platform.Api.Services.Identity;
 using Platform.Audit.Application;
@@ -66,14 +67,30 @@ public sealed class MfaLockoutAuditContractTests
             setup.Throws(new InvalidOperationException("provider-sensitive-content"));
         else
             setup.Returns(new ValueTask<AuditWriteResult>(AuditWriteResult.Unavailable()));
+        var records = new List<string>();
+        var logger = new Mock<ILogger<IdentityAuditProducer>>();
+        logger.Setup(l => l.Log(It.IsAny<LogLevel>(), It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(new InvocationAction(call =>
+            {
+                if (call.Arguments[4] is not Delegate formatter)
+                    throw new InvalidOperationException("The log formatter is required.");
+                records.Add($"{call.Arguments[2]} {formatter.DynamicInvoke(call.Arguments[2], call.Arguments[3])} {call.Arguments[3]}");
+            }));
         var producer = new IdentityAuditProducer(writer.Object, Mock.Of<ITransactionalAuditWriter>(),
-            NullLogger<IdentityAuditProducer>.Instance);
+            logger.Object);
 
         // Act
         var result = await producer.MfaThrottledAsync("server-mfa-270");
 
         // Assert
-        Assert.That(result.IsRecorded, Is.False);
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Status, Is.EqualTo(AuditWriteStatus.Unavailable));
+            Assert.That(records, Has.Count.EqualTo(1));
+            Assert.That(records[0], Does.Contain(AuditEventTypes.AuthMfaThrottled).And.Contain("server-mfa-270"));
+            Assert.That(records, Has.None.Contains("provider-sensitive-content"));
+        });
     }
 
     [TestCase("password", 0, null, "2026-11-28T11:15:00Z")]
@@ -110,7 +127,8 @@ public sealed class MfaLockoutAuditContractTests
         var target = TargetId;
 
         // Act & Assert
-        Assert.That(() => IdentityAuditProducer.CreateAccountUnlockedDraft(target, null, null), Throws.ArgumentException);
+        Assert.That(() => IdentityAuditProducer.CreateAccountUnlockedDraft(target, null, null),
+            Throws.ArgumentException.With.Property("ParamName").EqualTo("passwordLockoutEnd"));
     }
 
     [Test]
@@ -142,11 +160,11 @@ public sealed class MfaLockoutAuditContractTests
         Assert.That(rejection, Is.EqualTo(AuditRejectionCode.None));
     }
 
-    [TestCase("other", AuditOutcome.Success)]
-    [TestCase("MFA", AuditOutcome.Success)]
-    [TestCase("password", AuditOutcome.Denied)]
-    [TestCase("mfa", AuditOutcome.Failure)]
-    public void Validate_InvalidUnlockKindOrOutcome_Rejects(string kind, AuditOutcome outcome)
+    [TestCase("other", AuditOutcome.Success, AuditRejectionCode.InvalidDetailValue)]
+    [TestCase("MFA", AuditOutcome.Success, AuditRejectionCode.InvalidDetailValue)]
+    [TestCase("password", AuditOutcome.Denied, AuditRejectionCode.UnknownDetailKey)]
+    [TestCase("mfa", AuditOutcome.Failure, AuditRejectionCode.UnknownDetailKey)]
+    public void Validate_InvalidUnlockKindOrOutcome_Rejects(string kind, AuditOutcome outcome, AuditRejectionCode expected)
     {
         // Arrange
         var draft = new AuditEventDraft(AuditEventTypes.AccountUnlocked, outcome,
@@ -157,15 +175,15 @@ public sealed class MfaLockoutAuditContractTests
         var rejection = new AuditDraftValidator().Validate(draft, AdminContext);
 
         // Assert
-        Assert.That(rejection, Is.Not.EqualTo(AuditRejectionCode.None));
+        Assert.That(rejection, Is.EqualTo(expected));
     }
 
-    [TestCase("user")]
-    [TestCase("resource")]
-    [TestCase("course")]
-    [TestCase("details")]
-    [TestCase("success")]
-    public void Validate_MfaThrottleWithUnexpectedData_Rejects(string change)
+    [TestCase("user", AuditRejectionCode.InvalidContext)]
+    [TestCase("resource", AuditRejectionCode.InvalidResource)]
+    [TestCase("course", AuditRejectionCode.CourseNotAllowed)]
+    [TestCase("details", AuditRejectionCode.UnknownDetailKey)]
+    [TestCase("success", AuditRejectionCode.OutcomeNotAllowed)]
+    public void Validate_MfaThrottleWithUnexpectedData_Rejects(string change, AuditRejectionCode expected)
     {
         // Arrange
         var draft = new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied);
@@ -184,6 +202,6 @@ public sealed class MfaLockoutAuditContractTests
         var rejection = new AuditDraftValidator().Validate(draft, context);
 
         // Assert
-        Assert.That(rejection, Is.Not.EqualTo(AuditRejectionCode.None));
+        Assert.That(rejection, Is.EqualTo(expected));
     }
 }

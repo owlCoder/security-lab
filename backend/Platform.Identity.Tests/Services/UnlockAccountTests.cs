@@ -1,6 +1,6 @@
-using System.Data;
 using System.Data.Common;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Platform.Api.Enums.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
@@ -13,9 +13,8 @@ using Platform.Identity.Enums;
 namespace Platform.Identity.Tests.Services;
 
 /// <summary>
-/// IDN-05 administrator unlock / AUD-01 / AUD-03. The store fake behaves like a database transaction, as in
-/// <see cref="ChangeAccountStatusTests"/>: nothing is visible until commit, and leaving the scope without a commit
-/// discards everything. The audit fake checks every draft against the real catalog, as the real writer does.
+/// IDN-05 administrator unlock / AUD-01 / AUD-03. Mock callbacks model commit/disposal and validate
+/// every audit draft against the catalog. Nothing is persisted by these unit tests.
 /// The same behavior against PostgreSQL is covered by AccountUnlockIntegrationTests.
 /// </summary>
 [TestFixture]
@@ -32,116 +31,73 @@ public class UnlockAccountTests
     private const string StudentEmail = "student@example.com";
     private const int StudentFailures = 4;
 
-    private sealed class FakeIdentity(CallerIdentity? caller) : IIdentityContext
-    {
-        public CallerIdentity? Current => caller;
-    }
-
-    private sealed class FakeAdmins(params Guid[] ids) : IAdminDirectory
-    {
-        public bool IsAdministrator(Guid userId) => ids.Contains(userId);
-    }
-
-    private sealed class FakeCorrelation(string? id) : ICorrelationContext
-    {
-        public string? CorrelationId => id;
-    }
-
-    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
-    }
-
-    private sealed class FakeDbException : DbException
-    {
-        public FakeDbException() : base("simulated database failure") { }
-    }
-
-    private sealed class FakeDbTransaction(FakeStore.UnitOfWork work) : DbTransaction
-    {
-        public FakeStore.UnitOfWork Work => work;
-        public override IsolationLevel IsolationLevel => IsolationLevel.ReadCommitted;
-        protected override DbConnection? DbConnection => null;
-        public override void Commit() { }
-        public override void Rollback() { }
-    }
-
-    /// <summary>Accounts, their lockout state and Audit records of one fake database.</summary>
-    private sealed class FakeStore : IAccountStatusStore
+    // State belongs to this test harness; every production dependency is a Moq mock.
+    private sealed class UnlockTestState
     {
         public Dictionary<Guid, UserAccount> Accounts { get; } = new();
         public Dictionary<Guid, DateTimeOffset?> LockoutEnds { get; } = new();
         public Dictionary<Guid, int> FailedLogins { get; } = new();
         public List<(AuditEventDraft Draft, AuditContext Context)> Audit { get; } = new();
+        public List<(AuditEventDraft Draft, AuditContext Context)> PendingAudit { get; } = new();
         public int Commits { get; private set; }
         public bool FailOnClear { get; set; }
+        public Mock<IAccountStatusStore> Store { get; } = new(MockBehavior.Strict);
+        public Mock<IAccountStatusUnitOfWork> Work { get; } = new(MockBehavior.Strict);
+        public Mock<DbTransaction> Transaction { get; } = new();
 
-        public Task<IAccountStatusUnitOfWork> BeginAsync(CancellationToken ct = default) =>
-            Task.FromResult<IAccountStatusUnitOfWork>(new UnitOfWork(this));
-
-        public sealed class UnitOfWork(FakeStore store) : IAccountStatusUnitOfWork
+        public UnlockTestState()
         {
-            private readonly HashSet<Guid> _pendingClears = new();
-            public List<(AuditEventDraft, AuditContext)> PendingAudit { get; } = new();
-
-            public DbTransaction Transaction => new FakeDbTransaction(this);
-
-            public Task<UserAccount?> FindForUpdateAsync(Guid accountId, CancellationToken ct = default) =>
-                Task.FromResult(store.Accounts.TryGetValue(accountId, out var stored)
-                    ? new UserAccount(stored.Id, stored.Email, stored.Status, stored.Role)
-                    : null);
-
-            // An unlock never changes the status or the sessions; calling this fails the test.
-            public Task<int> ApplyAsync(UserAccount account, AccountStatus newStatus, CancellationToken ct = default) =>
-                throw new NotSupportedException();
-
-            // Same rule as EfAccountStatusStore: only a lockout that is still running is cleared.
-            public Task<DateTimeOffset?> ClearLockoutAsync(UserAccount account, DateTimeOffset now, CancellationToken ct = default)
-            {
-                if (store.FailOnClear) throw new FakeDbException();
-
-                if (store.LockoutEnds.GetValueOrDefault(account.Id) is not { } end || end <= now)
-                    return Task.FromResult<DateTimeOffset?>(null);
-
-                _pendingClears.Add(account.Id);
-                return Task.FromResult<DateTimeOffset?>(end);
-            }
-
-            public Task CommitAsync(CancellationToken ct = default)
-            {
-                foreach (var id in _pendingClears)
+            var pendingClears = new HashSet<Guid>();
+            Store.Setup(x => x.BeginAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Work.Object);
+            Work.SetupGet(x => x.Transaction).Returns(Transaction.Object);
+            Work.Setup(x => x.FindForUpdateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, CancellationToken _) => Accounts.GetValueOrDefault(id));
+            Work.Setup(x => x.ClearLockoutAsync(It.IsAny<UserAccount>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((UserAccount account, DateTimeOffset now, CancellationToken _) =>
                 {
-                    store.LockoutEnds[id] = null;
-                    store.FailedLogins[id] = 0;
+                    if (FailOnClear) throw new Npgsql.NpgsqlException("simulated database failure");
+                    if (LockoutEnds.GetValueOrDefault(account.Id) is not { } end || end <= now)
+                        return (DateTimeOffset?)null;
+                    pendingClears.Add(account.Id);
+                    return end;
+                });
+            Work.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>())).Callback(() =>
+            {
+                foreach (var id in pendingClears)
+                {
+                    LockoutEnds[id] = null;
+                    FailedLogins[id] = 0;
                 }
-                store.Audit.AddRange(PendingAudit);
-                store.Commits++;
-                return Task.CompletedTask;
-            }
-
-            // No commit, no change.
-            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+                pendingClears.Clear();
+                Audit.AddRange(PendingAudit);
+                PendingAudit.Clear();
+                Commits++;
+            }).Returns(Task.CompletedTask);
+            Work.Setup(x => x.DisposeAsync()).Callback(() =>
+            {
+                pendingClears.Clear();
+                PendingAudit.Clear();
+            }).Returns(ValueTask.CompletedTask);
         }
     }
 
-    private sealed class FakeAudit : ITransactionalAuditWriter
+    private sealed class AuditSetup
     {
-        private readonly AuditDraftValidator _validator = new();
-
         public AuditWriteResult Result { get; set; } = AuditWriteResult.Recorded(Guid.NewGuid());
+        public Mock<ITransactionalAuditWriter> Writer { get; } = new(MockBehavior.Strict);
 
-        public ValueTask<AuditWriteResult> WriteAsync(AuditEventDraft draft, AuditContext context,
-            DbTransaction transaction, CancellationToken cancellationToken = default)
+        public AuditSetup(UnlockTestState state)
         {
-            // Like the real writer, a draft outside the catalog is rejected and never stored.
-            var rejection = _validator.Validate(draft, context);
-            if (rejection != AuditRejectionCode.None)
-                return ValueTask.FromResult(AuditWriteResult.Rejected(rejection));
-
-            // Like the real writer, the record joins the caller's transaction instead of committing alone.
-            if (Result.IsRecorded)
-                ((FakeDbTransaction)transaction).Work.PendingAudit.Add((draft, context));
-            return ValueTask.FromResult(Result);
+            Writer.Setup(x => x.WriteAsync(It.IsAny<AuditEventDraft>(), It.IsAny<AuditContext>(),
+                    state.Transaction.Object, It.IsAny<CancellationToken>()))
+                .Returns((AuditEventDraft draft, AuditContext context, DbTransaction _, CancellationToken _) =>
+                {
+                    var rejection = new AuditDraftValidator().Validate(draft, context);
+                    if (rejection != AuditRejectionCode.None)
+                        return ValueTask.FromResult(AuditWriteResult.Rejected(rejection));
+                    if (Result.IsRecorded) state.PendingAudit.Add((draft, context));
+                    return ValueTask.FromResult(Result);
+                });
         }
     }
 
@@ -149,11 +105,11 @@ public class UnlockAccountTests
     private static CallerIdentity Student => new(true, StudentId, AuthenticationLevel.None, new Guid());
 
     /// <summary>The student is locked until <see cref="StudentLockoutEnd"/>; a test may change that afterwards.</summary>
-    private static (UnlockAccount Sut, FakeStore Store, FakeAudit Audit) Build(
+    private static (UnlockAccount Sut, UnlockTestState Store, AuditSetup Audit) Build(
         CallerIdentity? caller,
         string? correlationId = "corr-1")
     {
-        var store = new FakeStore();
+        var store = new UnlockTestState();
         store.Accounts[StudentId] = new UserAccount(StudentId, StudentEmail);
         store.Accounts[AdminId] = new UserAccount(AdminId, "admin@example.com", role: AccountRole.Administrator);
         store.LockoutEnds[StudentId] = StudentLockoutEnd;
@@ -162,13 +118,17 @@ public class UnlockAccountTests
         store.LockoutEnds[AdminId] = Now.AddMinutes(10);
         store.FailedLogins[AdminId] = 0;
 
-        var audit = new FakeAudit();
-        var sut = new UnlockAccount(
-            new FakeIdentity(caller),
-            new AdminOnlyAccessDecision(new FakeAdmins(AdminId)),
-            store, audit, new FakeCorrelation(correlationId),
-            new FixedClock(Now),
-            NullLogger<UnlockAccount>.Instance);
+        var audit = new AuditSetup(store);
+        var identity = new Mock<IIdentityContext>();
+        identity.SetupGet(x => x.Current).Returns(caller);
+        var access = new Mock<IAccessDecision>();
+        access.Setup(x => x.CanUnlockAccount(It.IsAny<CallerIdentity>())).Returns(caller?.UserId == AdminId);
+        var correlation = new Mock<ICorrelationContext>();
+        correlation.SetupGet(x => x.CorrelationId).Returns(correlationId);
+        var clock = new Mock<TimeProvider>();
+        clock.Setup(x => x.GetUtcNow()).Returns(Now);
+        var sut = new UnlockAccount(identity.Object, access.Object, store.Store.Object,
+            audit.Writer.Object, correlation.Object, clock.Object, NullLogger<UnlockAccount>.Instance);
 
         return (sut, store, audit);
     }
@@ -176,10 +136,13 @@ public class UnlockAccountTests
     [Test]
     public async Task Admin_UnlocksLockedAccount_LockoutCleared_CommittedOnce_AuditRecorded()
     {
+        // Arrange
         var (sut, store, _) = Build(Admin);
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Success));
         Assert.That(store.LockoutEnds[StudentId], Is.Null);
         Assert.That(store.FailedLogins[StudentId], Is.Zero);
@@ -193,24 +156,28 @@ public class UnlockAccountTests
         Assert.That(draft.Resource, Is.EqualTo(new AuditResourceRef(AuditResourceTypes.Account, StudentId.ToString("D"))));
         Assert.That(draft.Details, Is.EqualTo(new Dictionary<string, string>
         {
-            ["lockoutEnd"] = StudentLockoutEndInAudit
+            ["lockoutEnd"] = StudentLockoutEndInAudit,
+            ["lockoutKind"] = "password"
         }));
         Assert.That(context.Actor, Is.EqualTo(AuditActor.ForUser(AdminId)));
         Assert.That(context.CorrelationId, Is.EqualTo("corr-1"));
     }
 
-    // The audit fake runs the real catalog validator, so each value here is also proven to be a valid UtcTimestamp.
+    // The audit mock runs the real catalog validator, so each value here is also proven to be a valid UtcTimestamp.
     [TestCase(0L, "2026-11-23T10:15:00Z")]
     [TestCase(5_000_000L, "2026-11-23T10:15:00.5Z")]
     [TestCase(1_234_560L, "2026-11-23T10:15:00.123456Z")]   // PostgreSQL keeps microseconds
     [TestCase(1_234_567L, "2026-11-23T10:15:00.1234567Z")]
     public async Task LockoutEnd_IsRecordedInUtc_WithoutLosingItsFraction(long extraTicks, string expected)
     {
+        // Arrange
         var (sut, store, _) = Build(Admin);
         store.LockoutEnds[StudentId] = StudentLockoutEnd.AddTicks(extraTicks);
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Success));
         Assert.That(store.Audit.Single().Draft.Details!["lockoutEnd"], Is.EqualTo(expected));
     }
@@ -218,10 +185,13 @@ public class UnlockAccountTests
     [Test]
     public async Task Anonymous_IsUnauthenticated_NothingChanges_DenialIsAuditedWithoutActor()
     {
+        // Arrange
         var (sut, store, _) = Build(caller: null);
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Unauthenticated));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
 
@@ -235,10 +205,13 @@ public class UnlockAccountTests
     [Test]
     public async Task SessionWithoutFullAuthentication_IsUnauthenticated()
     {
+        // Arrange
         var (sut, store, _) = Build(new CallerIdentity(false, AdminId, AuthenticationLevel.None, new Guid()));
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Unauthenticated));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
     }
@@ -246,11 +219,14 @@ public class UnlockAccountTests
     [Test]
     public async Task Student_IsForbidden_NothingChanges_DenialIsAudited()
     {
+        // Arrange
         var (sut, store, _) = Build(Student);
         store.LockoutEnds[AdminId] = Now.AddMinutes(5);
 
+        // Act
         var outcome = await sut.ExecuteAsync(AdminId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Forbidden));
         Assert.That(store.LockoutEnds[AdminId], Is.EqualTo(Now.AddMinutes(5)));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
@@ -264,10 +240,13 @@ public class UnlockAccountTests
     [Test]
     public async Task Student_CannotUnlockOwnAccount_IsForbiddenFirst()
     {
+        // Arrange
         var (sut, store, _) = Build(Student);
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Forbidden));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
         Assert.That(store.FailedLogins[StudentId], Is.EqualTo(StudentFailures));
@@ -276,10 +255,13 @@ public class UnlockAccountTests
     [Test]
     public async Task Admin_CannotUnlockOwnAccount()
     {
+        // Arrange
         var (sut, store, _) = Build(Admin);
 
+        // Act
         var outcome = await sut.ExecuteAsync(AdminId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.SelfChangeNotAllowed));
         Assert.That(store.LockoutEnds[AdminId], Is.EqualTo(Now.AddMinutes(10)));
 
@@ -292,11 +274,14 @@ public class UnlockAccountTests
     [Test]
     public async Task UnknownAccount_ReturnsNotFound_AndIsAudited()
     {
+        // Arrange
         var (sut, store, _) = Build(Admin);
         var unknown = Guid.NewGuid();
 
+        // Act
         var outcome = await sut.ExecuteAsync(unknown);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.NotFound));
         var (draft, _) = store.Audit.Single();
         Assert.That(draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
@@ -309,12 +294,15 @@ public class UnlockAccountTests
     [TestCase(0, Description = "lockout ends exactly now")]
     public async Task AccountThatIsNotLocked_ReturnsNotLocked_NothingChanges(int? lockoutEndSecondsFromNow)
     {
+        // Arrange
         DateTimeOffset? lockoutEnd = lockoutEndSecondsFromNow is { } seconds ? Now.AddSeconds(seconds) : null;
         var (sut, store, _) = Build(Admin);
         store.LockoutEnds[StudentId] = lockoutEnd;
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.NotLocked));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(lockoutEnd));
         Assert.That(store.FailedLogins[StudentId], Is.EqualTo(StudentFailures), "the failure counter is not reset");
@@ -329,13 +317,16 @@ public class UnlockAccountTests
     [TestCase(true)]
     public async Task AuditNotRecorded_RollsBackTheUnlock(bool rejected)
     {
+        // Arrange
         var (sut, store, audit) = Build(Admin);
         audit.Result = rejected
             ? AuditWriteResult.Rejected(AuditRejectionCode.InvalidContext)
             : AuditWriteResult.Unavailable();
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Unavailable));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
         Assert.That(store.FailedLogins[StudentId], Is.EqualTo(StudentFailures));
@@ -346,11 +337,14 @@ public class UnlockAccountTests
     [Test]
     public async Task DatabaseFailure_ReturnsUnavailable_AndStoresNothing()
     {
+        // Arrange
         var (sut, store, _) = Build(Admin);
         store.FailOnClear = true;
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Unavailable));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
         Assert.That(store.FailedLogins[StudentId], Is.EqualTo(StudentFailures));
@@ -360,11 +354,14 @@ public class UnlockAccountTests
     [Test]
     public async Task RefusalStaysRefused_WhenAuditIsUnavailable()
     {
+        // Arrange
         var (sut, store, audit) = Build(Student);
         audit.Result = AuditWriteResult.Unavailable();
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Forbidden));
         Assert.That(store.LockoutEnds[StudentId], Is.EqualTo(StudentLockoutEnd));
     }
@@ -374,10 +371,13 @@ public class UnlockAccountTests
     [TestCase("0HN:00000001")]
     public async Task WithoutValidCorrelationId_AValidOneIsGenerated(string? correlationId)
     {
+        // Arrange
         var (sut, store, _) = Build(Admin, correlationId: correlationId);
 
+        // Act
         var outcome = await sut.ExecuteAsync(StudentId);
 
+        // Assert
         Assert.That(outcome, Is.EqualTo(UnlockAccountOutcome.Success));
         Assert.That(store.Audit.Single().Context.CorrelationId, Does.Match("^[A-Za-z0-9._-]{1,64}$"));
     }
@@ -385,13 +385,16 @@ public class UnlockAccountTests
     [Test]
     public async Task AuditRecords_NeverContainTheEmail()
     {
+        // Arrange
         var (sut, store, _) = Build(Admin);
 
+        // Act
         await sut.ExecuteAsync(StudentId);   // success
         await sut.ExecuteAsync(StudentId);   // now not locked: refusal
 
+        // Assert
         Assert.That(store.Audit, Has.Count.EqualTo(2));
-        Assert.That(store.Audit[0].Draft.Details!.Keys, Is.EquivalentTo(new[] { "lockoutEnd" }));
+        Assert.That(store.Audit[0].Draft.Details!.Keys, Is.EquivalentTo(new[] { "lockoutEnd", "lockoutKind" }));
         foreach (var (draft, _) in store.Audit)
         {
             Assert.That(draft.Details!.Values.Any(value => value.Contains('@')), Is.False, "no e-mail in the details");
