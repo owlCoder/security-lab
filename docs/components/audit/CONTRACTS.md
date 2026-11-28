@@ -206,7 +206,7 @@ rejected backup code or an attempt-limit denial.
 | `account.status.changed` | Identity (IDN-03), Admin (ADM-01) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `oldStatus`, `newStatus`, `reasonCode` |
 | `account.unlocked` | Identity (IDN-05, administrator unlock) | Success, Denied, Failure | `User` or `Anonymous` (Denied, not logged in) | forbidden | `Account` (required) | `lockoutEnd`, optional `lockoutKind` = `password`, `mfa`, `both` (both fields Success only), `reasonCode` |
 | `session.rotated` | Session security, Team 09 (IDN-11) | Success, Denied, Failure | `User` | forbidden | `Account` (required) | `trigger`, `reasonCode` |
-| `course.member.role.changed` | Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
+| `course.member.role.changed` | Memberships, Team 10 (ACC-02 enrollment), Memberships (ACC-03) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `oldRole`, `newRole`, `reasonCode` |
 | `course.delegation.granted` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
 | `course.delegation.revoked` | Memberships (ACC-07) | Success, Denied, Failure | `User` or `Anonymous` (Denied) | required | `Account` (required) | `action`, `delegationId`, `reasonCode` |
 | `course.delegation.expired` | Memberships (ACC-07), background job | Success | `Service` | required | `Account` (required) | `action`, `delegationId` |
@@ -333,6 +333,7 @@ Agreements with the consumers and producers listed above are tracked in
 | 0.1 | 2026-11-23 | `account.unlocked` event type added (IDN-05, administrator unlock), with the new detail key `lockoutEnd`. Additive change: existing event types and producers are not affected, the schema version stays 1 |
 | 0.1 | 2026-11-26 | US-23: required outcome-specific MFA `reasonCode` values and closed MFA/revocation cause lists. Additive change; schema version stays 1 |
 | 0.1 | 2026-11-28 | #270 proposal for Team 12 review: `auth.mfa.throttled` and optional Success-only `account.unlocked.lockoutKind` (`password`, `mfa`, `both`). Existing producers remain valid; schema version stays 1. HTTP limiter and MFA unlock integration are separate follow-ups |
+| 0.1 | 2026-11-28 | `course.member.role.changed`: Memberships, Team 10 (ACC-02 enrollment) added as a producer (`oldRole=none`, `newRole=student`), in the same PostgreSQL transaction as the membership (S11-06). Confirmed by Team 12 on PR #172. Additive change: existing event types and producers are not affected, the schema version stays 1 |
 
 ## REV-05 integration (2026-11-06)
 

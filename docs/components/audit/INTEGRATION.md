@@ -216,6 +216,15 @@ Audit component agree a short list of codes.
 - Membership changes produce `course.member.role.changed` and `course.delegation.*` under the
   transaction rule of S11-06. Delegation expiry is written by a background job with a `Service`
   actor.
+- Agreed for ACC-02 (Team 10, PR #172, confirmed by @Bojan763): enrolling a student writes
+  `course.member.role.changed` with `Success`, a server-side `User` actor (the enrolling teacher
+  or administrator), the required `CourseId`, an `Account` resource for the enrolled student and
+  details `oldRole=none`, `newRole=student`. The membership row and the audit record are written
+  through `ITransactionalAuditWriter` in one PostgreSQL transaction, with the Audit schema in the
+  same database. If the record is not `Recorded`, the membership is not committed and the API
+  returns 503. Denied enrollments are recorded by the Access module (`access.denied`). Code:
+  `Platform.Membership/Application/MembershipAuditEvents.cs`,
+  `Platform.Membership/Infrastructure/Persistence/EfMembershipStore.cs`.
 
 ### S11-09 Correlation (AUD-04 owner; member 10)
 
