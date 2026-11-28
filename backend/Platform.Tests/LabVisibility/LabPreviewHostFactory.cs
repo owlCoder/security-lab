@@ -18,7 +18,7 @@ namespace Platform.Tests.LabVisibility;
 // AUT-07: pravi API u memoriji (Development), ceo HTTP pipeline kao u aplikaciji:
 // SessionCheckMiddleware -> SessionIdentityContext -> LabCaller -> PreviewStudentView.
 // Zamenjeni su samo spoljni izvori: sesija (kolačić SecurityLab.Session=<userId> važi za
-// test korisnike), status naloga (svi aktivni) i skladište (uvek InMemory).
+// test korisnike), status naloga (aktivni, osim BlockedTeacher i ArchivedTeacher) i skladište (uvek InMemory).
 internal sealed class LabPreviewHostFactory : WebApplicationFactory<Program>
 {
     public const string Teacher = "11111111-1111-1111-1111-111111111111";
@@ -26,7 +26,12 @@ internal sealed class LabPreviewHostFactory : WebApplicationFactory<Program>
     public const string Outsider = "33333333-3333-3333-3333-333333333333";
     public const string OtherCourseTeacher = "44444444-4444-4444-4444-444444444444";
 
-    private static readonly HashSet<string> KnownUsers = [Teacher, Student, Outsider, OtherCourseTeacher];
+    // AUT-07 (KT2): nastavnici kursa čiji je nalog blokiran ili arhiviran, a sesija još važi.
+    public const string BlockedTeacher = "77777777-7777-7777-7777-777777777777";
+    public const string ArchivedTeacher = "88888888-8888-8888-8888-888888888888";
+
+    private static readonly HashSet<string> KnownUsers =
+        [Teacher, Student, Outsider, OtherCourseTeacher, BlockedTeacher, ArchivedTeacher];
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -37,7 +42,7 @@ internal sealed class LabPreviewHostFactory : WebApplicationFactory<Program>
             services.AddSingleton<ISessionManager, TestSessionManager>();
 
             services.RemoveAll<IAccountStatusReader>();
-            services.AddSingleton<IAccountStatusReader, ActiveTestAccounts>();
+            services.AddSingleton<IAccountStatusReader, TestAccounts>();
 
             // Uvek InMemory, i kad lokalno postoji ConnectionStrings:LabVisibility.
             services.RemoveAll<ILabPublicContentReader>();
@@ -78,11 +83,24 @@ internal sealed class LabPreviewHostFactory : WebApplicationFactory<Program>
             throw new NotSupportedException();
     }
 
-    private sealed class ActiveTestAccounts : IAccountStatusReader
+    private sealed class TestAccounts : IAccountStatusReader
     {
-        public Task<AccountSnapshot?> FindAsync(Guid accountId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(KnownUsers.Contains(accountId.ToString("D"))
-                ? new AccountSnapshot(accountId, AccountStatus.Active)
-                : null);
+        public Task<AccountSnapshot?> FindAsync(Guid accountId, CancellationToken cancellationToken = default)
+        {
+            var id = accountId.ToString("D");
+            if (!KnownUsers.Contains(id))
+            {
+                return Task.FromResult<AccountSnapshot?>(null);
+            }
+
+            var status = id switch
+            {
+                BlockedTeacher => AccountStatus.Blocked,
+                ArchivedTeacher => AccountStatus.Archived,
+                _ => AccountStatus.Active
+            };
+
+            return Task.FromResult<AccountSnapshot?>(new AccountSnapshot(accountId, status));
+        }
     }
 }

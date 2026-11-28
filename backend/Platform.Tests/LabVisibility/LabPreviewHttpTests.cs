@@ -22,6 +22,8 @@ public sealed class LabPreviewHttpTests
     private const string Student = LabPreviewHostFactory.Student;
     private const string Outsider = LabPreviewHostFactory.Outsider;
     private const string OtherCourseTeacher = LabPreviewHostFactory.OtherCourseTeacher;
+    private const string BlockedTeacher = LabPreviewHostFactory.BlockedTeacher;
+    private const string ArchivedTeacher = LabPreviewHostFactory.ArchivedTeacher;
 
     private LabPreviewHostFactory factory = null!;
     private HttpClient client = null!;
@@ -47,6 +49,11 @@ public sealed class LabPreviewHttpTests
         // Nastavnik drugog kursa: aktivan nalog, ali nije na kursu ove laboratorije.
         services.GetRequiredService<InMemoryCourseMembership>()
             .Set(OtherCourse, Guid.Parse(OtherCourseTeacher), LabVisibilityCourseRole.Teacher);
+
+        // AUT-07 (KT2): nastavnici baš ovog kursa, ali sa blokiranim ili arhiviranim nalogom.
+        var membership = services.GetRequiredService<InMemoryCourseMembership>();
+        membership.Set(DemoCourse, Guid.Parse(BlockedTeacher), LabVisibilityCourseRole.Teacher);
+        membership.Set(DemoCourse, Guid.Parse(ArchivedTeacher), LabVisibilityCourseRole.Teacher);
     }
 
     [OneTimeTearDown]
@@ -79,6 +86,21 @@ public sealed class LabPreviewHttpTests
     [TestCase(Outsider)]
     [TestCase(OtherCourseTeacher)]
     public async Task NotCourseTeacher_Gets404(string user)
+    {
+        using var response = await GetPreviewAsync(DraftLab, user);
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain("lab_not_available"));
+    }
+
+    // AUT-07 (KT2): nastavnik kursa sa blokiranim ili arhiviranim nalogom → isti 404.
+    // U aplikaciji IDN već odbija sesiju takvog naloga, pa on dobija 401 pre našeg koda.
+    // Ovaj test pokriva drugu liniju odbrane: sesija još važi (npr. blokada se desila
+    // između dva zahteva), LabCaller čita stvarni status naloga, a tim 3 odbija
+    // (AccountNotActive) pre LabPreviewPolicy, pa pregled vraća isti 404 kao svako odbijanje.
+    [TestCase(BlockedTeacher)]
+    [TestCase(ArchivedTeacher)]
+    public async Task InactiveCourseTeacher_WithStillValidSession_Gets404(string user)
     {
         using var response = await GetPreviewAsync(DraftLab, user);
 
