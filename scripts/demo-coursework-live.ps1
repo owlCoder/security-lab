@@ -1,10 +1,11 @@
 [CmdletBinding()]
-param([switch]$UseExistingServer, [switch]$NoBuild)
+param([switch]$UseExistingServer, [switch]$NoBuild, [switch]$AttemptDemo)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path $PSScriptRoot -Parent
 $savedConnection = [Environment]::GetEnvironmentVariable('COURSEWORK_TEST_POSTGRES')
 $savedPassword = [Environment]::GetEnvironmentVariable('POSTGRES_PASSWORD')
+$savedRunId = [Environment]::GetEnvironmentVariable('COURSEWORK_LIVE_RUN_ID')
 $container = $null
 $runId = [Guid]::NewGuid().ToString('N')
 
@@ -15,9 +16,11 @@ try {
         dotnet build backend/Platform.Coursework.Demo/Platform.Coursework.Demo.csproj --configuration Release `
             -m:1 -p:UseSharedCompilation=false --disable-build-servers
         if ($LASTEXITCODE -ne 0) { throw 'The live demonstration build failed.' }
-        dotnet build backend/Platform.Coursework.AdminTool/Platform.Coursework.AdminTool.csproj --configuration Release `
-            -m:1 -p:UseSharedCompilation=false --disable-build-servers
-        if ($LASTEXITCODE -ne 0) { throw 'The operator tool build failed.' }
+        if (-not $AttemptDemo) {
+            dotnet build backend/Platform.Coursework.AdminTool/Platform.Coursework.AdminTool.csproj --configuration Release `
+                -m:1 -p:UseSharedCompilation=false --disable-build-servers
+            if ($LASTEXITCODE -ne 0) { throw 'The operator tool build failed.' }
+        }
     }
     if ($UseExistingServer) {
         if ([string]::IsNullOrWhiteSpace($savedConnection)) {
@@ -60,26 +63,44 @@ try {
         $env:COURSEWORK_TEST_POSTGRES = $connection.ConnectionString
     }
 
-    $started = [DateTime]::UtcNow
-    dotnet backend/Platform.Coursework.Demo/bin/Release/net10.0/Platform.Coursework.Demo.dll
-    if ($LASTEXITCODE -ne 0) { throw 'The real HTTPS/Kestrel demonstration failed.' }
+    $env:COURSEWORK_LIVE_RUN_ID = $runId
+    $demoArguments = @()
+    $scenario = 'ADM08'
+    $evidenceName = 'live-administration.json'
+    if ($AttemptDemo) {
+        $demoArguments = @('--attempt-demo')
+        $scenario = 'ACC04'
+        $evidenceName = 'live-attempts.json'
+    }
 
-    $reportFile = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'TestResults') `
-        -Filter 'live-administration.json' -Recurse -File |
-        Where-Object { $_.LastWriteTimeUtc -ge $started } |
-        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-    if ($null -eq $reportFile) { throw 'No fresh live-demonstration evidence was produced.' }
-    $report = Get-Content -LiteralPath $reportFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+    dotnet backend/Platform.Coursework.Demo/bin/Release/net10.0/Platform.Coursework.Demo.dll @demoArguments
+    if ($LASTEXITCODE -ne 0) { throw "The $scenario HTTPS/Kestrel demonstration failed." }
+
+    $reportPath = Join-Path (Join-Path $repositoryRoot "TestResults/coursework-live-$runId") $evidenceName
+    if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'No evidence was produced for this run.' }
+    $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $checks = @($report.checks)
     $http = @($checks | Where-Object { $_.kind -eq 'http' })
     $failed = @($checks | Where-Object { $_.passed -ne $true })
-    if ($report.succeeded -ne $true -or $report.isolatedStateRemoved -ne $true -or
-        $report.originalDelegateCookieReused -ne $true -or [int]$report.apiRestarts -lt 1 -or
-        $checks.Count -lt 30 -or $http.Count -lt 25 -or $failed.Count -ne 0) {
-        throw 'Live evidence did not confirm the required HTTP, restart, same-cookie and cleanup checks.'
+    if ($report.runId -ne $runId -or $report.scenario -ne $scenario -or
+        $report.succeeded -ne $true -or $report.isolatedStateRemoved -ne $true -or $failed.Count -ne 0) {
+        throw 'The live evidence is incomplete or does not belong to this run.'
     }
-    Write-Host "LIVE evidence verified: $($checks.Count) checks, $($http.Count) HTTP checks; API restart, same cookie and cleanup confirmed."
-    Write-Host 'ATT and persistent membership integration remain external dependencies; this is the ADM-08 live demonstration.'
+    if ($AttemptDemo) {
+        if ($http.Count -lt 10 -or $report.providers -notcontains 'local HTTPS ATT stub' -or
+            $report.providers -notcontains 'synthetic course membership') {
+            throw 'The ACC-04 evidence did not confirm the required HTTPS and demo-provider checks.'
+        }
+        Write-Host "LIVE ACC04 evidence verified: $($checks.Count) checks, $($http.Count) HTTP checks."
+        Write-Host 'ATT and course membership are demo fixtures; the API, Identity sessions and Access policies are real.'
+    }
+    else {
+        if ($report.originalDelegateCookieReused -ne $true -or [int]$report.apiRestarts -lt 1 -or
+            $checks.Count -lt 30 -or $http.Count -lt 25) {
+            throw 'The ADM-08 evidence did not confirm the required HTTP, restart and same-cookie checks.'
+        }
+        Write-Host "LIVE ADM08 evidence verified: $($checks.Count) checks, $($http.Count) HTTP checks; API restart, same cookie and cleanup confirmed."
+    }
 }
 
 finally {
@@ -89,6 +110,7 @@ finally {
     finally {
         [Environment]::SetEnvironmentVariable('COURSEWORK_TEST_POSTGRES', $savedConnection)
         [Environment]::SetEnvironmentVariable('POSTGRES_PASSWORD', $savedPassword)
+        [Environment]::SetEnvironmentVariable('COURSEWORK_LIVE_RUN_ID', $savedRunId)
         Pop-Location
     }
 }

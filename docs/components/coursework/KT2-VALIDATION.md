@@ -214,3 +214,18 @@ or instruction file is added.
 missing central audit type agreements, human neighboring-team acknowledgement and
 real Tapiz/PR evidence are not fabricated. The current frontend remains the KT1
 simulator. Public/browser deployment and all-platform test execution are not claimed.
+
+## Local ACC-04 ATT stub validation — 2026-11-26
+
+| Check | Result |
+| --- | --- |
+| `demo-coursework-live.ps1 -AttemptDemo -UseExistingServer` | 21/21 checks, including 12 HTTP checks; build and cleanup passed |
+| `demo-coursework-live.ps1 -UseExistingServer -NoBuild` (ADM-08) | 59/59 checks, including 36 HTTP checks; API restart, same-cookie revocation and cleanup passed |
+| ACC-04 membership integration on a separate local merge of [ACC-02 PR #172](https://github.com/owlCoder/security-lab/pull/172) (`9008002`) | 1/1 test; owner read and saved with an active PostgreSQL membership. After withdrawal, the same session received 404 for both operations and no second write reached the ATT double. |
+
+The live runs used .NET 10, PowerShell and an isolated PostgreSQL 17.12 server.
+The ACC-04 demo uses the real HTTPS API and real Identity sessions, with a local
+HTTPS ATT double and synthetic course membership; it does not require #172 and
+does not assert that a real ATT implementation exists. Results are emitted under
+`TestResults/coursework-live-<run>/`, as `live-attempts.json` or
+`live-administration.json` according to the selected mode.

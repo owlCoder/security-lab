@@ -21,6 +21,7 @@ internal sealed class DemoFixture : IAsyncDisposable
     private readonly string database;
     private bool created;
     private bool disposed;
+    public string RepositoryRoot => root;
     public string Connection { get; }
     public string PrivateDirectory { get; }
     public string Password { get; } = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
@@ -48,7 +49,7 @@ internal sealed class DemoFixture : IAsyncDisposable
     public CoursesDbContext Catalog() => new(new DbContextOptionsBuilder<CoursesDbContext>()
         .UseNpgsql(Connection, p => p.MigrationsHistoryTable("__EFMigrationsHistory", "courses")).Options);
 
-    public async Task InitializeAsync(CancellationToken ct, Action<string>? stage = null)
+    public async Task InitializeAsync(CancellationToken ct, Action<string>? stage = null, bool includeAdministration = true)
     {
         stage?.Invoke("create-own-isolated-database");
         await using (var db = new NpgsqlConnection(bootstrap))
@@ -75,6 +76,8 @@ internal sealed class DemoFixture : IAsyncDisposable
         }
         stage?.Invoke("migrate-real-central-audit-schema");
         await AuditPersistenceExtensions.MigrateAuditDatabaseAsync(Connection, ct);
+        if (!includeAdministration) return;
+
         stage?.Invoke("migrate-and-seed-isolated-catalog");
         await using (var courses = Catalog())
         {
