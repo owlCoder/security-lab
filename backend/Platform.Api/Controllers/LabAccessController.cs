@@ -4,6 +4,7 @@ using Platform.Api.Interfaces.Identity;
 using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Domain;
 using Platform.Prerequisites.Contracts;
+using Platform.Prerequisites.Infrastructure;
 using AccountState = Platform.Access.Domain.Enums.AccountState;
 
 namespace Platform.Api.Controllers;
@@ -15,7 +16,8 @@ public sealed class LabAccessController(
     IPrerequisiteAccessService accessService,
     ILabPublicContentReader contentReader,
     ICourseMembership membership,
-    IRequestSubjectResolver subjectResolver) : ControllerBase
+    IRequestSubjectResolver subjectResolver,
+    IPrerequisiteRepository repository) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> Get(Guid laboratoryId, CancellationToken cancellationToken)
@@ -41,9 +43,17 @@ public sealed class LabAccessController(
         if (role != CourseRole.Student || content.State != LabVisibilityState.Published)
             return NotFound();
 
-        var result = await accessService.CheckAccessAsync(userId, laboratoryId, cancellationToken);
+        try
+        {
+            var result = await accessService.CheckAccessAsync(userId, laboratoryId, cancellationToken);
 
-        return Ok(new LabAccessResponse(result.IsUnlocked, result.MissingPrerequisites));
+            return Ok(new LabAccessResponse(result.IsUnlocked, result.MissingPrerequisites));
+        }
+        catch (InvalidOperationException)
+            when (repository is UnavailablePrerequisiteRepository)
+        {
+            return StatusCode(503, new { code = "prerequisite_storage_unavailable" });
+        }
     }
 
     public sealed record LabAccessResponse(bool IsUnlocked, IReadOnlyList<Guid> MissingPrerequisites);

@@ -7,6 +7,7 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Domain;
 using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Domain;
+using Platform.Prerequisites.Infrastructure;
 
 namespace Platform.Prerequisites.Tests;
 
@@ -125,7 +126,8 @@ public class LabAccessControllerTests
             access,
             new FixedContentReader(content),
             new FixedMembership(role),
-            new FixedSubjectResolver(subject));
+            new FixedSubjectResolver(subject),
+            new InMemoryPrerequisiteRepository());
 
         controller.ControllerContext = new ControllerContext
         {
