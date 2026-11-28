@@ -279,7 +279,10 @@ public sealed class MfaVerificationIntegrationTests : MfaIntegrationTestBase
 
     private static async Task<HttpResponseMessage> EnrollWithAsync(HttpClient client, string sessionToken, CsrfPair pair)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/mfa/enroll");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/mfa/enroll")
+        {
+            Content = JsonContent.Create(new { Password })
+        };
         pair.ApplyTo(request, sessionToken);
         return await client.SendAsync(request);
     }
