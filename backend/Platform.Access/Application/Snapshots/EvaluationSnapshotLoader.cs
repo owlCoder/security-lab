@@ -56,7 +56,7 @@ public sealed class EvaluationSnapshotLoader : IEvaluationSnapshotLoader
         var now = timeProvider.GetUtcNow();
         var accountId = ParseAccountId(subject.Id);
 
-        var resourceTask = ResolveResourceAsync(request.Resource, cancellationToken);
+        var resourceTask = ResolveResourceAsync(request.Resource, subject, cancellationToken);
         var grantsTask = LoadGrantsAsync(accountId, request.Action, cancellationToken);
         ObserveFault(resourceTask);
         ObserveFault(grantsTask);
@@ -72,14 +72,14 @@ public sealed class EvaluationSnapshotLoader : IEvaluationSnapshotLoader
         return new EvaluationSnapshot(subject, membership, resource, grants, now);
     }
 
-    private async Task<ResourceDescriptor?> ResolveResourceAsync(ResourceRef? resource, CancellationToken cancellationToken)
+    private async Task<ResourceDescriptor?> ResolveResourceAsync(ResourceRef? resource, SubjectRef subject, CancellationToken cancellationToken)
     {
         if (resource?.Type is null || !resolvers.TryGetValue(resource.Type, out var resolver))
         {
             return null;
         }
 
-        var descriptor = await resolver.ResolveAsync(resource, cancellationToken).ConfigureAwait(false);
+        var descriptor = await resolver.ResolveAsync(resource, subject, cancellationToken).ConfigureAwait(false);
         if (descriptor is null)
         {
             return null;

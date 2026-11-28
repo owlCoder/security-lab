@@ -22,18 +22,41 @@ public sealed class FakeMembershipReader(
 
 public sealed class FakeResourceResolver(
     string resourceType,
-    Func<ResourceRef, CancellationToken, ValueTask<ResourceDescriptor?>>? handler = null) : IResourceAttributeResolver
+    Func<ResourceRef, CancellationToken, ValueTask<ResourceDescriptor?>>? handler = null,
+    Func<ResourceRef, SubjectRef, CancellationToken, ValueTask<ResourceDescriptor?>>? subjectHandler = null) : IResourceAttributeResolver
 {
     private int calls;
+    private readonly List<SubjectRef> subjects = [];
 
     public string ResourceType => resourceType;
 
     public int Calls => Volatile.Read(ref calls);
 
+    public IReadOnlyList<SubjectRef> Subjects
+    {
+        get { lock (subjects) { return subjects.ToArray(); } }
+    }
+
     public ValueTask<ResourceDescriptor?> ResolveAsync(ResourceRef resource, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref calls);
         return handler is null ? ValueTask.FromResult<ResourceDescriptor?>(null) : handler(resource, cancellationToken);
+    }
+
+    public ValueTask<ResourceDescriptor?> ResolveAsync(
+        ResourceRef resource,
+        SubjectRef subject,
+        CancellationToken cancellationToken)
+    {
+        lock (subjects) { subjects.Add(subject); }
+
+        if (subjectHandler is null)
+        {
+            return ResolveAsync(resource, cancellationToken);
+        }
+
+        Interlocked.Increment(ref calls);
+        return subjectHandler(resource, subject, cancellationToken);
     }
 }
 

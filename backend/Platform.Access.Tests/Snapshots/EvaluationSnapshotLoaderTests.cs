@@ -77,6 +77,32 @@ public class EvaluationSnapshotLoaderTests
     }
 
     [Test]
+    public async Task ACC08_Load_PassesSubjectToResourceResolver()
+    {
+        SubjectRef? receivedSubject = null;
+        var resolver = new FakeResourceResolver(
+            "attempt",
+            subjectHandler: (_, subject, _) =>
+            {
+                receivedSubject = subject;
+                return ValueTask.FromResult<ResourceDescriptor?>(Descriptor());
+            });
+        var requestSubject = new SubjectRef(Account.ToString("D"), AccountState.Active);
+        var request = new AccessRequest(
+            requestSubject,
+            "attempt.read",
+            new ResourceRef("attempt", "att-1"),
+            "corr-subject");
+
+        var snapshot = await Loader(resolver: resolver).LoadAsync(request, CancellationToken.None);
+
+        Assert.That(snapshot.Subject, Is.SameAs(requestSubject));
+        Assert.That(receivedSubject, Is.SameAs(requestSubject));
+        Assert.That(resolver.Subjects, Has.Count.EqualTo(1));
+        Assert.That(resolver.Subjects[0], Is.SameAs(requestSubject));
+    }
+
+    [Test]
     public async Task ACC08_Load_MembershipIsReadForTheCourseOfTheResolvedResource()
     {
         var membership = new FakeMembershipReader();
