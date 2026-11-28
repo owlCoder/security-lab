@@ -75,18 +75,19 @@ public sealed class LoginLockoutIntegrationTests : IntegrationTestBase
     {
         // Arrange
         var (_, email) = await CreateStudentAsync();
+        var statuses = new List<HttpStatusCode>();
 
+        // Act
         for (var round = 0; round < 3; round++)
         {
             for (var i = 0; i < MaxAttempts - 1; i++)
                 await LoginAsync(email, WrongPassword);
 
-            // Act
-            var success = await LoginAsync(email, Password);
-
-            // Assert: typos below the limit never add up across successful logins.
-            Assert.That(success.Status, Is.EqualTo(HttpStatusCode.OK));
+            statuses.Add((await LoginAsync(email, Password)).Status);
         }
+
+        // Assert: typos below the limit never add up across successful logins.
+        Assert.That(statuses, Is.All.EqualTo(HttpStatusCode.OK));
     }
 
     [Test]
@@ -115,7 +116,7 @@ public sealed class LoginLockoutIntegrationTests : IntegrationTestBase
     }
 
     [Test]
-    public async Task Login_LockedAccountAndUnknownEmail_ShouldReturnIdenticalResponses()
+    public async Task Login_UnknownEmailAfterFailureLimit_ShouldMatchLockedAccountResponse()
     {
         // Arrange
         var (_, email) = await CreateStudentAsync();
