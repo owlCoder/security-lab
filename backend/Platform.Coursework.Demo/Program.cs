@@ -6,9 +6,15 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length != 0)
+        if (args is [LiveAttemptApi.ChildArgument])
         {
-            Console.Error.WriteLine("Run from the repository root using scripts/demo-coursework-live.ps1. No credentials belong in arguments.");
+            await LiveAttemptApi.RunAsync();
+            return 0;
+        }
+        var attemptDemo = args is ["--attempt-demo"];
+        if (args.Length != 0 && !attemptDemo)
+        {
+            Console.Error.WriteLine("Run from the repository root using scripts/demo-coursework-live.ps1, optionally with -AttemptDemo.");
             return 2;
         }
         var root = Path.GetFullPath(Directory.GetCurrentDirectory());
@@ -18,10 +24,12 @@ internal static class Program
         if (string.IsNullOrWhiteSpace(bootstrap))
         { Console.Error.WriteLine("Use the isolated launcher or an explicitly dedicated COURSEWORK_TEST_POSTGRES server."); return 2; }
 
-        var report = new LiveReport();
+        var runId = Guid.TryParseExact(Environment.GetEnvironmentVariable("COURSEWORK_LIVE_RUN_ID"), "N", out var id)
+            ? id.ToString("N") : Guid.NewGuid().ToString("N");
+        var report = new LiveReport(runId, attemptDemo);
         var results = Path.Combine(root, "TestResults", "coursework-live-" + report.RunId);
         Directory.CreateDirectory(results);
-        var evidence = Path.Combine(results, "live-administration.json");
+        var evidence = Path.Combine(results, attemptDemo ? "live-attempts.json" : "live-administration.json");
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using var interrupt = new CancellationTokenSource();
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; interrupt.Cancel(); };
@@ -29,15 +37,25 @@ internal static class Program
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, interrupt.Token);
         DemoFixture? fixture = null;
         LiveApiProcess? api = null;
+        AttemptDemoStub? stub = null;
         try
         {
             report.Stage = "prepare-isolated-provider-state";
             fixture = new DemoFixture(root, bootstrap, report.RunId);
-            await fixture.InitializeAsync(linked.Token, stage => report.Stage = stage);
-            report.Stage = "start-production-https-kestrel";
-            api = new LiveApiProcess(root, fixture.Connection, fixture.PrivateDirectory);
+            await fixture.InitializeAsync(linked.Token, stage => report.Stage = stage, includeAdministration: !attemptDemo);
+            if (attemptDemo)
+            {
+                report.Stage = "start-loopback-att-stub";
+                stub = new AttemptDemoStub(fixture);
+                await stub.StartAsync(linked.Token);
+            }
+            report.Stage = "start-https-kestrel-api";
+            api = new LiveApiProcess(fixture, stub);
             await api.StartAsync(linked.Token);
-            await LiveScenario.RunAsync(fixture, api, report, linked.Token);
+            if (stub is not null)
+                await LiveAttemptScenario.RunAsync(fixture, api, stub, report, linked.Token);
+            else
+                await LiveScenario.RunAsync(fixture, api, report, linked.Token);
             report.Succeeded = true;
         }
         catch (Exception ex)
@@ -46,12 +64,17 @@ internal static class Program
             report.Succeeded = false;
             report.FailureType = ex.GetType().Name;
             Console.Error.WriteLine($"Live demonstration failed at {report.Stage} ({report.FailureType}).");
+            if (attemptDemo && api is not null)
+                foreach (var item in api.AttemptDiagnostics)
+                    Console.Error.WriteLine("ACC-04 diagnostic: " + item);
         }
         finally
         {
             Console.CancelKeyPress -= cancel;
             try { if (api is not null) await api.DisposeAsync(); }
             catch (Exception ex) { report.CleanupErrors.Add("API:" + ex.GetType().Name); }
+            try { if (stub is not null) await stub.DisposeAsync(); }
+            catch (Exception ex) { report.CleanupErrors.Add("ATT stub:" + ex.GetType().Name); }
             try
             {
                 if (fixture is not null) { await fixture.DisposeAsync(); report.IsolatedStateRemoved = true; }
@@ -63,19 +86,22 @@ internal static class Program
                 new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
         }
         var passed = report.Checks.Count(c => c.Passed);
-        Console.WriteLine($"LIVE ADM08 {(report.Succeeded ? "PASS" : "FAIL")}: {passed}/{report.Checks.Count} checks; HTTP={report.Checks.Count(c => c.Kind == "http")}. Evidence: {evidence}");
+        Console.WriteLine($"LIVE {report.Scenario} {(report.Succeeded ? "PASS" : "FAIL")}: {passed}/{report.Checks.Count} checks; HTTP={report.Checks.Count(c => c.Kind == "http")}. Evidence: {evidence}");
         return report.Succeeded ? 0 : 1;
     }
 }
 
-internal sealed class LiveReport
+internal sealed class LiveReport(string runId, bool attemptDemo)
 {
     public int SchemaVersion { get; } = 1;
-    public string RunId { get; } = Guid.NewGuid().ToString("N");
+    public string RunId { get; } = runId;
+    public string Scenario { get; } = attemptDemo ? "ACC04" : "ADM08";
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
-    public string Mode { get; } = "Real HTTPS/Kestrel, Production host, disposable PostgreSQL providers";
-    public string[] Providers { get; } = ["Identity/session", "ACC-01 catalog", "Platform.Access", "ADM-08 PostgreSQL", "central Audit"];
+    public string Mode { get; } = "Real HTTPS/Kestrel and disposable PostgreSQL providers";
+    public string[] Providers { get; } = attemptDemo
+        ? ["Identity/session", "Platform.Access", "local HTTPS ATT stub", "synthetic course membership"]
+        : ["Identity/session", "ACC-01 catalog", "Platform.Access", "ADM-08 PostgreSQL", "central Audit"];
     public string[] UnclosedBoundaries { get; } = ["Actual ATT read/CAS provider", "Actual ACC-02 persistence on main", "Unmapped administrative audit types", "Human contract acceptance"];
     public string Stage { get; set; } = "initializing";
     public bool Succeeded { get; set; }
