@@ -212,7 +212,7 @@ The phone (E2) is outside all boundaries. The TOTP secret leaves the server once
 
 ## Security requirements
 
-- Server-side access checks: every request to an endpoint without `[AllowAnonymous]` goes through P3 and gets `401` without a valid session. Administrator-only actions are decided on the server (`AdminOnlyAccessDecision`, `CreateAccountPolicy`). Endpoints without an explicit policy are denied by default (ACC-05).
+- Server-side access checks: every request to an endpoint without `[AllowAnonymous]` goes through P3 and gets `401` without a valid session. Administrator-only actions are decided on the server (`AdminOnlyAccountAdministrationDecision`, `CreateAccountPolicy`). Endpoints without an explicit policy are denied by default (ACC-05).
 - Input validation and sensitive data: length limits and generic error messages on login, no secrets in logs or API responses (SEC-02, AUD-03).
 - Negative scenarios: see [Negative flows](#negative-flows). Unit tests exist for `LoginService`, `LogoutService`, `MfaService`, `IdentityAuditProducer`, `SessionStore`, `StoreSessionCreator`, `SessionManager`, `SessionCheckMiddleware`, `DevelopmentAccountSeeder` and `TestUsers`. HTTP-level tests against PostgreSQL (Testcontainers) cover login, logout, `me`, sessions and MFA (`Integration/Mfa/`, including parallel requests and audit rows).
 
@@ -229,7 +229,7 @@ These are the places where the code and the intended single data model differ. T
 
 Present in the repository now:
 
-- Contracts: `IIdentityContext` (`CallerIdentity`), `ISessionManager`, `IAccessDecision`, `AuthenticationLevel` (`None`, `MfaPending`, `Active`). Audit through the Audit module contract (`IdentityAuditProducer`); the old Identity `IAuditWriter` / `LoggerAuditWriter` is removed.
+- Contracts: `IIdentityContext` (`CallerIdentity`), `ISessionManager`, `IAccountAdministrationDecision`, `AuthenticationLevel` (`None`, `MfaPending`, `Active`). Audit through the Audit module contract (`IdentityAuditProducer`); the old Identity `IAuditWriter` / `LoggerAuditWriter` is removed.
 - Identity module: `backend/Platform.Identity` with `PlatformIdentityDbContext` (`identity.accounts`, `identity.sessions`, `identity.mfa_credentials`), `AddIdentityModule(configuration)`, BCrypt `IPasswordHasher`, `ICredentialVerifier`, `ISessionStore`, `IMfaCredentialsStore`, migrations `InitialIdentity`, `AddAccountPasswordHash`, `AddSessions`, `AddAccountRole` and the MFA credentials migration.
 - US-17 and US-18 MFA: `POST /api/auth/mfa/enroll`, `.../enroll/confirm`, `.../verify` (`MfaService`). Details in [`IDN-02_TOTP_MFA.md`](./IDN-02_TOTP_MFA.md).
 - US-04 login: `POST /api/auth/login` (`AuthController`, `LoginService`), cookie `SecurityLab.Session`. Details in [`IDN-02_LOGIN.md`](./IDN-02_LOGIN.md).
@@ -239,7 +239,7 @@ Present in the repository now:
 - Session revocation: `SessionManager.RevokeAllForUser`, `RevokeSession` and `ListForUser` work against `identity.sessions`. `ChangeAccountStatus` (IDN-03) calls `RevokeAllForUser` when it blocks or archives an account.
 - US-09 development seed: `DevelopmentDatabase` and `DevelopmentAccountSeeder` (four accounts, Development only), test helper `TestUsers` in `Platform.Identity.Tests`.
 - Frontend: `frontend/src/auth/authApi.ts` calls `/api/auth/me`, `/api/auth/login` and `/api/auth/logout`, `frontend/src/api/accounts.ts` calls `POST /api/admin/accounts`.
-- Not used on the request path: `StubIdentityContext` and `AnonymousIdentityContext`. The old `StoreSessionManager` stub has been deleted.
+- The unused `StubIdentityContext` and `AnonymousIdentityContext` and the old `StoreSessionManager` stub have been deleted.
 
 Planned (this DFD describes them, but the code does not exist yet): mandatory MFA for selected groups (`IMfaPolicy`, US-19).
 

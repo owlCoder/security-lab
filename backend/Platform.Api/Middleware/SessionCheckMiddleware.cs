@@ -4,12 +4,13 @@ using Platform.Api.Interfaces.Identity;
 using Platform.Api.Models.Identity;
 using Platform.Api.Modules.LabLocalization;
 using Platform.Api.Services.Identity;
+using Platform.Identity.Services.Sessions;
 
 namespace Platform.Api.Middleware;
 
 public class SessionCheckMiddleware
 {
-    public const string SessionItemKey = "session";
+    public const string SessionItemKey = SessionHttpContextItems.Session;
     public const string InvalidSessionCode = "session_invalid";
 
     private readonly RequestDelegate _next;
