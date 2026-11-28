@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import LabCatalog from './components/catalog/LabCatalog'
 import DraftsPage from './pages/DraftsPage'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
@@ -113,6 +114,7 @@ export default function App() {
           <Route path="laboratories/:laboratoryId/competencies" element={<CompetenciesPage />} />
           <Route path="account/sessions" element={<SessionsPage />} />
           <Route path="access-demo" element={<><ProtectedApp /><RevisionsSection /></>} />
+          <Route path="catalog" element={<LabCatalog />} />
           <Route path="login-history" element={<LoginHistoryPage />} />
           {/*
             AUT-01: demo stranica nacrta (samo lokalno stanje, ništa se ne čuva).
