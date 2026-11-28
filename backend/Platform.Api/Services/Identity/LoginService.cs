@@ -7,6 +7,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Platform.Api.Services.Identity;
 
@@ -19,7 +20,10 @@ internal sealed class LoginService(
     ISessionCreator sessions,
     ISessionManager sessionManager,
     IMfaCredentialsStore mfaCredentials,
-    IdentityAuditProducer audit) : ILoginService
+    IdentityAuditProducer audit,
+    IEmailSender emailSender,
+    TimeProvider clock,
+    ILogger<LoginService> logger) : ILoginService
 {
     public async Task<LoginResult> ExecuteAsync(
         string? email, string? password, string correlationId, CancellationToken ct = default)
@@ -46,6 +50,15 @@ internal sealed class LoginService(
             return await FailAsync(
                 LoginOutcome.InvalidCredentials,
                 check.Status == AccountStatus.Blocked ? "account_blocked" : "account_archived",
+                correlationId,
+                check.AccountId,
+                ct,
+                actorConfirmed: true);
+
+        if (!check.EmailConfirmed)
+            return await FailAsync(
+                LoginOutcome.InvalidCredentials,
+                "email_not_confirmed",
                 correlationId,
                 check.AccountId,
                 ct,
@@ -109,6 +122,24 @@ internal sealed class LoginService(
             await sessionManager.RevokeSession(
                 check.AccountId, session.Handle, CancellationToken.None);
             return new LoginResult(LoginOutcome.Unavailable);
+        }
+
+        if (check.NewSessionNotificationsEnabled && !string.IsNullOrWhiteSpace(check.Email))
+        {
+            try
+            {
+                var occurredAt = clock.GetUtcNow().ToString("O");
+                await emailSender.SendAsync(
+                    check.Email,
+                    "New sign-in to Security Lab",
+                    $"A new sign-in to your Security Lab account occurred at {occurredAt} UTC. " +
+                    "If this was not you, reset your password and contact support.",
+                    ct);
+            }
+            catch (EmailDeliveryException ex)
+            {
+                EmailDeliveryLogging.SessionNotificationFailed(logger, check.AccountId, ex);
+            }
         }
 
         return new LoginResult(

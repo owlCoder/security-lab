@@ -47,7 +47,9 @@ public sealed class AccountLockoutTests
 
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<IConfiguration>(config);
         services.AddSingleton<TimeProvider>(_clock);
+        services.AddIdentityModule();
         services.AddIdentityModule(config);
         services.Replace(ServiceDescriptor.Singleton<IPasswordHasher>(_hasher));
 

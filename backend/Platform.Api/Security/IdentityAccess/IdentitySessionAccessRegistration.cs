@@ -24,7 +24,11 @@ public static class IdentitySessionAccessRegistration
             .AddAccessAction<SessionSelfServicePolicy>(
                 new ActionDefinition(IdentityAccessActions.SessionList, ActionScope.Authenticated, null, false))
             .AddAccessAction<SessionSelfServicePolicy>(
-                new ActionDefinition(IdentityAccessActions.SessionRevoke, ActionScope.Authenticated, null, false));
+                new ActionDefinition(IdentityAccessActions.SessionRevoke, ActionScope.Authenticated, null, false))
+            .AddAccessAction<SessionNotificationPolicy>(
+                new ActionDefinition(IdentityAccessActions.SessionNotificationsRead, ActionScope.Authenticated, null, false))
+            .AddAccessAction<SessionNotificationPolicy>(
+                new ActionDefinition(IdentityAccessActions.SessionNotificationsUpdate, ActionScope.Authenticated, null, false));
 
         // Decorator around the currently registered subject provider (anonymous if there is none yet).
         var original = services.LastOrDefault(d => d.ServiceType == typeof(IAccessSubjectProvider));

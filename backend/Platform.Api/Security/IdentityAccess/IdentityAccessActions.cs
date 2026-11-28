@@ -13,7 +13,10 @@ public static class IdentityAccessActions
 {
     public const string Login = "identity.login";
     public const string Logout = "identity.logout";
+    public const string EmailConfirmation = "identity.email.confirmation";
     public const string SessionRead = "identity.session.read";
+    public const string SessionNotificationsRead = "identity.session.notifications.read";
+    public const string SessionNotificationsUpdate = "identity.session.notifications.update";
 
     /// <summary>US-15: anyone, signed in or not, gets a CSRF token (<c>GET /api/auth/csrf</c>); login needs one too.</summary>
     public const string CsrfToken = "identity.csrf.token";
@@ -61,6 +64,8 @@ public static class IdentityAccessActions
             SessionRead,
             SessionList,
             SessionRevoke,
+            SessionNotificationsRead,
+            SessionNotificationsUpdate,
             MfaEnroll,
             MfaEnrollConfirm,
         };
@@ -75,6 +80,8 @@ public static class IdentityAccessActions
             SessionRead,
             SessionList,
             SessionRevoke,
+            SessionNotificationsRead,
+            SessionNotificationsUpdate,
             MfaEnroll,
             MfaEnrollConfirm,
             // #185: /student-view i /preview (tim 6) dobijaju subjekat iz prave sesije, ne iz razvojnog zaglavlja.

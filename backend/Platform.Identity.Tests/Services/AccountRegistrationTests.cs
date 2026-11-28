@@ -6,6 +6,7 @@ using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
 using Platform.Identity.Persistence;
+using Platform.Identity;
 using Testcontainers.PostgreSql;
 
 namespace Platform.Identity.Tests.Services;
@@ -34,10 +35,13 @@ public sealed class AccountRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IConfiguration>(config);
+        services.AddIdentityModule(config);
         services.AddIdentityModule();
         _provider = services.BuildServiceProvider();
 
         using var scope = _provider.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>()
+            .Database.MigrateAsync();
         await scope.ServiceProvider.GetRequiredService<AccountDbContext>()
             .Database.MigrateAsync();
     }
@@ -62,7 +66,43 @@ public sealed class AccountRegistrationTests
         var user = await FindByIdAsync(result.AccountId!.Value);
         Assert.That(user.Email, Is.EqualTo(email.ToLowerInvariant()));
         Assert.That(user.Status, Is.EqualTo(AccountStatus.Active));
+        Assert.That(user.EmailConfirmed, Is.False);
         Assert.That(user.PasswordHash, Is.Not.Null.And.Not.EqualTo(StrongPassword));
+
+        using var scope = _provider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var loginAccount = await db.Accounts.SingleAsync(account => account.Id == user.Id);
+        Assert.That(loginAccount.EmailConfirmed, Is.False);
+        Assert.That(loginAccount.PasswordHash, Is.Not.Null.And.Not.EqualTo(StrongPassword));
+    }
+
+    [Test]
+    public async Task Confirmation_token_is_one_time_and_only_its_hash_is_stored()
+    {
+        var email = NewEmail();
+        var registration = await RegisterAsync(email, StrongPassword);
+        using var scope = _provider.CreateScope();
+        var confirmation = scope.ServiceProvider.GetRequiredService<IEmailConfirmationService>();
+
+        var grant = await confirmation.IssueAsync(email);
+
+        Assert.That(grant, Is.Not.Null);
+        Assert.That(grant!.Email, Is.EqualTo(email));
+        Assert.That(grant.Token, Is.Not.Empty);
+        Assert.That(await confirmation.ConfirmAsync(grant.Token), Is.True);
+        Assert.That(await confirmation.ConfirmAsync(grant.Token), Is.False);
+        Assert.That(await confirmation.IssueAsync(email), Is.Null);
+
+        var db = scope.ServiceProvider.GetRequiredService<PlatformIdentityDbContext>();
+        var account = await db.Accounts.SingleAsync(candidate => candidate.Id == registration.AccountId);
+        var storedToken = await db.EmailConfirmationTokens.SingleAsync(token => token.UserId == account.Id);
+        Assert.That(account.EmailConfirmed, Is.True);
+        Assert.That(storedToken.TokenHash, Is.EqualTo(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(grant.Token))));
+        Assert.That(storedToken.TokenHash.Length, Is.EqualTo(32));
+
+        var userManager = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<AppUser>>();
+        Assert.That((await userManager.FindByIdAsync(account.Id.ToString()))!.EmailConfirmed, Is.True);
     }
 
     [TestCase("")]

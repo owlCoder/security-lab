@@ -1,14 +1,21 @@
 using System.Net.Mail;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Platform.Identity.Entities;
+using Platform.Identity.Enums;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Models;
+using Platform.Identity.Persistence;
 
 namespace Platform.Identity.Services;
 
-public sealed class AccountRegistrationService(UserManager<AppUser> userManager)
+public sealed class AccountRegistrationService(
+    UserManager<AppUser> userManager,
+    AccountDbContext accountDb,
+    PlatformIdentityDbContext identityDb,
+    IPasswordHasher passwordHasher)
     : IAccountRegistration
 {
     private const int MaxEmailLength = 254;
@@ -42,8 +49,12 @@ public sealed class AccountRegistrationService(UserManager<AppUser> userManager)
         {
             Id = Guid.NewGuid(),
             UserName = email,
-            Email = email
+            Email = email,
+            EmailConfirmed = false
         };
+
+        await using var transaction = await identityDb.Database.BeginTransactionAsync(cancellationToken);
+        await accountDb.Database.UseTransactionAsync(transaction.GetDbTransaction(), cancellationToken);
 
         try
         {
@@ -51,6 +62,17 @@ public sealed class AccountRegistrationService(UserManager<AppUser> userManager)
 
             if (result.Succeeded)
             {
+                var account = new UserAccount(
+                    user.Id,
+                    email,
+                    AccountStatus.Active,
+                    AccountRole.Student,
+                    emailConfirmed: false);
+                account.SetPasswordHash(passwordHasher.Hash(command.Password));
+                identityDb.Accounts.Add(account);
+                await identityDb.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+
                 return RegisterAccountResult.Created(user.Id);
             }
 

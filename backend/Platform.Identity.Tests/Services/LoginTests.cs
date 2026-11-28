@@ -40,6 +40,7 @@ public class LoginTests
     private Mock<ISessionManager> _sessionManager = null!;
     private Mock<IMfaCredentialsStore> _mfaCredentials = null!;
     private Mock<ITrustedAuditWriter> _audit = null!;
+    private Mock<IEmailSender> _emailSender = null!;
     private List<(AuditEventDraft Draft, AuditContext Context)> _events = null!;
     private LoginService _login = null!;
 
@@ -64,6 +65,7 @@ public class LoginTests
             .Callback<AuditEventDraft, AuditContext, CancellationToken>(
                 (draft, context, _) => _events.Add((draft, context)))
             .ReturnsAsync(AuditWriteResult.Recorded(Guid.NewGuid()));
+        _emailSender = new Mock<IEmailSender>();
 
         // Same defaults the old fakes had: wrong credentials, and a session store that issues a session.
         GivenCredentials(CredentialResult.Invalid);
@@ -74,7 +76,10 @@ public class LoginTests
             _sessions.Object,
             _sessionManager.Object,
             _mfaCredentials.Object,
-            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance));
+            new IdentityAuditProducer(_audit.Object, Mock.Of<ITransactionalAuditWriter>(), NullLogger<IdentityAuditProducer>.Instance),
+            _emailSender.Object,
+            TimeProvider.System,
+            NullLogger<LoginService>.Instance);
     }
 
     private void GivenCredentials(CredentialResult result) =>
@@ -252,6 +257,28 @@ public class LoginTests
         Assert.That(e.Context.Actor.Id, Is.EqualTo(id));
     }
 
+    [Test]
+    [Category("IDN-10")]
+    public async Task UnconfirmedEmail_IsRefusedWithoutCreatingASession()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(
+            true,
+            id,
+            AccountStatus.Active,
+            Email: Email,
+            EmailConfirmed: false));
+
+        var result = await _login.ExecuteAsync(Email, Password, "corr-unconfirmed");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.InvalidCredentials));
+        Assert.That(result.Session, Is.Null);
+        VerifyNoSessionCreated();
+        Assert.That(_events.Single().Draft.Outcome, Is.EqualTo(AuditOutcome.Failure));
+        Assert.That(_events.Single().Draft.Details!["reasonCode"], Is.EqualTo("email_not_confirmed"));
+        Assert.That(_events.Single().Context.Actor.Id, Is.EqualTo(id));
+    }
+
     [TestCase(null, Password)]
     [TestCase("", Password)]
     [TestCase("   ", Password)]
@@ -324,6 +351,28 @@ public class LoginTests
             id,
             handle,
             CancellationToken.None), Times.Once);
+    }
+
+    [Test]
+    [Category("IDN-13")]
+    public async Task NewSessionEmailIsSentOnlyWhenTheOwnerOptedIn()
+    {
+        var id = Guid.NewGuid();
+        GivenCredentials(new CredentialResult(
+            true,
+            id,
+            AccountStatus.Active,
+            Email: Email,
+            NewSessionNotificationsEnabled: true));
+        var result = await _login.ExecuteAsync(Email, Password, "corr-alert");
+
+        Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Success));
+        _emailSender.Verify(sender => sender.SendAsync(
+            Email,
+            It.Is<string>(subject => subject.Contains("sign-in")),
+            It.Is<string>(body => body.Contains("new sign-in", StringComparison.OrdinalIgnoreCase)
+                && !body.Contains(Token)),
+            It.IsAny<CancellationToken>()), Times.Once());
     }
 
     [Test]

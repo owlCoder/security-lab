@@ -25,6 +25,27 @@ namespace Platform.Access.Tests;
 [Property("RequirementId", "ACC-05")]
 public sealed class AccountEndpointAccessTests
 {
+    private sealed class TestEmailConfirmationService : IEmailConfirmationService
+    {
+        public Task<EmailConfirmationGrant?> IssueAsync(
+            string email,
+            CancellationToken ct = default) =>
+            Task.FromResult<EmailConfirmationGrant?>(new EmailConfirmationGrant(email, "test-token"));
+
+        public Task<bool> ConfirmAsync(string token, CancellationToken ct = default) =>
+            Task.FromResult(false);
+    }
+
+    private sealed class NoopEmailSender : IEmailSender
+    {
+        public Task SendAsync(
+            string recipient,
+            string subject,
+            string body,
+            CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
     private sealed class RecordingAccountRegistration : IAccountRegistration
     {
         public List<RegisterAccountCommand> Commands { get; } = [];
@@ -97,6 +118,8 @@ public sealed class AccountEndpointAccessTests
         builder.Services.AddSingleton<IRequestSubjectResolver, DevelopmentSubjectResolver>();
         builder.Services.AddScoped<IAccessSubjectProvider, ResolverAccessSubjectProvider>();
         builder.Services.AddSingleton<IAccountRegistration>(registration);
+        builder.Services.AddSingleton<IEmailConfirmationService, TestEmailConfirmationService>();
+        builder.Services.AddSingleton<IEmailSender, NoopEmailSender>();
         builder.Services.AddSingleton<IAccessAuditWriter, NoopAuditWriter>();
         builder.Services.AddSingleton(new AccessConfigurationOptions { RequirePolicyCoverage = false });
         builder.Services

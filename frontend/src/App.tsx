@@ -13,6 +13,7 @@ import LoginPage from './login/page'
 import CoursesPage from './pages/CoursesPage'
 import RevisionDetailPage from './pages/RevisionDetailPage'
 import RevisionListPage from './pages/RevisionListPage'
+import ConfirmEmailPage from './components/ConfirmEmailPage'
 import DraftsPage from './pages/DraftsPage'
 import AuthoringSection from './components/authoring/AuthoringSection'
 import LabVisibilitySection from './labs/LabVisibilitySection'
@@ -98,7 +99,6 @@ export default function App() {
         <Route index element={<>
           <LandingPage />
           <HealthStatus />
-
           <CourseworkKt1 />
           <LabsSection />
           <CoursesPage />
@@ -109,6 +109,7 @@ export default function App() {
         <Route path="teacher/labs/new" element={<TeacherMetadataPage />} />
         <Route path="teacher/labs/:labId/edit" element={<TeacherMetadataPage />} />
         <Route path="login" element={<LoginRoute />} />
+        <Route path="confirm-email" element={<ConfirmEmailPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="laboratories/:laboratoryId/competencies" element={<CompetenciesPage />} />
           <Route path="account/sessions" element={<SessionsPage />} />

@@ -180,6 +180,7 @@ builder.Services.AddScoped<IFederatedLoginService, FederatedLoginService>();
 var oidcEnabled = builder.Services.AddOidcFederation(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ILogoutService, LogoutService>();
 builder.Services.AddScoped<ISessionCreator, StoreSessionCreator>();
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IMfaService, MfaService>();
 builder.Services.AddScoped<IdentityAuditProducer>();
 

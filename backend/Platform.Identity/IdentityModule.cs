@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;
@@ -24,7 +25,11 @@ public static class IdentityModule
     {
         var connectionString = configuration.GetConnectionString(ConnectionStringName);
 
-        services.AddDbContext<PlatformIdentityDbContext>(options => options.UseIdentityNpgsql(connectionString));
+        services.TryAddScoped<NpgsqlConnection>(_ =>
+            new NpgsqlConnection(connectionString ?? string.Empty));
+
+        services.AddDbContext<PlatformIdentityDbContext>((sp, options) =>
+            options.UseIdentityNpgsql(sp.GetRequiredService<NpgsqlConnection>()));
 
         // IDN-06: with KeysPath the keys survive a restart and can be backed up with the database. Without it the
         // framework default location is used. The keys are not encrypted at rest (IDN-02_TOTP_MFA.md, key storage).
@@ -53,12 +58,18 @@ public static class IdentityModule
         services.AddScoped<ICredentialStore, EfCredentialStore>();
         services.AddScoped<IAccountStatusReader, EfAccountStatusReader>();
         services.AddScoped<ICredentialVerifier, CredentialVerifier>();
+        services.AddScoped<IEmailConfirmationService, EmailConfirmationService>();
+        services.AddScoped<ISessionNotificationPreferences, SessionNotificationPreferences>();
         services.AddScoped<ISessionStore, SessionStore>();
         services.AddScoped<IMfaCredentialsStore, EfMfaCredentialsStore>();
         services.AddScoped<IExternalIdentityLinker, ExternalIdentityLinker>();
 
         return services;
     }
+
+    internal static DbContextOptionsBuilder UseIdentityNpgsql(this DbContextOptionsBuilder options, NpgsqlConnection connection) =>
+        options.UseNpgsql(connection, npgsql =>
+            npgsql.MigrationsHistoryTable("__EFMigrationsHistory", PlatformIdentityDbContext.SchemaName));
 
     internal static DbContextOptionsBuilder UseIdentityNpgsql(this DbContextOptionsBuilder options, string? connectionString) =>
         options.UseNpgsql(connectionString, npgsql =>
