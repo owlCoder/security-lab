@@ -229,3 +229,22 @@ HTTPS ATT double and synthetic course membership; it does not require #172 and
 does not assert that a real ATT implementation exists. Results are emitted under
 `TestResults/coursework-live-<run>/`, as `live-attempts.json` or
 `live-administration.json` according to the selected mode.
+
+## Validation on `main` — 2026-11-28
+
+Both live HTTPS demonstrations were rerun locally on Linux against `main` commit
+[`531cb31`](https://github.com/owlCoder/security-lab/commit/531cb3172247b72df9df222e15c7fc137b305484)
+with an isolated PostgreSQL instance.
+
+| Demonstration | Local result | Report |
+|---|---|---|
+| ACC-04: draft ownership, access denial and version checks | **21/21 checks passed**, including 12 HTTP checks | `TestResults/coursework-live-<run>/live-attempts.json` |
+| ADM-08: delegation, settings, restart and revocation | **59/59 checks passed**, including 36 HTTP checks | `TestResults/coursework-live-<run>/live-administration.json` |
+
+The ACC-04 run exercised the real HTTPS API, login and authorization with
+simulated ATT and course membership. The ADM-08 run confirmed that settings
+survived a restart and that the same session lost access after delegation was revoked.
+
+The [baseline GitHub Actions run](https://github.com/owlCoder/security-lab/actions/runs/46151876600)
+passed for backend and frontend. It predates the dedicated ACC-04 CI step;
+the ACC-04 result above is from the local run.
