@@ -369,8 +369,12 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
                     It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
                 .Callback(new InvocationAction(call =>
                 {
-                    var (state, exception) = (call.Arguments[2], (Exception?)call.Arguments[3]);
-                    var message = ((Delegate)call.Arguments[4]).DynamicInvoke(state, exception);
+                    var (state, exception) = (call.Arguments[2], call.Arguments[3] as Exception);
+                    // ILogger.Log always passes a formatter; without one the capture could not read the message,
+                    // so the test fails loudly instead of recording an empty line.
+                    if (call.Arguments[4] is not Delegate formatter)
+                        throw new InvalidOperationException("ILogger.Log was called without a formatter.");
+                    var message = formatter.DynamicInvoke(state, exception);
                     var record = new StringBuilder()
                         .Append(call.Arguments[0]).Append(' ').Append(category).Append(' ').Append(call.Arguments[1])
                         .Append(": ").AppendLine(message?.ToString());
