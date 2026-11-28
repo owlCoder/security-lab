@@ -9,4 +9,10 @@ public interface IResourceAttributeResolver
     ValueTask<ResourceDescriptor?> ResolveAsync(
         ResourceRef resource,
         CancellationToken cancellationToken);
+
+    ValueTask<ResourceDescriptor?> ResolveAsync(
+        ResourceRef resource,
+        SubjectRef subject,
+        CancellationToken cancellationToken)
+        => ResolveAsync(resource, cancellationToken);
 }
