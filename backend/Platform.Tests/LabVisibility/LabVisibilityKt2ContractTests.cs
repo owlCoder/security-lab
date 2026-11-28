@@ -56,6 +56,30 @@ public class LabVisibilityKt2ContractTests
         Assert.That(LabVisibilityActions.KeyWrite, Is.EqualTo("lab.key.write"));
     }
 
+    [TestCase(true, AccessOutcome.Allow)]
+    [TestCase(false, AccessOutcome.Deny)]
+    public async Task KeyWrite_OnDraft_ChecksTeachersCourse(
+        bool teachesLabCourse,
+        AccessOutcome expectedOutcome)
+    {
+        var teacherId = Guid.NewGuid();
+        var courseId = teachesLabCourse
+            ? LabVisibilityDemoSeed.DemoCourseId
+            : Guid.NewGuid();
+
+        provider.GetRequiredService<InMemoryCourseMembership>()
+            .Set(courseId, teacherId, LabVisibilityCourseRole.Teacher);
+
+        var decision = await provider.GetRequiredService<IAccessDecision>().DecideAsync(
+            new AccessRequest(
+                new SubjectRef(teacherId.ToString(), AccountState.Active),
+                LabVisibilityActions.KeyWrite,
+                new ResourceRef("lab", LabVisibilityDemoSeed.DraftLabId.ToString()),
+                Guid.NewGuid().ToString("N")));
+
+        Assert.That(decision.Outcome, Is.EqualTo(expectedOutcome));
+    }
+
     // Negativni test: upisan student nikad ne sme da upiše ključ, ni posle kartice 5.
     [Test]
     public async Task EnrolledStudent_IsDeniedKeyWrite()
