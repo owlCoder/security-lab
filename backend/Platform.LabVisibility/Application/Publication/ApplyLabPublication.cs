@@ -15,11 +15,12 @@ public enum LabPublicationOutcome
 // ReasonCode je samo kod (npr. "key_incomplete"), nikad sadržaj ni odgovor.
 public sealed record LabPublicationResult(LabPublicationOutcome Outcome, string? ReasonCode = null);
 
-// Nazivi radnji u auditu za promenu stanja (nisu radnje pristupa tima 3).
+// Nazivi radnji u auditu za promenu stanja. Isti su kao u LabVisibilityActions.All,
+// jer trajni audit upisuje samo radnje iz te liste.
 public static class LabPublicationAuditActions
 {
-    public const string Publish = "lab.publication.publish";
-    public const string Archive = "lab.publication.archive";
+    public const string Publish = LabVisibilityActions.Publish;
+    public const string Archive = LabVisibilityActions.Archive;
 }
 
 // AUT-07 (KT2): primenjuje stanje objave koje javlja vlasnik objave (AUT-01/AUT-06, REV;
@@ -38,6 +39,9 @@ public sealed class ApplyLabPublication(
     public const string KeyIncomplete = "key_incomplete";
     public const string InvalidTransition = "invalid_transition";
     public const string StateChanged = "state_changed";
+
+    // Uspeh se upisuje kao "allowed", jer ga trajni audit već mapira na Success.
+    public const string Succeeded = "allowed";
 
     public async ValueTask<LabPublicationResult> ExecuteAsync(
         Guid labId,
@@ -140,7 +144,7 @@ public sealed class ApplyLabPublication(
                 cancellationToken);
         }
 
-        await WriteAuditAsync(content.LabId, auditAction, "success", actorId, correlationId, cancellationToken);
+        await WriteAuditAsync(content.LabId, auditAction, Succeeded, actorId, correlationId, cancellationToken);
         return new LabPublicationResult(outcome);
     }
 

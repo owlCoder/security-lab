@@ -15,5 +15,10 @@ public static class LabVisibilityActions
     // Namerno nije u All: nije radnja nad laboratorijom.
     public const string Entry = "lab.visibility.entry";
 
-    public static readonly IReadOnlyList<string> All = [StudentView, Preview, KeyRead, KeyWrite];
+    // KT2 (AUT-07-2, Cvetojević): promena stanja objave. Nisu radnje pristupa tima 3 (stanje javlja
+    // vlasnik objave), ali su u All da bi ih trajni audit (LabVisibilityAuditMapping) prepoznao i upisao.
+    public const string Publish = "lab.publication.publish";
+    public const string Archive = "lab.publication.archive";
+
+    public static readonly IReadOnlyList<string> All = [StudentView, Preview, KeyRead, KeyWrite, Publish, Archive];
 }

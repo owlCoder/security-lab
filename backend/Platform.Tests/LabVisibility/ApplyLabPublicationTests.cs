@@ -60,7 +60,7 @@ public sealed class ApplyLabPublicationTests
         Assert.That(await StateAsync(), Is.EqualTo(LabVisibilityState.Published));
         Assert.That(audit.Events, Has.Count.EqualTo(1));
         Assert.That(audit.Events[0].Action, Is.EqualTo(LabPublicationAuditActions.Publish));
-        Assert.That(audit.Events[0].Outcome, Is.EqualTo("success"));
+        Assert.That(audit.Events[0].Outcome, Is.EqualTo(ApplyLabPublication.Succeeded));
         Assert.That(audit.Events[0].ActorId, Is.EqualTo(TeacherId));
     }
 
@@ -107,7 +107,7 @@ public sealed class ApplyLabPublicationTests
         Assert.That(result.Outcome, Is.EqualTo(LabPublicationOutcome.Archived));
         Assert.That(await StateAsync(), Is.EqualTo(LabVisibilityState.Archived));
         Assert.That(audit.Events.Single().Action, Is.EqualTo(LabPublicationAuditActions.Archive));
-        Assert.That(audit.Events.Single().Outcome, Is.EqualTo("success"));
+        Assert.That(audit.Events.Single().Outcome, Is.EqualTo(ApplyLabPublication.Succeeded));
     }
 
     // Negativni test: iz arhive nema povratka; nacrt ne može direktno u arhivu.
@@ -153,6 +153,14 @@ public sealed class ApplyLabPublicationTests
 
         Assert.That(result.Outcome, Is.EqualTo(LabPublicationOutcome.Unchanged));
         Assert.That(audit.Events, Is.Empty);
+    }
+
+    [Test]
+    public void PublicationAuditActions_AreKnownLabVisibilityActions()
+    {
+        // Trajni audit upisuje samo radnje iz LabVisibilityActions.All; ostale odbacuje uz alarm.
+        Assert.That(LabVisibilityActions.All, Does.Contain(LabPublicationAuditActions.Publish));
+        Assert.That(LabVisibilityActions.All, Does.Contain(LabPublicationAuditActions.Archive));
     }
 
     // Uslovna promena (T27): ako stanje nije ono koje je objava očekivala, ništa se ne prepisuje.
