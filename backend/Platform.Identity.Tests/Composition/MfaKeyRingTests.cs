@@ -10,23 +10,33 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Moq;
+using Platform.Identity.Composition;
 using Platform.Identity.Interfaces.Mfa;
+using Platform.Identity.Tests.Helpers;
 
-namespace Platform.Identity.Tests;
+namespace Platform.Identity.Tests.Composition;
 
 /// <summary>
-/// IDN-06: the key ring that encrypts TOTP secrets is persistent and encrypted at rest, and outside Development the
-/// host does not start when the key ring cannot be used.
+/// US-22 (IDN-06): the key ring that encrypts TOTP secrets is persistent and encrypted at rest, and outside
+/// Development the host does not start when the key ring cannot be used. The host tests never open a database
+/// connection, so the class stays outside <c>Integration/</c> with its own <see cref="CustomWebApplicationFactory{TProgram}"/>.
 /// </summary>
 [TestFixture]
 [Category("US-22")]
 public sealed class MfaKeyRingTests
 {
+    private CustomWebApplicationFactory<Program> _host = null!;
     private string _root = null!;
     private string _keys = null!;
     private string _certificate = null!;
     private Action? _restoreAccess;
     private const string Password = "test-only-password";
+
+    [OneTimeSetUp]
+    public void CreateHost() => _host = new CustomWebApplicationFactory<Program>();
+
+    [OneTimeTearDown]
+    public void DisposeHost() => _host.Dispose();
 
     [SetUp]
     public void SetUp()
@@ -322,7 +332,27 @@ public sealed class MfaKeyRingTests
         var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(Settings()));
 
         // Assert
-        Assert.That(error!.Message, Does.Contain("not encrypted with a certificate"));
+        Assert.That(error!.Message, Does.Contain("not a valid key file"));
+    }
+
+    // XML encryption of the key ring needs RSA; an ECDSA PFX has a private key but would fail at the first enrollment.
+    [Test]
+    public void AddMfaKeyRing_EcdsaCertificate_Throws()
+    {
+        // Arrange
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var certificate = new CertificateRequest("CN=MFA key ring test", ecdsa, HashAlgorithmName.SHA256)
+            .CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
+        var path = Path.Combine(_root, "ecdsa.pfx");
+        File.WriteAllBytes(path, certificate.Export(X509ContentType.Pfx, Password));
+        var settings = Settings();
+        settings["Identity:DataProtection:CertificatePath"] = path;
+
+        // Act
+        var error = Assert.Throws<InvalidOperationException>(() => BuildProvider(settings));
+
+        // Assert
+        Assert.That(error!.Message, Does.Contain("must hold an RSA key"));
     }
 
     [Test]
@@ -345,7 +375,7 @@ public sealed class MfaKeyRingTests
         // Arrange
         // The test key ring of this process (MfaTestKeyRing) is overridden with empty values, as on a server where
         // nothing is set.
-        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
+        using var factory = _host.WithWebHostBuilder(builder => builder
             .UseEnvironment(Environments.Production)
             .UseSetting("Identity:DataProtection:KeysPath", "")
             .UseSetting("Identity:DataProtection:CertificatePath", "")
@@ -363,7 +393,7 @@ public sealed class MfaKeyRingTests
     {
         // Arrange
         var settings = Settings();
-        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        using var factory = _host.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment(Environments.Production);
             foreach (var (key, value) in settings)
@@ -381,13 +411,11 @@ public sealed class MfaKeyRingTests
 
     // backend/Directory.Build.props + MfaTestKeyRing: every test process has a usable key ring before any host starts.
     [Test]
-    public void TestProcess_HasTheSharedTestKeyRing()
+    public void AddMfaKeyRing_SharedTestKeyRingVariables_ProtectsSecret()
     {
         // Arrange
         var keysPath = Environment.GetEnvironmentVariable("Identity__DataProtection__KeysPath");
         var certificatePath = Environment.GetEnvironmentVariable("Identity__DataProtection__CertificatePath");
-
-        // Act
         var settings = new Dictionary<string, string?>
         {
             ["Identity:DataProtection:KeysPath"] = keysPath,
@@ -395,12 +423,15 @@ public sealed class MfaKeyRingTests
             ["Identity:DataProtection:CertificatePassword"] =
                 Environment.GetEnvironmentVariable("Identity__DataProtection__CertificatePassword")
         };
+
+        // Act
         using var provider = BuildProvider(settings);
+        var ciphertext = provider.GetRequiredService<ITotpSecretProtector>().Protect("x");
 
         // Assert
         Assert.That(Directory.Exists(keysPath), Is.True);
         Assert.That(File.Exists(certificatePath), Is.True);
-        Assert.That(provider.GetRequiredService<ITotpSecretProtector>().Protect("x"), Is.Not.Empty);
+        Assert.That(ciphertext, Is.Not.Empty);
     }
 
     private string CreateCertificate(string fileName)

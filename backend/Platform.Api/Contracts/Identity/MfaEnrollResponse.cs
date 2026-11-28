@@ -1,13 +1,8 @@
-using System.Text;
-
 namespace Platform.Api.Contracts.Identity;
 
 public record MfaEnrollResponse(string Uri)
 {
-    // US-22: the otpauth:// URI carries the secret; ToString() of a record would print it into any log.
-    protected virtual bool PrintMembers(StringBuilder builder)
-    {
-        builder.Append("Uri = ***");
-        return true;
-    }
+    // US-22: the otpauth:// URI carries the secret, and the generated record ToString() would print it into any
+    // log that formats the response. Same approach as MfaVerifyRequest and LoginRequest.
+    public override string ToString() => "MfaEnrollResponse { *** }";
 }

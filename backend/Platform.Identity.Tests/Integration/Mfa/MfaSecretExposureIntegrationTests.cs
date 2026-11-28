@@ -1,52 +1,94 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Web;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using OtpNet;
 using Platform.Api.Contracts.Identity;
 using Platform.Api.Services.Identity;
+using Platform.Audit.Contracts;
 using Platform.Identity.Testing;
 using Platform.Identity.Tests.Helpers;
 
 namespace Platform.Identity.Tests.Integration.Mfa;
 
 /// <summary>
-/// US-22 (IDN-06): the TOTP secret, the otpauth:// URI, the codes and the ciphertext never reach a log record, and
-/// the secret leaves the API only once, in the mfa/enroll response. Every record of the test host is captured,
-/// at every level, with its message, structured values, scopes and exception.
+/// US-22 (IDN-06): the TOTP secret, the otpauth:// URI, the codes and the ciphertext never reach a log record or an
+/// audit draft, and the secret leaves the API only once, in the mfa/enroll response. Every log record of the test
+/// host is captured, at every level, with its message, structured values, scopes and exception. Both audit writers
+/// are mocks that capture every draft and context; they answer Recorded, or Unavailable to reach the alarm path.
 /// </summary>
 [NonParallelizable]
 [Category("US-22")]
 public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
 {
     private ConcurrentQueue<string> _records = null!;
+    private ConcurrentQueue<string> _auditDrafts = null!;
+    private bool _auditUnavailable;
     private WebApplicationFactory<Program> _host = null!;
     private HttpClient _client = null!;
 
     private IReadOnlyList<string> Records => _records.ToArray();
+    private IReadOnlyList<string> AuditDrafts => _auditDrafts.ToArray();
 
     [SetUp]
     public void StartCapturingHost()
     {
         _records = new ConcurrentQueue<string>();
+        _auditDrafts = new ConcurrentQueue<string>();
+        _auditUnavailable = false;
         var provider = CapturingLoggerProvider(_records).Object;
-        _host = Factory.WithWebHostBuilder(builder => builder.ConfigureLogging(logging =>
+        var trusted = new Mock<ITrustedAuditWriter>();
+        trusted.Setup(w => w.WriteAsync(It.IsAny<AuditEventDraft>(), It.IsAny<AuditContext>(), It.IsAny<CancellationToken>()))
+            .Callback<AuditEventDraft, AuditContext, CancellationToken>((draft, context, _) => CaptureAudit(draft, context))
+            .Returns(() => new ValueTask<AuditWriteResult>(AuditResult()));
+        var transactional = new Mock<ITransactionalAuditWriter>();
+        transactional.Setup(w => w.WriteAsync(It.IsAny<AuditEventDraft>(), It.IsAny<AuditContext>(),
+                It.IsAny<DbTransaction>(), It.IsAny<CancellationToken>()))
+            .Callback<AuditEventDraft, AuditContext, DbTransaction, CancellationToken>(
+                (draft, context, _, _) => CaptureAudit(draft, context))
+            .Returns(() => new ValueTask<AuditWriteResult>(AuditResult()));
+
+        _host = Factory.WithWebHostBuilder(builder =>
         {
-            logging.AddProvider(provider);
-            // A rule for this provider (by its proxy type name) wins over every category rule from appsettings,
-            // so nothing is filtered out.
-            logging.Services.Configure<LoggerFilterOptions>(options => options.Rules.Add(
-                new LoggerFilterRule(provider.GetType().FullName, null, LogLevel.Trace, null)));
-        }));
+            builder.ConfigureLogging(logging =>
+            {
+                logging.AddProvider(provider);
+                // A rule for this provider (by its proxy type name) wins over every category rule from appsettings,
+                // so nothing is filtered out.
+                logging.Services.Configure<LoggerFilterOptions>(options => options.Rules.Add(
+                    new LoggerFilterRule(provider.GetType().FullName, null, LogLevel.Trace, null)));
+            });
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<ITrustedAuditWriter>();
+                services.AddSingleton(trusted.Object);
+                services.RemoveAll<ITransactionalAuditWriter>();
+                services.AddSingleton(transactional.Object);
+            });
+        });
         _client = _host.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
     }
+
+    private AuditWriteResult AuditResult() =>
+        _auditUnavailable ? AuditWriteResult.Unavailable() : AuditWriteResult.Recorded(Guid.NewGuid());
+
+    // Relaxed escaping: a value is written as it is, so a secret in a draft cannot hide behind \u escapes.
+    private static readonly JsonSerializerOptions AuditJson = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    private void CaptureAudit(AuditEventDraft draft, AuditContext context) =>
+        _auditDrafts.Enqueue(JsonSerializer.Serialize(new { draft, context }, AuditJson));
 
     [TearDown]
     public void StopCapturingHost()
@@ -56,9 +98,9 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
     }
 
     // Every MFA step of the criteria: enroll, confirm, verify with success, wrong code, replayed code and the
-    // attempt threshold. The capture itself is checked too, otherwise an empty capture would always pass.
+    // attempt threshold. Both captures are checked too, otherwise an empty capture would always pass.
     [Test]
-    public async Task MfaFlow_EveryStep_NoLogRecordContainsSecretUriCodeOrCiphertext()
+    public async Task MfaFlow_EveryStep_LogsAndAuditDraftsHaveNoSecretUriCodeOrCiphertext()
     {
         // Arrange
         const string email = "mfa-exposure-logs@platform.com";
@@ -101,6 +143,49 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
         Assert.That(records, Has.None.Contains(ciphertext), "ciphertext");
         foreach (var code in new[] { confirmCode, verifyCode, wrongCode })
             Assert.That(records.Where(r => ContainsCode(r, code)), Is.Empty, $"TOTP code {code}");
+
+        // AUD-03: what the MFA flow hands to Audit (auth.mfa.* from IdentityAuditProducer), through both writers.
+        var drafts = AuditDrafts;
+        Assert.That(drafts.Any(d => d.Contains("auth.mfa.enabled")) && drafts.Any(d => d.Contains("auth.mfa.verified")),
+            Is.True, "the capture sees the MFA audit drafts");
+        Assert.That(drafts, Has.None.Contains(secret), "audit: Base32 secret");
+        Assert.That(drafts, Has.None.Contains("otpauth://"), "audit: otpauth:// URI");
+        Assert.That(drafts, Has.None.Contains(pendingCiphertext), "audit: pending ciphertext");
+        Assert.That(drafts, Has.None.Contains(ciphertext), "audit: ciphertext");
+        foreach (var code in new[] { confirmCode, verifyCode, wrongCode })
+            Assert.That(drafts.Where(d => ContainsCode(d, code)), Is.Empty, $"audit: TOTP code {code}");
+    }
+
+    // AUD-03: when Audit cannot record, IdentityAuditProducer writes a technical alarm to the log. The alarm must
+    // fire, and neither it nor anything else in the log may carry the secret, the code or the ciphertext.
+    [Test]
+    public async Task MfaFlow_AuditUnavailable_LogsAlarm_AndNoSecretCodeOrCiphertext()
+    {
+        // Arrange
+        const string email = "mfa-exposure-audit-down@platform.com";
+        var user = await UserTestData.AddAsync(Factory, email, Password);
+        var session = await LoginTokenAsync(email);
+        var secret = SecretFrom((await (await PostAsync("/api/auth/mfa/enroll", session, null))
+            .Content.ReadFromJsonAsync<MfaEnrollResponse>())!.Uri);
+        await PostAsync("/api/auth/mfa/enroll/confirm", session, new { Code = MfaTestData.CurrentCode(secret) });
+        var ciphertext = (await GetCredentialsAsync(user.Id))!.TotpSecretCiphertext!;
+        var pending = await LoginTokenAsync(email);
+        var wrongCode = WrongCode(secret);
+        var verifyCode = MfaTestData.NextCode(secret);
+        _auditUnavailable = true;
+
+        // Act
+        var wrong = await PostAsync("/api/auth/mfa/verify", pending, new { Code = wrongCode });
+        var verify = await PostAsync("/api/auth/mfa/verify", pending, new { Code = verifyCode });
+
+        // Assert
+        Assert.That(wrong.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized), "a refusal stays a refusal");
+        Assert.That(verify.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable), "no success without audit");
+        var records = Records;
+        Assert.That(records.Count(r => r.Contains("Audit write failed")), Is.GreaterThanOrEqualTo(2),
+            "the alarm is logged for the refusal and for the success");
+        Assert.That(records, Has.None.Contains(secret).And.None.Contains("otpauth://").And.None.Contains(ciphertext));
+        Assert.That(records.Where(r => ContainsCode(r, wrongCode) || ContainsCode(r, verifyCode)), Is.Empty);
     }
 
     // Negative control: the check itself finds a leak, so the test above cannot pass by not looking.
@@ -135,20 +220,23 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
         Assert.That(request.Code, Is.EqualTo("375532"), "only the text form is hidden, not the value");
     }
 
+    // The secret leaves the API once, in the enroll response; no response ever carries the ciphertext.
     [Test]
-    public async Task Enroll_Response_IsTheOnlyResponseWithTheSecret()
+    public async Task MfaFlow_EnrollThenConfirmVerifyMeAndSessions_OnlyEnrollResponseHasSecret_AndNoneHasCiphertext()
     {
         // Arrange
         const string email = "mfa-exposure-responses@platform.com";
-        await UserTestData.AddAsync(Factory, email, Password);
+        var user = await UserTestData.AddAsync(Factory, email, Password);
         var session = await LoginTokenAsync(email);
 
         // Act
         var enroll = await PostAsync("/api/auth/mfa/enroll", session, null);
         var enrollText = await TextOf(enroll);
         var secret = SecretFrom((await enroll.Content.ReadFromJsonAsync<MfaEnrollResponse>())!.Uri);
+        var pendingCiphertext = (await GetCredentialsAsync(user.Id))!.PendingTotpSecretCiphertext!;
         var confirmCode = MfaTestData.CurrentCode(secret);
         var confirm = await PostAsync("/api/auth/mfa/enroll/confirm", session, new { Code = confirmCode });
+        var ciphertext = (await GetCredentialsAsync(user.Id))!.TotpSecretCiphertext!;
 
         var verifyCode = MfaTestData.NextCode(secret);
         var verify = await PostAsync("/api/auth/mfa/verify", await LoginTokenAsync(email), new { Code = verifyCode });
@@ -160,6 +248,7 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
         // Assert
         Assert.That(enroll.StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That(enrollText, Does.Contain(secret), "the enroll response hands out the secret once");
+        Assert.That(enrollText, Does.Not.Contain(pendingCiphertext), "enroll: ciphertext");
         var later = new Dictionary<string, HttpResponseMessage>
         {
             ["confirm"] = confirm, ["verify"] = verify, ["me"] = me, ["sessions"] = sessions, ["replayed verify"] = replayed
@@ -173,13 +262,14 @@ public sealed class MfaSecretExposureIntegrationTests : MfaIntegrationTestBase
             var text = await TextOf(response);
             Assert.That(text, Does.Not.Contain(secret), $"{name}: secret");
             Assert.That(text, Does.Not.Contain("otpauth://"), $"{name}: otpauth:// URI");
+            Assert.That(text, Does.Not.Contain(pendingCiphertext).And.Not.Contain(ciphertext), $"{name}: ciphertext");
             Assert.That(ContainsCode(text, confirmCode) || ContainsCode(text, verifyCode), Is.False, $"{name}: code");
         }
     }
 
     // A refused confirm (wrong code) and a second enroll on an active MFA do not hand out a secret either.
     [Test]
-    public async Task RefusedConfirmAndSecondEnroll_Responses_HaveNoSecret()
+    public async Task MfaFlow_WrongConfirmCodeThenSecondEnroll_ResponsesHaveNoSecretOrCode()
     {
         // Arrange
         const string email = "mfa-exposure-refused@platform.com";
