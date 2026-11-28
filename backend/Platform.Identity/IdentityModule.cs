@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Platform.Identity.Composition;
 using Platform.Identity.Interfaces;
 using Platform.Identity.Interfaces.Mfa;
 using Platform.Identity.Persistence;

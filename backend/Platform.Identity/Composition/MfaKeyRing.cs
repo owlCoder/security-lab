@@ -6,31 +6,11 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Platform.Identity.Options.Mfa;
 
-namespace Platform.Identity;
+namespace Platform.Identity.Composition;
 
-/// <summary>
-/// IDN-06: where the Data Protection key ring that encrypts TOTP secrets is kept, and the certificate that encrypts
-/// the keys at rest. Losing the key ring makes every stored TOTP secret unreadable, so outside Development both
-/// values are required and the host does not start without them. Secrets (the certificate password) come from
-/// environment variables or user-secrets, never from the repository (ADM-04).
-/// </summary>
-public sealed class MfaKeyRingOptions
-{
-    public const string Section = "Identity:DataProtection";
-
-    /// <summary>Directory for the key ring. Must survive restarts and be part of the backup with the database.</summary>
-    public string? KeysPath { get; set; }
-
-    /// <summary>PFX file with a private key; it encrypts every key written to <see cref="KeysPath"/>.</summary>
-    public string? CertificatePath { get; set; }
-
-    public string? CertificatePassword { get; set; }
-
-    internal bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(KeysPath) && !string.IsNullOrWhiteSpace(CertificatePath);
-}
-
+/// <summary>US-22 (IDN-06): the persistent, certificate-protected key ring for TOTP secrets (<see cref="MfaKeyRingOptions"/>).</summary>
 public static class MfaKeyRingRegistration
 {
     /// <summary>Changing it makes every stored TOTP secret unreadable: Data Protection isolates keys per name.</summary>
@@ -86,6 +66,13 @@ public static class MfaKeyRingRegistration
             using var certificate = LoadCertificate(options);
             if (!certificate.HasPrivateKey)
                 return $"{MfaKeyRingOptions.Section}:CertificatePath must contain a private key to decrypt the key ring.";
+
+            // XML encryption with a certificate needs an RSA key. An ECDSA PFX would pass the check above and fail
+            // only at the first enrollment.
+            using var rsa = certificate.GetRSAPrivateKey();
+            if (rsa is null)
+                return $"{MfaKeyRingOptions.Section}:CertificatePath must hold an RSA key; XML encryption of the key " +
+                       "ring does not work with ECDSA or other key types.";
         }
         catch (CryptographicException)
         {
@@ -115,10 +102,16 @@ public static class MfaKeyRingRegistration
 
         // A key written before the certificate was set (KeysPath alone, as in #232) keeps its master key in plain
         // text, and Data Protection goes on using it until it expires instead of writing an encrypted one.
-        if (!EveryKeyIsCertificateEncrypted(options.KeysPath!))
-            return $"{MfaKeyRingOptions.Section}:KeysPath holds a key that is not encrypted with a certificate, for " +
-                   "example one written before CertificatePath was set. Start from an empty KeysPath; secrets " +
-                   "stored with the old key have to be enrolled again.";
+        switch (FindKeyFileProblem(options.KeysPath!))
+        {
+            case KeyFileProblem.NotCertificateEncrypted:
+                return $"{MfaKeyRingOptions.Section}:KeysPath holds a key that is not encrypted with a certificate, " +
+                       "for example one written before CertificatePath was set. Start from an empty KeysPath; " +
+                       "secrets stored with the old key have to be enrolled again.";
+            case KeyFileProblem.NotAKeyFile:
+                return $"{MfaKeyRingOptions.Section}:KeysPath holds an *.xml file that is not a valid key file, for " +
+                       "example damaged by a restore. Restore it from the backup or remove it.";
+        }
 
         if (!CanWrite(options.KeysPath!))
             return $"{MfaKeyRingOptions.Section}:KeysPath is not writable. Data Protection writes the first key " +
@@ -127,40 +120,47 @@ public static class MfaKeyRingRegistration
         return null;
     }
 
+    private enum KeyFileProblem
+    {
+        None,
+        NotCertificateEncrypted,
+        NotAKeyFile
+    }
+
     /// <summary>
-    /// Every <c>&lt;key&gt;</c> file has its secret in an <c>encryptedSecret</c> made by the certificate
+    /// Every <c>&lt;key&gt;</c> file must have its secret in an <c>encryptedSecret</c> made by the certificate
     /// (<c>EncryptedXmlDecryptor</c>) and no plain <c>masterKey</c>. Revocation files hold no secret and are skipped.
-    /// A file that is not valid XML counts as not encrypted.
+    /// A file that cannot be parsed is reported on its own, so a damaged restore is not taken for a missing certificate.
     /// </summary>
-    private static bool EveryKeyIsCertificateEncrypted(string directory)
+    private static KeyFileProblem FindKeyFileProblem(string directory)
     {
         var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
-        try
+        foreach (var file in Directory.EnumerateFiles(directory, "*.xml"))
         {
-            foreach (var file in Directory.EnumerateFiles(directory, "*.xml"))
+            XDocument document;
+            try
             {
-                XDocument document;
-                using (var reader = XmlReader.Create(file, settings))
-                    document = XDocument.Load(reader);
-
-                if (document.Root?.Name.LocalName != "key")
-                    continue;
-
-                var elements = document.Root.Descendants().ToList();
-                var plainMasterKey = elements.Any(e => e.Name.LocalName == "masterKey");
-                var encryptedByCertificate = elements.Any(e =>
-                    e.Name.LocalName == "encryptedSecret"
-                    && ((string?)e.Attribute("decryptorType"))?.Contains("EncryptedXmlDecryptor", StringComparison.Ordinal) == true);
-                if (plainMasterKey || !encryptedByCertificate)
-                    return false;
+                using var reader = XmlReader.Create(file, settings);
+                document = XDocument.Load(reader);
+            }
+            catch (Exception ex) when (ex is XmlException or IOException or UnauthorizedAccessException)
+            {
+                return KeyFileProblem.NotAKeyFile;
             }
 
-            return true;
+            if (document.Root?.Name.LocalName != "key")
+                continue;
+
+            var elements = document.Root.Descendants().ToList();
+            var plainMasterKey = elements.Any(e => e.Name.LocalName == "masterKey");
+            var encryptedByCertificate = elements.Any(e =>
+                e.Name.LocalName == "encryptedSecret"
+                && ((string?)e.Attribute("decryptorType"))?.Contains("EncryptedXmlDecryptor", StringComparison.Ordinal) == true);
+            if (plainMasterKey || !encryptedByCertificate)
+                return KeyFileProblem.NotCertificateEncrypted;
         }
-        catch (Exception ex) when (ex is XmlException or IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
+
+        return KeyFileProblem.None;
     }
 
     private static bool CanRead(string directory)

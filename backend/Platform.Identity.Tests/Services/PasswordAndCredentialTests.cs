@@ -185,6 +185,6 @@ public class PasswordAndCredentialTests
                 record is not null && !(record.LockoutEnd > now) && record.FailedLoginCount < maxAttempts);
         store.Setup(s => s.TryClearFailuresAsync(It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
-        return new CredentialVerifier(store.Object, _hasher, Options.Create(new IdentityLockoutOptions()), TimeProvider.System);
+        return new CredentialVerifier(store.Object, _hasher, Microsoft.Extensions.Options.Options.Create(new IdentityLockoutOptions()), TimeProvider.System);
     }
 }

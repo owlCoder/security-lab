@@ -40,6 +40,7 @@ using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
 using Platform.Audit.Composition;
 using Platform.Authoring.Composition;
+using Platform.Identity.Composition;
 using Platform.Competencies.Composition;
 using Platform.Authoring.Application;
 using Platform.Identity;
