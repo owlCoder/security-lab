@@ -94,6 +94,64 @@ public class LabVisibilityKt2ContractTests
         Assert.That(decision.Outcome, Is.EqualTo(AccessOutcome.Deny));
     }
 
+    [TestCase(LabPublicationStatus.Published, true, SaveEvaluatorKeyOutcome.Published)]
+    [TestCase(LabPublicationStatus.Published, false, SaveEvaluatorKeyOutcome.NotFound)]
+    [TestCase(LabPublicationStatus.Archived, true, SaveEvaluatorKeyOutcome.Published)]
+    [TestCase(LabPublicationStatus.Archived, false, SaveEvaluatorKeyOutcome.NotFound)]
+    public async Task SaveEvaluatorKey_ClosedLab_ProtectsStateAndKey(
+        LabPublicationStatus status,
+        bool teachesLabCourse,
+        SaveEvaluatorKeyOutcome expectedOutcome)
+    {
+        var labId = LabVisibilityDemoSeed.DraftLabId;
+        var teacherId = Guid.NewGuid();
+        var courseId = teachesLabCourse ? LabVisibilityDemoSeed.DemoCourseId : Guid.NewGuid();
+
+        provider.GetRequiredService<InMemoryCourseMembership>()
+            .Set(courseId, teacherId, LabVisibilityCourseRole.Teacher);
+
+        // Izvor objave je već ažuriran, a lokalni zapis još prikazuje Draft.
+        provider.GetRequiredService<StubLabPublicationSource>()
+            .Set(new LabPublication(labId, Guid.NewGuid(), status, DateTimeOffset.UtcNow));
+
+        await using var scope = provider.CreateAsyncScope();
+        var save = scope.ServiceProvider.GetRequiredService<ISaveEvaluatorKey>();
+        var store = scope.ServiceProvider.GetRequiredService<IEvaluatorKeyStore>();
+
+        var result = await save.ExecuteAsync(
+            new SaveEvaluatorKeyCommand(labId, [new EvaluatorKeyAnswerInput("t1", SecretAnswer)]),
+            new SubjectRef(teacherId.ToString(), AccountState.Active),
+            Guid.NewGuid().ToString("N"));
+
+        Assert.That(await store.GetAsync(labId), Is.Null, "Odbijen upis ne sme da sačuva ključ.");
+        Assert.That(result.Outcome, Is.EqualTo(expectedOutcome));
+    }
+
+    [Test]
+    public async Task SaveEvaluatorKey_TeacherSavesDraftKey()
+    {
+        var teacherId = LabVisibilityDemoSeed.TeacherId;
+        var labId = LabVisibilityDemoSeed.DraftLabId;
+        provider.GetRequiredService<InMemoryCourseMembership>()
+            .Set(LabVisibilityDemoSeed.DemoCourseId, teacherId, LabVisibilityCourseRole.Teacher);
+
+        await using var scope = provider.CreateAsyncScope();
+        var save = scope.ServiceProvider.GetRequiredService<ISaveEvaluatorKey>();
+        var store = scope.ServiceProvider.GetRequiredService<IEvaluatorKeyStore>();
+
+        var result = await save.ExecuteAsync(
+            new SaveEvaluatorKeyCommand(labId, [new EvaluatorKeyAnswerInput("t1", SecretAnswer)]),
+            new SubjectRef(teacherId.ToString(), AccountState.Active),
+            Guid.NewGuid().ToString("N"));
+
+        Assert.That(result.Outcome, Is.EqualTo(SaveEvaluatorKeyOutcome.Saved));
+        var storedKey = await store.GetAsync(labId);
+        Assert.That(storedKey, Is.Not.Null);
+        Assert.That(storedKey!.Answers, Has.Count.EqualTo(1));
+        Assert.That(storedKey.Answers[0].TaskId, Is.EqualTo("t1"));
+        Assert.That(storedKey.Answers[0].ExpectedAnswer, Is.EqualTo(SecretAnswer));
+    }
+
     [Test]
     public async Task SaveEvaluatorKey_IsResolvable_AndDeniesStudent()
     {
