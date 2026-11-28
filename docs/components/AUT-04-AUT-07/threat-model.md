@@ -2,6 +2,7 @@
 
 **Vlasnik dokumenta:** Dušan Kovačević (kartica AUT-04-3). Svaki član tima dodaje i održava redove za svoj deo.
 **Osnova procene:** `main` na commitu `868ce1f` (26.11.2026) i PR #226 (trajni audit). Redovi za ostale KT2 kartice su označeni kao „Plan KT2“ i ažuriraju se u PR-u te kartice.
+**Ažuriranje AUT-07-2 (28.11.2026):** redovi T20–T23, T27 i nov T30, grana `feature/AUT-07-publication-state` (osnova `main` `8cf04d5`).
 **Stanja:** `Urađeno` (kod i test su na `main`), `U PR-u` (kod i test postoje, PR nije spojen), `Plan KT2` (kontrola je dogovorena, test se piše u ovom sprintu).
 **Postupak:** kao na vežbi 4: imovina → tok i granica → scenario → bezbednosni zahtev → kontrola → test → dokaz, kroz četiri pitanja: Na čemu radimo? Šta može poći po zlu? Šta ćemo preduzeti? Da li je dovoljno?
 
@@ -120,7 +121,7 @@ Kolona „Zahtev“ je bezbednosni zahtev iz specifikacije koji kontrola ispunja
 | T15 | F1, F2 | A6 | Klijent pošalje lažan identitet (zaglavlje, razvojni nalog u produkciji) | IDN, ACC-05 | Ulazna radnja je vezana za sesiju; razvojni identitet postoji samo u Development režimu | `EntryAction_IsSessionBound_AndLabActionsUseRealPolicies`, `InvalidSession_GetsUnauthorized`, `RequestWithoutIdentity_GetsUnauthorized`; Vitest „izostavlja razvojni identitet u produkciji“ | NUnit, Vitest | Urađeno | Stojanović, Ferjuc |
 | T16 | F5 | A6 | Razvojni stub članstva radi i van testova, pa uloge nisu prave; opozvana sesija ili uklonjen član i dalje vidi laboratoriju | ACC-05 | `AccCourseMembership` preko `Platform.Access.IMembershipReader`; prikaz i pregled kroz `SessionIdentityContext` | _upisuje Stojanović (opozvana sesija → 401, uklonjen sa kursa → 404)_ | NUnit, HTTP test | Plan KT2 (AUT-04-5) | Stojanović |
 | T17 | F5 | A1 | Nepoznata laboratorija ili neregistrovana radnja dobije podrazumevanu dozvolu | ACC-05 | Podrazumevano odbijanje kod tima 3; dupla registracija radnje ruši pokretanje | `UnknownLab_IsDeniedForEveryAction`, `UnregisteredLabAction_IsDeniedAsUnknown`, `RegisteringTwice_FailsAtStartup` | NUnit, CI | Urađeno | Kovačević |
-| T27 | F3, F6 | A1 | Trka: nastavnik upisuje ključ u istom trenutku kad se laboratorija objavljuje, pa se ključ promeni posle objave | AUT-04 | Provera stanja i upis ključa u istoj transakciji, uz proveru verzije reda stanja; objava čita ključ u istoj transakciji | _upisuju Gajić i Cvetojević (istovremena objava i upis: posle objave ključ je onaj koji je objava videla)_ | NUnit nad bazom | Plan KT2 (AUT-04-4, AUT-07-2) | Gajić, Cvetojević |
+| T27 | F3, F6 | A1 | Trka: nastavnik upisuje ključ u istom trenutku kad se laboratorija objavljuje, pa se ključ promeni posle objave | AUT-04 | Provera stanja i upis ključa u istoj transakciji, uz proveru verzije reda stanja; objava menja stanje samo uslovno (`UPDATE … WHERE state = očekivano`, `ILabPublicationStateStore`), pa dve istovremene promene ne mogu obe da prođu, a izgubljena trka vraća `state_changed` | `StateStore_ChangesOnlyFromExpectedState` (Cvetojević); _test istovremenog upisa ključa i objave upisuje Gajić_ | NUnit; nad bazom posle AUT-04-4 | Delimično: uslovna promena stanja U PR-u (AUT-07-2); transakcija pri upisu ključa Plan KT2 (AUT-04-4) | Gajić, Cvetojević |
 | T28 | F5 | A1, A3 | Ispad Access, IDN ili ACC modula (izuzetak, timeout) se pretvori u dozvolu | ACC-05 | Svaki izuzetak u odluci ili čitanju članstva daje odbijanje (`404` ili `null`), bez delimičnog odgovora | _upisuje Stojanović (ispad članstva → odbijanje za studentski prikaz, pregled i ključ)_ | NUnit | Plan KT2 (AUT-04-5) | Stojanović |
 | T29 | F4 | A1 | Korisnik se predstavi kao evaluator i dobije ključ | AUT-04 | Politika priznaje samo tačan ID `system:evaluator`; korisnički ID iz sesije je uvek GUID i ne može da bude jednak njemu | `EvaluatorIdVariant_IsDenied`, `BlockedEvaluator_IsDenied`, `EvaluatorId_IsNeverAValidUserId` | NUnit, CI | Urađeno | Kovačević |
 
@@ -130,13 +131,14 @@ Kolona „Zahtev“ je bezbednosni zahtev iz specifikacije koji kontrola ispunja
 |---|---|---|---|---|---|---|---|---|---|
 | T18 | F2 | A3 | Student ili nastavnik drugog kursa otvori pregled nacrta | AUT-07 | `lab.preview`: samo nastavnik kursa; student za nacrt dobija `404` | `NotCourseTeacher_Gets404`, `EnrolledStudent_RequestingDraft_GetsNotFound`, `WithoutIdentity_Gets401` | NUnit, HTTP test | Urađeno | Cvetojević |
 | T19 | F2 | A1 | Pregled pokaže odgovore, jer nastavnik „sme da ih vidi“ | AUT-04, AUT-07 | Pregled koristi isti `StudentViewProjector` kao student i ne zavisi od ključa | `PreviewJson_ContainsNoAnswer`, `PreviewStudentView_DoesNotDependOnEvaluatorKey` | NUnit | Urađeno | Cvetojević |
-| T20 | F2 | A3 | Pregled se razlikuje od onoga što student zaista dobije, pa nastavnik objavi pogrešno | AUT-07 | Isti projektor za pregled i studentski prikaz; test jednakosti posle objave | `PreviewView_EqualsStudentViewOfSameContentAfterPublish`; _test kroz tok objave nad istim seed-om upisuje Cvetojević_ | NUnit | Urađeno; proširenje Plan KT2 (AUT-07-2) | Cvetojević |
-| T21 | F6 | A4 | Objavi se laboratorija bez potpunog ključa | AUT-07 | `ApplyLabPublication`: nacrt → objavljena samo ako ključ pokriva sve zadatke; pokušaj ide u audit | _upisuje Cvetojević_ | NUnit | Plan KT2 (AUT-07-2) | Cvetojević |
-| T22 | F1 | A2 | Arhivirana laboratorija ostane vidljiva studentu | AUT-07 | Objavljena → arhivirana; student dobija `404` | _upisuje Cvetojević_ | NUnit | Plan KT2 (AUT-07-2) | Cvetojević |
-| T23 | F6 | A4 | Susedni tim javi lažno ili nepoznato stanje, ili kroz objavu pošalje odgovore | AUT-07 | Ugovor `ILabPublicationSource` nosi samo stanje; nepoznata laboratorija → `null`, ništa se ne menja; ključ se nikad ne čuva u nacrtu | `PublicationStub_ReturnsNullForUnknownLab`, `PublicationStub_ReturnsStateForDemoLabs` | NUnit; ugovor u `docs/contracts/LabVisibility-KT2.md` | Urađeno (stub); pravi adapter čeka AUT-01/REV | Cvetojević |
+| T20 | F2 | A3 | Pregled se razlikuje od onoga što student zaista dobije, pa nastavnik objavi pogrešno | AUT-07 | Isti projektor za pregled i studentski prikaz; test jednakosti posle objave | `PreviewView_EqualsStudentViewOfSameContentAfterPublish`, `PreviewOfDraft_EqualsStudentViewAfterPublish_AndArchiveHidesLabFromStudent` (pregled nacrta, pa objava kroz `ApplyLabPublication`, pa studentski prikaz preko HTTP-a) | NUnit, HTTP test | Urađeno; proširenje U PR-u (AUT-07-2) | Cvetojević |
+| T21 | F6 | A4 | Objavi se laboratorija bez potpunog ključa | AUT-07 | `ApplyLabPublication`: nacrt → objavljena samo ako skup zadataka sa odgovorom tačno odgovara zadacima laboratorije (`IEvaluatorKeyCoverage` vraća samo ID-jeve zadataka, nikad odgovore); inače `Rejected` sa kodom `key_incomplete`, laboratorija ostaje nacrt, pokušaj ide u audit (`lab.publication.publish`) | `DraftWithoutKey_IsRejected_StaysDraft_AndIsAudited`, `DraftWhoseKeyMissesNewTask_IsRejected`, `DraftWithCompleteKey_PublishedBySource_BecomesPublished_AndIsAudited`, `PublicationResultAndAudit_NeverContainAnswer` | NUnit | U PR-u (AUT-07-2) | Cvetojević |
+| T22 | F1 | A2 | Arhivirana laboratorija ostane vidljiva studentu | AUT-07 | Objavljena → arhivirana kroz `ApplyLabPublication` (audit `lab.publication.archive`); student dobija isti `404`, nastavnik i dalje ima pregled | `Published_ArchivedBySource_BecomesArchived_AndIsAudited`, `PreviewOfDraft_EqualsStudentViewAfterPublish_AndArchiveHidesLabFromStudent` | NUnit, HTTP test | U PR-u (AUT-07-2) | Cvetojević |
+| T23 | F6 | A4 | Susedni tim javi lažno ili nepoznato stanje, ili kroz objavu pošalje odgovore | AUT-07 | Ugovor `ILabPublicationSource` nosi samo stanje; nepoznata laboratorija → `null`, ništa se ne menja; ključ se nikad ne čuva u nacrtu | `PublicationStub_ReturnsNullForUnknownLab`, `PublicationStub_ReturnsStateForDemoLabs`, `LabUnknownToPublicationSource_NothingChanges`, `InvalidTransition_IsRejected_AndStateIsKept` (arhivirana → objavljena, objavljena → nacrt, nacrt → arhivirana: odbijeno, `invalid_transition`, audit) | NUnit; ugovor u `docs/contracts/LabVisibility-KT2.md` | Urađeno (stub); primena stanja U PR-u (AUT-07-2); pravi adapter čeka AUT-01/REV | Cvetojević |
 | T24 | F3 | A1 | Ekran za unos ključa prikaže postojeći ključ ili ga ponovi u grešci | AUT-04 | Forma radi samo `PUT`, nikad `GET`; polja se prazne posle snimanja; greška bez poslatog odgovora | Vitest „prikazuje javni sadržaj i izostavlja expectedAnswer iz odgovora“; _testove forme upisuje Ferjuc_ | Vitest | Delimično, Plan KT2 (AUT-07-3) | Ferjuc |
 | T25 | F1 | A1 | Student vidi dugme ili stranicu za unos ključa | AUT-04 | Ekran za ključ samo za nastavnika; zaštita je i na serveru (T10), ekran je samo dodatna prepreka | _upisuje Ferjuc_ | Vitest | Plan KT2 (AUT-07-3) | Ferjuc |
 | T26 | F2 | A1 | Browser ili proxy sačuva odgovor pregleda | AUT-04 | `Cache-Control: no-store` na svakom odgovoru | `EveryResponse_IsNotCached` | NUnit, HTTP test | Urađeno | Cvetojević |
+| T30 | F2, F5 | A3 | Blokiran ili arhiviran nastavnik kursa, čija sesija još važi, otvori pregled nacrta | AUT-07, ACC-05 | IDN ne daje sesiju neaktivnom nalogu (`401`); ako sesija još važi, `LabCaller` čita trenutni status naloga, a `IAccessDecision` odbija neaktivan nalog → isti `404` kao za zabranjeno | `InactiveCourseTeacher_WithStillValidSession_Gets404` (blokiran i arhiviran nastavnik) | NUnit, HTTP test | U PR-u (AUT-07-2) | Cvetojević |
 
 ## 4. Da li je dovoljno?
 
@@ -166,15 +168,16 @@ Pravilo iz vežbe 4 (`ThreatRiskCalculator`): **rizik = verovatnoća (1–5) × 
 | T18 | 3 | 4 | da | 24 | da | 1 | 6 | — |
 | T19 | 5 | 3 | da | 30 | da | 1 | 10 | — |
 | T20 | 3 | 2 | da | 12 | ne, tretirano | 1 | 6 | — |
-| T21 | 4 | 3 | da | 24 | da | 1 | 8 | — |
+| T21 | 4 | 3 | da | 24 | da | 1 | 8 | provera ključa i promena stanja nisu u istoj transakciji (T27) |
 | T22 | 2 | 3 | da | 12 | ne, tretirano | 1 | 4 | — |
 | T23 | 4 | 3 | da | 24 | da | 2 | 16 | do pravog adaptera stanje dolazi iz stub-a |
 | T24 | 5 | 3 | da | 30 | da | 1 | 10 | — |
 | T25 | 5 | 2 | da | 20 | ne, tretirano | 1 | 10 | — |
 | T26 | 5 | 2 | da | 20 | ne, tretirano | 1 | 10 | — |
-| T27 | 5 | 3 | da | 30 | da | 1 | 10 | — |
+| T27 | 5 | 3 | da | 30 | da | 1 | 10 | do AUT-04-4 upis ključa ne proverava stanje u istoj transakciji |
 | T28 | 5 | 3 | da | 30 | da | 1 | 10 | — |
 | T29 | 5 | 2 | da | 20 | ne, tretirano | 1 | 10 | — |
+| T30 | 3 | 2 | da | 12 | ne, tretirano | 1 | 6 | zavisi od toga da je status naloga iz IDN-a tačan u trenutku zahteva |
 
 Najveći rizik pre kontrole (40) imaju T1, T5 i T10, odnosno izlazak, čitanje i upis evaluator ključa. Sva tri imaju kontrolu na serveru i negativan test. Posle kontrola nijedan scenario ne prelazi prag 24. Najviši preostali rizik imaju T9 (18) i T23 (16): kod njih kontrola otkriva problem ili zavisi od stub-a, ali ga ne sprečava.
 
@@ -183,7 +186,7 @@ Najveći rizik pre kontrole (40) imaju T1, T5 i T10, odnosno izlazak, čitanje i
 - **Članstvo je razvojni stub** dok se ne spoji AUT-04-5 (T16).
 - **Upis ključa i audit nisu u istoj transakciji.** Upis ključa je privilegovana promena, pa po pravilima AUD tima treba da padne ako zapis ne uspe. To se rešava u AUT-04-4; do tada važi samo alarm (T9).
 - **Audit zapisi nemaju kurs**, pa ih pregled za nastavnika (AUD-06) još ne prikazuje.
-- **Stanje objave dolazi iz stub-a** dok AUT-01/AUT-06 i REV ne potvrde ugovor i ne naprave adapter (T23).
+- **Stanje objave dolazi iz stub-a** dok se ne napravi adapter. AUT-01/AUT-06 su potvrdili ugovor, REV još nije (T23). `ApplyLabPublication` postoji i testiran je, ali ga van testova još ništa ne poziva; poziv dolazi sa adapterom ili događajem o objavi.
 - **Evaluator EVAL tima nije povezan.** Ključ čita samo `EvaluatorKeyReader` u istom procesu; drugi put do ključa ne postoji.
 - **Administrator baze** može da pročita tabelu ključa. Odvojena uloga baze bez prava na `lab_evaluator_key` je opcioni deo AUT-04-6.
 - **Isti `404`** za odbijeno i nepostojeće ne znači i isto vreme odgovora. Jednako vreme odgovora ne tvrdimo.
