@@ -32,9 +32,6 @@ using Platform.Api.Endpoints.Identity;
 using Platform.Api.Interfaces.Identity;
 using Platform.Api.Middleware;
 using Platform.Api.Modules.Identity.RateLimiting;
-using Platform.Api.Modules.Laboratories.Application;
-using Platform.Api.Modules.Laboratories.Infrastructure;
-using Platform.Api.Modules.RevisionReviews;
 using Platform.Api.Services.Identity;
 using Platform.Api.Services.Audit;
 using Platform.Audit.Application;
@@ -52,6 +49,7 @@ using Platform.LabVisibility.Contracts;
 using Platform.LabVisibility.Infrastructure.Membership;
 using Platform.LabVisibility.Infrastructure.Policies;
 using Platform.LabVisibility.Infrastructure.Persistence;
+using Platform.Prerequisites.Application;
 using Platform.Prerequisites.Contracts;
 using Platform.Prerequisites.Infrastructure;
 
@@ -215,6 +213,16 @@ else
     builder.Services.AddSingleton<IPrerequisiteRepository, UnavailablePrerequisiteRepository>();
 }
 
+// LAB-06: prerequisite access service
+builder.Services.AddScoped<
+    IPrerequisiteAccessService,
+    PrerequisiteAccessService>();
+
+// LAB-06: fail-closed provider until real completion data is integrated
+builder.Services.AddSingleton<
+    ICompletedLaboratories,
+    NoCompletedLaboratories>();
+
 // LAB-07: lokalizacija laboratorija
 builder.Services.AddLabLocalizationModule();
 
@@ -267,6 +275,7 @@ if (administrationEnabled || attemptsEnabled) builder.Services.AddAdministration
 builder.Services.AddPrg04RequestIdentity();
 
 var app = builder.Build();
+
 app.UseRouting();
 
 // AUD-01/AUD-04 (S-10): correlation ID za svaki zahtev; mora biti prvi middleware
