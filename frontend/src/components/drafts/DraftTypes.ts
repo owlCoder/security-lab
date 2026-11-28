@@ -24,18 +24,27 @@ export function labTypeLabel(type: LabType): string {
   return LAB_TYPES.find(labType => labType.value === type)?.label ?? type
 }
 
-// LAB-04: nacrt, objavljena, arhivirana.
-// Uskladiti nazive sa backendom (članovi 1 i 2) pre povezivanja.
-export type DraftStatus = 'Draft' | 'Published' | 'Archived'
+// LAB-04: nacrt, objavljena, arhivirana; InReview je stanje nacrta predatog na pregled.
+// Nazivi treba da prate DraftStatus iz authoring modula.
+export type DraftStatus = 'Draft' | 'InReview' | 'Published' | 'Archived'
 
 const DRAFT_STATUS_LABELS: Record<DraftStatus, string> = {
   Draft: 'Nacrt',
+  InReview: 'Na pregledu',
   Published: 'Objavljena',
   Archived: 'Arhivirana',
 }
 
 export function draftStatusLabel(status: DraftStatus): string {
   return DRAFT_STATUS_LABELS[status]
+}
+
+export function isDraftStatus(value: unknown): value is DraftStatus {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(DRAFT_STATUS_LABELS, value)
+}
+
+export function isLabType(value: unknown): value is LabType {
+  return LAB_TYPES.some(labType => labType.value === value)
 }
 
 export type CreateDraftData = {
