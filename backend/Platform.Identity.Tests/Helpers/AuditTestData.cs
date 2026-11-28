@@ -67,17 +67,28 @@ public static class AuditTestData
     }
 
     /// <summary>The rows of one event type for one account; <see cref="Row.Raw"/> is the whole row as JSON.</summary>
-    public static async Task<List<Row>> RowsAsync(Guid accountId, string eventType)
+    public static Task<List<Row>> RowsAsync(Guid accountId, string eventType) =>
+        RowsWhereAsync("resource_id", accountId.ToString(), eventType);
+
+    /// <summary>
+    /// The rows of one event type for one request; for events without a resource, such as a login attempt for an
+    /// unknown account. <see cref="Row.Raw"/> is the whole row as JSON.
+    /// </summary>
+    public static Task<List<Row>> RowsAsync(string correlationId, string eventType) =>
+        RowsWhereAsync("correlation_id", correlationId, eventType);
+
+    // The column name is one of the two fixed identifiers above, never test input.
+    private static async Task<List<Row>> RowsWhereAsync(string column, string value, string eventType)
     {
         await using var connection = new NpgsqlConnection(TestDatabaseFixture.ConnectionString);
         await connection.OpenAsync();
-        await using var command = new NpgsqlCommand("""
+        await using var command = new NpgsqlCommand($"""
             SELECT outcome, actor_kind, actor_id, correlation_id, row_to_json(e)::text
             FROM audit.audit_events e
-            WHERE event_type = @type AND resource_id = @id
+            WHERE event_type = @type AND {column} = @value
             """, connection);
         command.Parameters.AddWithValue("type", eventType);
-        command.Parameters.AddWithValue("id", accountId.ToString());
+        command.Parameters.AddWithValue("value", value);
         var rows = new List<Row>();
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())

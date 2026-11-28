@@ -1,4 +1,6 @@
 using System.Data.Common;
+using System.Net;
+using System.Net.Sockets;
 using Platform.Audit.Contracts;
 using Platform.Identity.Enums;
 using Microsoft.Extensions.Logging;
@@ -26,12 +28,14 @@ public sealed class IdentityAuditProducer(
     public ValueTask<AuditWriteResult> LoginSucceededAsync(
         Guid userId,
         string correlationId,
+        string? sourceAddress = null,
         CancellationToken cancellationToken = default) =>
         WriteAsync(
             new AuditEventDraft(
                 AuditEventTypes.AuthLogin,
                 AuditOutcome.Success,
-                Resource: Account(userId)),
+                Resource: Account(userId),
+                Details: LoginDetails(sourceAddress)),
             UserContext(userId, correlationId),
             cancellationToken);
 
@@ -39,6 +43,7 @@ public sealed class IdentityAuditProducer(
         string reasonCode,
         string correlationId,
         Guid? confirmedUserId = null,
+        string? sourceAddress = null,
         CancellationToken cancellationToken = default,
         bool actorConfirmed = false) =>
         WriteAsync(
@@ -46,7 +51,7 @@ public sealed class IdentityAuditProducer(
                 AuditEventTypes.AuthLogin,
                 AuditOutcome.Failure,
                 Resource: confirmedUserId is Guid userId ? Account(userId) : null,
-                Details: Details(("reasonCode", reasonCode))),
+                Details: LoginDetails(sourceAddress, reasonCode)),
             actorConfirmed && confirmedUserId is Guid id
                 ? UserContext(id, correlationId)
                 : AnonymousContext(correlationId),
@@ -282,6 +287,33 @@ public sealed class IdentityAuditProducer(
     private static IReadOnlyDictionary<string, string> Details(
         params (string Key, string Value)[] entries) =>
         entries.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
+
+    // IDN-22: auth.login details; without a usable source address a success keeps no details at all.
+    private static IReadOnlyDictionary<string, string>? LoginDetails(
+        string? sourceAddress,
+        string? reasonCode = null)
+    {
+        var details = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (reasonCode is not null)
+            details["reasonCode"] = reasonCode;
+        if (NormalizeSourceAddress(sourceAddress) is string address)
+            details["sourceAddress"] = address;
+        return details.Count == 0 ? null : details;
+    }
+
+    // IDN-22: the audit catalog takes only a plain IPv4 or IPv6 address (AuditDetailFormat.IpAddress), so an
+    // IPv4-mapped address becomes IPv4 and a zone id is dropped. A value that is not an address is left out:
+    // the login is still audited, only without its source address. IPv4 must round-trip, because TryParse
+    // also reads short forms such as "203.0.113" as a different address.
+    private static string? NormalizeSourceAddress(string? sourceAddress)
+    {
+        if (!IPAddress.TryParse(sourceAddress, out var address)
+            || (address.AddressFamily == AddressFamily.InterNetwork && address.ToString() != sourceAddress))
+            return null;
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+        return new IPAddress(address.GetAddressBytes()).ToString();
+    }
 
     private static string Status(AccountStatus status) => status switch
     {
