@@ -78,6 +78,14 @@ public static class AuditEventCatalog
             AuditPresence.Forbidden,
             null,
             Fields()),
+        // HTTP rejection before MFA verification; no account identity is inferred from a request.
+        new AuditEventSchema(
+            AuditEventTypes.AuthMfaThrottled,
+            Outcomes((AuditOutcome.Denied, Anonymous)),
+            AuditPresence.Forbidden,
+            AuditPresence.Forbidden,
+            null,
+            Fields()),
         new AuditEventSchema(
             AuditEventTypes.AuthMfaBackupCodesGenerated,
             Outcomes((AuditOutcome.Success, User)),
@@ -174,6 +182,11 @@ public static class AuditEventCatalog
                 ("lockoutEnd", new AuditDetailField(
                     AuditDetailFormat.UtcTimestamp,
                     new[] { AuditOutcome.Success }.ToFrozenSet())),
+                ("lockoutKind", new AuditDetailField(
+                    AuditDetailFormat.Code,
+                    new[] { AuditOutcome.Success }.ToFrozenSet(),
+                    AllowedValuesByOutcome: ValuesByOutcome(
+                        (AuditOutcome.Success, Codes("password", "mfa", "both"))))),
                 ("reasonCode", ReasonCode))),
 
         new AuditEventSchema(

@@ -261,6 +261,48 @@ US-18 i audit testovi (unit testovi u `backend/Platform.Identity.Tests/Services/
 
 ## 9. Budući rad
 
+### IDN-05 / #270: pripremljen Audit ugovor
+
+Audit dopuna predlaže Timu 12 novi `auth.mfa.throttled` (`Denied`, `Anonymous`,
+bez resursa, kursa i detalja) za HTTP odbijanje na `mfa/verify` i `mfa/enroll/confirm`.
+`IdentityAuditProducer.MfaThrottledAsync` prima samo serversku korelaciju; ne čita
+sesiju, nalog, IP adresu, tijelo zahtjeva, TOTP kod ili tajnu. Ovo nije događaj
+`auth.mfa.verified/Denied` sa `attempt_limit`, koji opisuje MFA brojač po nalogu.
+
+`IdentityAuditProducer.CreateAccountUnlockedDraft(targetId, passwordLockoutEnd,
+mfaLockoutEnd)` pravi uspješan `account.unlocked` sa `lockoutKind` (`password`,
+`mfa`, `both`) i `lockoutEnd` kao najkasnijim uklonjenim rokom u UTC. Ulazi moraju
+biti stvarni rokovi blokada uklonjenih u transakciji, a ne vrijednosti iz HTTP
+zahtjeva. Ako nijedna blokada nije uklonjena, metoda odbija pravljenje događaja.
+Detalj `lockoutKind` je dodatni, opcion u katalogu radi kompatibilnosti postojećih
+producenata i istorijskih zapisa; novi tok otključavanja treba uvijek da ga šalje.
+
+Ovaj paket priprema ugovor i testove; još ne povezuje događaje sa HTTP limiterom
+ili novim MFA otključavanjem. Preostala integracija u #270:
+
+- Otključavanje: store vraća uklonjene rokove za lozinku i MFA; servis poziva
+  factory, piše kroz `ITransactionalAuditWriter` u istoj transakciji i commit radi
+  samo za `IsRecorded`. Testirati MFA-only, password-only, obje blokade i rollback
+  pri grešci audita; zatim uspješnu prijavu novim važećim TOTP kodom.
+- HTTP limiter: posebna MFA politika i `RetryAfterSeconds` grana; na njenom
+  `OnRejected` pozvati `MfaThrottledAsync` umjesto `LoginThrottledAsync`, uz isti
+  ograničeni pokušaj upisa, odvojeni scope i serversku korelaciju kao kod prijave.
+  Nedostupan audit ne mijenja već nastali 429. Odbijeni zahtjev ne poziva MFA
+  servis i ne povećava brojač kodova. Testirati obje rute i `Retry-After`.
+- Tim 12: pregled novog događaja i dozvoljenih vrijednosti `lockoutKind` prije
+  spajanja. Nisu potrebne promjene Audit baze niti internih store/domain tipova.
+
+Ugovorni testovi su `MfaLockoutAuditContractTests`; oni ne dokazuju budući HTTP
+429 ili uklanjanje MFA blokade. Postojeća ograničenja ispod ostaju dok se te
+integracije ne završe.
+
+Lokalna Release provjera ovog paketa (2026-11-28, osnova `8cf04d50`):
+`Platform.Identity.Tests` 713/713 (uključuje 23 nova ugovorna testa), Audit katalog,
+validator, writer i event unit testovi 198/198; bez padova i preskakanja.
+`dotnet build backend/SecurityLab.slnx --configuration Release --no-restore`
+prolazi bez grešaka. Ovo nije puna backend test kampanja niti dokaz budućih
+HTTP/MFA-unlock integracija.
+
 Recovery kodovi i administratorski MFA reset nisu deo US-17. TOTP nije
 phishing-resistant MFA; WebAuthn/passkeys mogu biti buduće poboljšanje.
 
