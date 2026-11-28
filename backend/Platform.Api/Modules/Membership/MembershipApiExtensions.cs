@@ -33,6 +33,30 @@ public static class MembershipApiExtensions
                 MembershipActions.CourseResourceType,
                 IsPrivileged: true));
 
+
+        // ACC-07-3: radnje za delegacije i njihova politika (nastavnik kursa ili administrator),
+        // takođe pre AddAccessControl() (strogi ACC-05).
+        services.AddAccessAction<ManageCourseDelegationsPolicy>(
+            new ActionDefinition(
+                DelegationActions.Grant,
+                ActionScope.Course,
+                DelegationActions.CourseResourceType,
+                IsPrivileged: true));
+
+        services.AddAccessAction<ManageCourseDelegationsPolicy>(
+            new ActionDefinition(
+                DelegationActions.Revoke,
+                ActionScope.Course,
+                DelegationActions.CourseResourceType,
+                IsPrivileged: true));
+
+        services.AddAccessAction<ManageCourseDelegationsPolicy>(
+            new ActionDefinition(
+                DelegationActions.Read,
+                ActionScope.Course,
+                DelegationActions.CourseResourceType,
+                IsPrivileged: false));
+
         return services;
     }
 
