@@ -37,6 +37,7 @@ internal static class AuditDraftExamples
         yield return (
             new AuditEventDraft(AuditEventTypes.AuthLoginThrottled, AuditOutcome.Denied),
             AnonymousContext);
+        yield return (new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied), AnonymousContext);
 
         yield return (
             new AuditEventDraft(

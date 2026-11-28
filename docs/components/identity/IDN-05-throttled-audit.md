@@ -47,6 +47,22 @@ audit zaključavanja i otključavanja naloga ostaje zaseban zadatak.
 
 ## Greške i vremensko ograničenje
 
+### MFA HTTP ograničenje — ugovor za #270
+
+Pripremljen je poseban `auth.mfa.throttled` preko
+`IdentityAuditProducer.MfaThrottledAsync`: `Denied`, `Anonymous`, serverska
+korelacija, bez kursa, resursa i detalja. Vlasnik povezivanja i učestalosti je
+IDN-05 tim, uz pregled Audit ugovora od Tima 12. Prijedlog je jedan pokušaj upisa
+za svaki zahtjev odbijen budućom MFA HTTP politikom, bez tihog uzorkovanja.
+
+Ovaj događaj još nije povezan u `OnRejected`; postojeći login tok se ne mijenja.
+Pri povezivanju zadržati postojeći rok upisa, zaseban scope i odgovor 429 čak i
+ako Audit nije dostupan. Ne slati `auth.login.throttled` niti događaj brojača
+kodova `auth.mfa.verified/Denied + attempt_limit` za HTTP odbijanje.
+Detalji i preostale integracije su u [IDN-05](IDN-05.md#issue-270-mfa-audit-ugovor).
+
+### Postojeći login tok
+
 Audit pokušaj ima rok od jedne sekunde, nezavisan od prekida klijenta. Koristi sopstveni
 scope koji traje do završetka writer-a. Ako adapter ignoriše otkazivanje i završi kasnije,
 ne koristi HttpContext niti već završen request scope; eventualna kasna greška se posmatra.

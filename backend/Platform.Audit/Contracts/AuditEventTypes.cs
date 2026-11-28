@@ -11,6 +11,7 @@ public static class AuditEventTypes
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
     public const string AuthLoginThrottled = "auth.login.throttled";
+    public const string AuthMfaThrottled = "auth.mfa.throttled";
     public const string AuthMfaEnrollmentStarted = "auth.mfa.enrollment.started";
     public const string AuthMfaEnabled = "auth.mfa.enabled";
     public const string AuthMfaVerified = "auth.mfa.verified";

@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using Platform.Audit.Contracts;
@@ -17,6 +18,46 @@ public sealed class IdentityAuditProducer(
     ITransactionalAuditWriter transactionalWriter,
     ILogger<IdentityAuditProducer> logger)
 {
+    /// <summary>
+    /// SEC-04: a refused MFA HTTP request, not a failed code or the account attempt limit.
+    /// The caller supplies server correlation only; request and account data are deliberately excluded.
+    /// </summary>
+    public ValueTask<AuditWriteResult> MfaThrottledAsync(
+        string correlationId,
+        CancellationToken cancellationToken = default) =>
+        WriteAsync(
+            new AuditEventDraft(AuditEventTypes.AuthMfaThrottled, AuditOutcome.Denied),
+            AnonymousContext(correlationId),
+            cancellationToken);
+
+    /// <summary>
+    /// Builds the successful unlock record from lockouts actually cleared by the store. The caller must write
+    /// this draft with ITransactionalAuditWriter in the unlock transaction and commit only after IsRecorded.
+    /// lockoutEnd is the latest cleared end, preserving the existing timestamp field for older readers.
+    /// </summary>
+    public static AuditEventDraft CreateAccountUnlockedDraft(
+        Guid targetId,
+        DateTimeOffset? passwordLockoutEnd,
+        DateTimeOffset? mfaLockoutEnd)
+    {
+        if (targetId == Guid.Empty)
+            throw new ArgumentException("A confirmed account ID is required.", nameof(targetId));
+        if (passwordLockoutEnd is null && mfaLockoutEnd is null)
+            throw new ArgumentException("At least one cleared lockout is required.", nameof(passwordLockoutEnd));
+
+        var kind = passwordLockoutEnd is null ? "mfa" : mfaLockoutEnd is null ? "password" : "both";
+        var end = passwordLockoutEnd ?? mfaLockoutEnd!.Value;
+        if (mfaLockoutEnd is { } mfaEnd && mfaEnd > end)
+            end = mfaEnd;
+        return new AuditEventDraft(
+            AuditEventTypes.AccountUnlocked,
+            AuditOutcome.Success,
+            Resource: Account(targetId),
+            Details: Details(
+                ("lockoutKind", kind),
+                ("lockoutEnd", end.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF'Z'", CultureInfo.InvariantCulture))));
+    }
+
     public ValueTask<AuditWriteResult> LoginThrottledAsync(
         string correlationId,
         CancellationToken cancellationToken = default) =>

@@ -50,6 +50,16 @@ IPv6 adrese se grupišu po /64 bloku.
 
 ## AUD-01: audit prekoračenja limita prijave
 
+Za MFA HTTP politiku pripremljen je odvojen Audit ugovor iz #270:
+`IdentityAuditProducer.MfaThrottledAsync` piše `auth.mfa.throttled`, ishod `Denied`,
+akter `Anonymous`, samo serverska korelacija, bez kursa, resursa i detalja.
+Ova metoda još nije pozvana iz limitera. Pri dodavanju MFA politike povezati je u
+`OnRejected` za obje MFA rute, uz isti rok, zaseban scope i očuvanje 429 pri
+neuspjelom upisu kao za login. Predložen je jedan pokušaj Audit upisa po odbijenom
+MFA HTTP zahtjevu; vlasnik je IDN-05 uz pregled Tima 12. Ne koristiti
+`auth.login.throttled` ni `auth.mfa.verified` sa `attempt_limit` za to odbijanje.
+Posebna politika, konfiguracija, `Retry-After` i HTTP testovi ostaju dio #270.
+
 Za odbijanje politikom `RateLimitPolicies.Login` middleware poziva
 `IdentityAuditProducer.LoginThrottledAsync`, koji koristi postojeći javni
 `ITrustedAuditWriter` i događaj `auth.login.throttled` sa ishodom `Denied`.
