@@ -49,6 +49,9 @@ public static class MembershipServiceCollectionExtensions
         }
         services.AddScoped<IMembershipService, MembershipService>();
         services.AddSingleton<IMembershipReader, StoreMembershipReader>();
+        services.AddScoped<RevokeDelegationService>();
+        services.AddScoped<ListDelegationsService>();
+
         return services;
     }
 }
