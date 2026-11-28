@@ -5,7 +5,7 @@ namespace Platform.Identity.Tests.Helpers;
 /// <summary>
 /// IDN-only HTTP fixtures do not exercise Audit persistence. They still keep the
 /// production fail-closed contract by explicitly supplying a successful trusted writer.
-/// Cross-module PostgreSQL persistence is covered by IdentityAuditPostgresIntegrationTests.
+/// Cross-module PostgreSQL persistence is covered by IdentityAuditIntegrationTests.
 /// </summary>
 internal sealed class SuccessfulAuditWriter : ITrustedAuditWriter
 {

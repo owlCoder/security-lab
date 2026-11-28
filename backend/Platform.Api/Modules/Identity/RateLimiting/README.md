@@ -104,7 +104,7 @@ credential verifier-a za odbijen zahtev. Verifier i izdavanje sesije su u tim te
 
 Dodatni testovi provjeravaju jedan anoniman audit događaj, serversku korelaciju,
 odsustvo tajni i očuvanje 429 pri odbijenom/neuspjelom/sporom auditu.
-`IdentityAuditPostgresIntegrationTests.ThrottledLogin_PersistsOneAnonymousDeniedEvent_WithNoCredentials`
+`IdentityAuditIntegrationTests.Login_ThrottledAccount_ShouldPersistOneAnonymousDeniedEventWithoutCredentials`
 provjerava pravi HTTP pipeline i jedan trajni zapis u novom DB kontekstu, za poznat
 i nepoznat nalog, sa stvarnim writer-om i ograničenim SELECT/INSERT audit nalogom.
 

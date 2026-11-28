@@ -8,110 +8,38 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using Npgsql;
+using Moq;
 using Platform.Api.Enums.Identity;
-using Platform.Api.Services.Identity;
-using Platform.Audit.Composition;
+using Platform.Api.Interfaces.Identity;
+using Platform.Audit.Application;
 using Platform.Audit.Contracts;
 using Platform.Audit.Infrastructure.Persistence;
-using Platform.Identity;
 using Platform.Identity.Entities;
-using Platform.Identity.Enums;
-using Platform.Identity.Persistence;
-using Platform.Identity.Persistence.Mfa;
-using Platform.Identity.Services;
-using Testcontainers.PostgreSql;
+using Platform.Identity.Tests.Helpers;
 using Platform.Identity.Testing;
 
-namespace Platform.Identity.Tests.Services;
+namespace Platform.Identity.Tests.Integration.Audit;
 
 [TestFixture]
+[Category("AUD-01")]
 [NonParallelizable]
-public sealed class IdentityAuditPostgresIntegrationTests
+public sealed class IdentityAuditIntegrationTests : IntegrationTestBase
 {
     private const string Password = "Strong-password!2026";
 
-    private PostgreSqlContainer database = null!;
     private string auditRuntimeConnection = null!;
-    private DbContextOptions<PlatformIdentityDbContext> identityOptions = null!;
-    private DbContextOptions<AuditDbContext> auditOptions = null!;
 
     [OneTimeSetUp]
-    public async Task StartDatabase()
-    {
-        database = new PostgreSqlBuilder("postgres:17-alpine").Build();
-        await database.StartAsync();
-
-        identityOptions = new DbContextOptionsBuilder<PlatformIdentityDbContext>()
-            .UseNpgsql(database.GetConnectionString(), postgres =>
-                postgres.MigrationsHistoryTable(
-                    "__EFMigrationsHistory",
-                    PlatformIdentityDbContext.SchemaName))
-            .Options;
-        auditOptions = new DbContextOptionsBuilder<AuditDbContext>()
-            .UseNpgsql(database.GetConnectionString(), postgres =>
-                postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit"))
-            .Options;
-
-        await using var identity = new PlatformIdentityDbContext(identityOptions);
-        await identity.Database.MigrateAsync();
-        await using var audit = new AuditDbContext(auditOptions);
-        await audit.Database.MigrateAsync();
-        var password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
-        await using var connection = new NpgsqlConnection(database.GetConnectionString());
-        await connection.OpenAsync();
-        // The generated password is hexadecimal; this role exists only in the disposable container.
-        await using var command = new NpgsqlCommand($"""
-            CREATE ROLE s16_audit_runtime LOGIN PASSWORD '{password}'
-                NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-            GRANT USAGE ON SCHEMA audit TO s16_audit_runtime;
-            GRANT SELECT, INSERT ON audit.audit_events TO s16_audit_runtime;
-            """, connection);
-        await command.ExecuteNonQueryAsync();
-        auditRuntimeConnection = new NpgsqlConnectionStringBuilder(database.GetConnectionString())
-        {
-            Username = "s16_audit_runtime", Password = password, Pooling = false
-        }.ConnectionString;
-    }
-
-    [OneTimeTearDown]
-    public async Task StopDatabase() => await database.DisposeAsync();
+    public async Task PrepareAuditRuntime() =>
+        auditRuntimeConnection = await AuditTestData.CreateRestrictedRuntimeAsync();
 
     [Test]
-    public async Task LoginAndLogoutHttpFlow_PersistsTrustedAuditEventsAndRevokesSession()
+    public async Task LoginAndLogout_ValidAccount_ShouldPersistAuditEventsAndRevokeSession()
     {
-        var userId = Guid.NewGuid();
-        var email = $"audit-flow-{userId:N}@example.com";
-        await SeedAccountAsync(userId, email);
-
-        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Testing");
-            builder.ConfigureAppConfiguration((_, configuration) =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:Identity"] = database.GetConnectionString(),
-                    ["ConnectionStrings:Audit"] = auditRuntimeConnection
-                }));
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<PlatformIdentityDbContext>();
-                services.RemoveAll<DbContextOptions<PlatformIdentityDbContext>>();
-                services.AddDbContext<PlatformIdentityDbContext>(options =>
-                    options.UseNpgsql(database.GetConnectionString(), postgres =>
-                        postgres.MigrationsHistoryTable(
-                            "__EFMigrationsHistory",
-                            PlatformIdentityDbContext.SchemaName)));
-
-                services.RemoveAll<AuditDbContext>();
-                services.RemoveAll<DbContextOptions<AuditDbContext>>();
-                services.AddDbContext<AuditDbContext>(options =>
-                    options.UseNpgsql(auditRuntimeConnection, postgres =>
-                        postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
-            });
-        });
+        // Arrange
+        var email = $"audit-flow-{Guid.NewGuid():N}@example.com";
+        var userId = (await UserTestData.AddAsync(Factory, email, Password)).Id;
+        await using var factory = CreateIdentityHost(loginPermitLimit: 1000);
         using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
@@ -119,20 +47,15 @@ public sealed class IdentityAuditPostgresIntegrationTests
             AllowAutoRedirect = false
         });
 
+        // Act
         using var loginResponse = await client.PostAsJsonAsync(
             "/api/auth/login",
             new { email, password = Password });
         using var logoutResponse = await client.PostAsync("/api/auth/logout", content: null);
 
-        await using var freshIdentity = new PlatformIdentityDbContext(identityOptions);
-        await using var freshAudit = new AuditDbContext(auditOptions);
-        var storedSession = await freshIdentity.Sessions.AsNoTracking()
-            .SingleAsync(session => session.UserId == userId);
-        var events = await freshAudit.Events.AsNoTracking()
-            .Where(row => row.ActorId == userId)
-            .Select(row => row.EventType)
-            .ToListAsync();
-
+        // Assert
+        var storedSession = (await SessionTestData.GetForUserAsync(Factory, userId)).Single();
+        var events = (await AuditTestData.GetByActorAsync(Factory, userId)).Select(row => row.EventType).ToList();
         Assert.Multiple(() =>
         {
             Assert.That(loginResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -144,113 +67,85 @@ public sealed class IdentityAuditPostgresIntegrationTests
     }
 
     [Test]
-    public async Task LoginAndRevokeHttpFlow_PersistsSessionRevokedWithRequestCorrelation()
+    public async Task LoginAndRevokeHttpFlow_ValidSession_PersistsSessionRevokedWithRequestCorrelation()
     {
-        var userId = Guid.NewGuid();
-        var email = $"audit-revoke-{userId:N}@example.com";
-        await SeedAccountAsync(userId, email);
-
-        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Testing");
-            builder.ConfigureAppConfiguration((_, configuration) =>
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:Identity"] = database.GetConnectionString(),
-                    ["ConnectionStrings:Audit"] = auditRuntimeConnection
-                }));
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<PlatformIdentityDbContext>();
-                services.RemoveAll<DbContextOptions<PlatformIdentityDbContext>>();
-                services.AddDbContext<PlatformIdentityDbContext>(options =>
-                    options.UseNpgsql(database.GetConnectionString(), postgres =>
-                        postgres.MigrationsHistoryTable(
-                            "__EFMigrationsHistory",
-                            PlatformIdentityDbContext.SchemaName)));
-
-                services.RemoveAll<AuditDbContext>();
-                services.RemoveAll<DbContextOptions<AuditDbContext>>();
-                services.AddDbContext<AuditDbContext>(options =>
-                    options.UseNpgsql(auditRuntimeConnection, postgres =>
-                        postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
-            });
-        });
+        // Arrange
+        var email = $"audit-revoke-{Guid.NewGuid():N}@example.com";
+        var userId = (await UserTestData.AddAsync(Factory, email, Password)).Id;
+        await using var factory = CreateIdentityHost(loginPermitLimit: 1000);
         using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
             HandleCookies = true,
             AllowAutoRedirect = false
         });
-
         using var loginResponse = await client.PostAsJsonAsync(
             "/api/auth/login",
             new { email, password = Password });
         Assert.That(loginResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var session = (await SessionTestData.GetForUserAsync(Factory, userId))
+            .Single(value => value.RevokedAt == null);
 
-        await using var identity = new PlatformIdentityDbContext(identityOptions);
-        var session = await identity.Sessions.AsNoTracking()
-            .SingleAsync(value => value.UserId == userId && value.RevokedAt == null);
-
+        // Act
         using var revokeResponse = await client.DeleteAsync(
             $"/api/auth/sessions/{session.SessionHandle}");
         var correlationId = revokeResponse.Headers.GetValues("X-Correlation-ID").Single();
 
-        await using var audit = new AuditDbContext(auditOptions);
-        var record = await audit.Events.AsNoTracking()
-            .SingleAsync(value =>
-                value.ActorId == userId
-                && value.EventType == AuditEventTypes.AuthSessionRevoked
-                && value.CorrelationId == correlationId);
-
+        // Assert
+        var records = await AuditTestData.GetByCorrelationAsync(Factory, correlationId);
+        Assert.That(records, Has.Count.EqualTo(1));
+        var record = records.Single(value =>
+            value.ActorId == userId
+            && value.EventType == AuditEventTypes.AuthSessionRevoked
+            && value.CorrelationId == correlationId);
         Assert.Multiple(() =>
         {
             Assert.That(revokeResponse.StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+            Assert.That(record.ActorId, Is.EqualTo(userId));
+            Assert.That(record.ActorKind, Is.EqualTo(AuditActorKind.User));
+            Assert.That(record.EventType, Is.EqualTo(AuditEventTypes.AuthSessionRevoked));
             Assert.That(record.Outcome, Is.EqualTo(AuditOutcome.Success));
+            Assert.That(record.ResourceType, Is.EqualTo(AuditResourceTypes.Account));
             Assert.That(record.ResourceId, Is.EqualTo(userId.ToString()));
             Assert.That(record.DetailsJson, Does.Contain("user_request"));
             Assert.That(record.DetailsJson, Does.Contain(session.SessionHandle.ToString("D")));
         });
+        Assert.That((await SessionTestData.GetAsync(Factory, session.Id))!.RevokedAt, Is.Not.Null);
     }
 
     [Test]
     public async Task Login_WhenAuditWriteFails_PersistsOnlyARevokedSession()
     {
-        var userId = Guid.NewGuid();
-        var email = $"audit-down-{userId:N}@example.com";
-        await SeedAccountAsync(userId, email);
+        // Arrange
+        var email = $"audit-down-{Guid.NewGuid():N}@example.com";
+        var userId = (await UserTestData.AddAsync(Factory, email, Password)).Id;
+        var writer = new Mock<ITrustedAuditWriter>();
+        writer.Setup(value => value.WriteAsync(
+                It.IsAny<AuditEventDraft>(), It.IsAny<AuditContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AuditWriteResult.Unavailable());
+        await using var factory = CreateIdentityHost(writer: writer.Object);
+        using var scope = factory.Services.CreateScope();
+        var login = scope.ServiceProvider.GetRequiredService<ILoginService>();
 
-        await using var identity = new PlatformIdentityDbContext(identityOptions);
-        var sessionStore = new SessionStore(identity, TimeProvider.System);
-        var login = new LoginService(
-            new CredentialVerifier(
-                new EfCredentialStore(identity),
-                new BCryptPasswordHasher(),
-                Options.Create(new IdentityLockoutOptions()),
-                TimeProvider.System),
-            new StoreSessionCreator(sessionStore, NullLogger<StoreSessionCreator>.Instance),
-            new SessionManager(identity),
-            new EfMfaCredentialsStore(identity),
-            CreateProducer(new UnavailableAuditWriter()));
-
+        // Act
         var result = await login.ExecuteAsync(email, Password, Guid.NewGuid().ToString("N"));
 
+        // Assert
         Assert.That(result.Outcome, Is.EqualTo(LoginOutcome.Unavailable));
         Assert.That(result.Session, Is.Null);
 
-        await using var freshIdentity = new PlatformIdentityDbContext(identityOptions);
-        var storedSession = await freshIdentity.Sessions.AsNoTracking()
-            .SingleAsync(session => session.UserId == userId);
+        var storedSession = (await SessionTestData.GetForUserAsync(Factory, userId)).Single();
         Assert.That(storedSession.RevokedAt, Is.Not.Null);
     }
 
     [TestCase(true)]
     [TestCase(false)]
-    public async Task ThrottledLogin_PersistsOneAnonymousDeniedEvent_WithNoCredentials(bool knownAccount)
+    public async Task Login_ThrottledAccount_ShouldPersistOneAnonymousDeniedEventWithoutCredentials(bool knownAccount)
     {
+        // Arrange
         var userId = Guid.NewGuid();
         var email = $"throttled-{userId:N}@example.com";
-        if (knownAccount) await SeedAccountAsync(userId, email);
+        if (knownAccount) userId = (await UserTestData.AddAsync(Factory, email, Password)).Id;
         await using var factory = CreateIdentityHost();
         using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
         {
@@ -263,12 +158,14 @@ public sealed class IdentityAuditPostgresIntegrationTests
         client.DefaultRequestHeaders.Add("X-Correlation-ID", "client-correlation");
         client.DefaultRequestHeaders.Add("X-Test-User", userId.ToString());
         var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+
+        // Act
         using var blocked = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
         var correlation = blocked.Headers.GetValues("X-Correlation-ID").Single();
         var body = await blocked.Content.ReadAsStringAsync();
 
-        await using var freshAudit = new AuditDbContext(auditOptions);
-        var records = await freshAudit.Events.AsNoTracking().Where(row => row.CorrelationId == correlation).ToListAsync();
+        // Assert
+        var records = await AuditTestData.GetByCorrelationAsync(Factory, correlation);
         Assert.That(records, Has.Count.EqualTo(1));
         var record = records.Single();
         Assert.Multiple(() =>
@@ -290,14 +187,14 @@ public sealed class IdentityAuditPostgresIntegrationTests
             Assert.That(record.DetailsJson, Is.EqualTo("{}"));
             Assert.That(record.OccurredAt, Is.InRange(before, DateTimeOffset.UtcNow));
         });
-        await using var freshIdentity = new PlatformIdentityDbContext(identityOptions);
-        Assert.That(await freshIdentity.Sessions.CountAsync(session => session.UserId == userId),
+        Assert.That((await SessionTestData.GetForUserAsync(Factory, userId)).Count,
             Is.EqualTo(knownAccount ? 1 : 0), "The rejected request must never issue another session.");
     }
 
     [Test]
     public async Task ThrottledLogin_WhenDatabaseRejectsInsert_StillReturns429WithoutSession()
     {
+        // Arrange
         var email = $"no-audit-{Guid.NewGuid():N}@example.com";
         await using var factory = CreateIdentityHost();
         using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
@@ -307,11 +204,14 @@ public sealed class IdentityAuditPostgresIntegrationTests
         using var first = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
         Assert.That(first.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
 
-        await ExecuteAuditSqlAsync("REVOKE INSERT ON audit.audit_events FROM s16_audit_runtime");
+        await AuditTestData.SetInsertAllowedAsync(false);
         try
         {
+            // Act
             using var blocked = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
             var correlation = blocked.Headers.GetValues("X-Correlation-ID").Single();
+
+            // Assert
             Assert.Multiple(() =>
             {
                 Assert.That(blocked.StatusCode, Is.EqualTo(HttpStatusCode.TooManyRequests));
@@ -319,30 +219,22 @@ public sealed class IdentityAuditPostgresIntegrationTests
                 Assert.That(blocked.Headers.CacheControl?.NoStore, Is.True);
                 Assert.That(blocked.Headers.Contains("Set-Cookie"), Is.False);
             });
-            await using var audit = new AuditDbContext(auditOptions);
-            Assert.That(await audit.Events.AnyAsync(row => row.CorrelationId == correlation), Is.False);
+            Assert.That(await AuditTestData.GetByCorrelationAsync(Factory, correlation), Is.Empty);
+            Assert.That(await SessionTestData.CountAsync(Factory), Is.Zero);
             Assert.That(await blocked.Content.ReadAsStringAsync(), Does.Contain("rate_limited"));
         }
         finally
         {
-            await ExecuteAuditSqlAsync("GRANT INSERT ON audit.audit_events TO s16_audit_runtime");
+            await AuditTestData.SetInsertAllowedAsync(true);
         }
     }
 
-    private async Task ExecuteAuditSqlAsync(string sql)
-    {
-        await using var connection = new NpgsqlConnection(database.GetConnectionString());
-        await connection.OpenAsync();
-        await using var command = new NpgsqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync();
-    }
-
     [Test]
-    public async Task AccountLockoutHttpFlow_PersistsAuditAtThreshold_AndForLaterRejectedLogin()
+    public async Task Login_LockoutThresholdAndLaterAttempt_ShouldPersistAnonymousFailureEvents()
     {
-        var userId = Guid.NewGuid();
-        var email = $"lockout-audit-{userId:N}@example.com";
-        await SeedAccountAsync(userId, email);
+        // Arrange
+        var email = $"lockout-audit-{Guid.NewGuid():N}@example.com";
+        var userId = (await UserTestData.AddAsync(Factory, email, Password)).Id;
         await using var factory = CreateIdentityHost(loginPermitLimit: 1000, maxFailedAttempts: 3);
         using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
         {
@@ -354,22 +246,22 @@ public sealed class IdentityAuditPostgresIntegrationTests
             using var failure = await client.PostAsJsonAsync("/api/auth/login", new { email, password = wrongPassword });
             Assert.That(failure.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
         }
-        await using (var before = new PlatformIdentityDbContext(identityOptions))
-        {
-            var account = await before.Accounts.AsNoTracking().SingleAsync(value => value.Id == userId);
-            Assert.That(account.LockoutEnd, Is.Null);
-            Assert.That(account.FailedLoginCount, Is.EqualTo(2));
-        }
+        var account = (await GetAsync<UserAccount>(userId))!;
+        Assert.That(account.LockoutEnd, Is.Null);
+        Assert.That(account.FailedLoginCount, Is.EqualTo(2));
 
         client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
         client.DefaultRequestHeaders.Add("X-Correlation-ID", "untrusted-lockout-correlation");
+
+        // Act
         using var triggering = await client.PostAsJsonAsync("/api/auth/login", new { email, password = wrongPassword });
         var triggeringCorrelation = triggering.Headers.GetValues("X-Correlation-ID").Single();
         var body = await triggering.Content.ReadAsStringAsync();
-        await AssertLockedLoginAuditAsync(triggeringCorrelation, userId, email, wrongPassword);
-
         using var blocked = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
         var blockedCorrelation = blocked.Headers.GetValues("X-Correlation-ID").Single();
+
+        // Assert
+        await AssertLockedLoginAuditAsync(triggeringCorrelation, userId, email, wrongPassword);
         await AssertLockedLoginAuditAsync(blockedCorrelation, userId, email, Password);
         Assert.Multiple(() =>
         {
@@ -384,41 +276,41 @@ public sealed class IdentityAuditPostgresIntegrationTests
             Assert.That(body, Does.Contain("invalid_credentials"));
         });
         Assert.That(await blocked.Content.ReadAsStringAsync(), Is.EqualTo(body));
-        await using var identity = new PlatformIdentityDbContext(identityOptions);
-        Assert.That((await identity.Accounts.AsNoTracking().SingleAsync(value => value.Id == userId)).LockoutEnd,
+        Assert.That((await GetAsync<UserAccount>(userId))!.LockoutEnd,
             Is.GreaterThan(DateTimeOffset.UtcNow));
-        Assert.That(await identity.Sessions.AnyAsync(value => value.UserId == userId), Is.False);
+        Assert.That(await SessionTestData.GetForUserAsync(Factory, userId), Is.Empty);
     }
 
     [Test]
     public async Task AccountLockout_WhenAuditInsertFails_StaysLockedAndIssuesNoSession()
     {
-        var userId = Guid.NewGuid();
-        var email = $"lockout-audit-down-{userId:N}@example.com";
-        await SeedAccountAsync(userId, email);
+        // Arrange
+        var email = $"lockout-audit-down-{Guid.NewGuid():N}@example.com";
+        var userId = (await UserTestData.AddAsync(Factory, email, Password)).Id;
         await using var factory = CreateIdentityHost(loginPermitLimit: 1000, maxFailedAttempts: 1);
         using var client = factory.CreateCsrfClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost")
         });
-        await ExecuteAuditSqlAsync("REVOKE INSERT ON audit.audit_events FROM s16_audit_runtime");
+        await AuditTestData.SetInsertAllowedAsync(false);
         try
         {
+            // Act
             using var failed = await client.PostAsJsonAsync("/api/auth/login", new { email, password = "wrong-password" });
             var correlation = failed.Headers.GetValues("X-Correlation-ID").Single();
+
+            // Assert
             Assert.That(failed.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
             Assert.That(failed.Headers.Contains("Set-Cookie"), Is.False);
-            await using var identity = new PlatformIdentityDbContext(identityOptions);
-            Assert.That((await identity.Accounts.AsNoTracking().SingleAsync(value => value.Id == userId)).LockoutEnd,
+            Assert.That((await GetAsync<UserAccount>(userId))!.LockoutEnd,
                 Is.GreaterThan(DateTimeOffset.UtcNow));
-            Assert.That(await identity.Sessions.AnyAsync(value => value.UserId == userId), Is.False);
-            await using var audit = new AuditDbContext(auditOptions);
-            Assert.That(await audit.Events.AnyAsync(value => value.CorrelationId == correlation), Is.False,
+            Assert.That(await SessionTestData.GetForUserAsync(Factory, userId), Is.Empty);
+            Assert.That(await AuditTestData.GetByCorrelationAsync(Factory, correlation), Is.Empty,
                 "The current contract does not guarantee a durable event when Audit storage rejects the write.");
         }
         finally
         {
-            await ExecuteAuditSqlAsync("GRANT INSERT ON audit.audit_events TO s16_audit_runtime");
+            await AuditTestData.SetInsertAllowedAsync(true);
         }
         using var stillLocked = await client.PostAsJsonAsync("/api/auth/login", new { email, password = Password });
         Assert.That(stillLocked.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
@@ -427,8 +319,7 @@ public sealed class IdentityAuditPostgresIntegrationTests
 
     private async Task AssertLockedLoginAuditAsync(string correlation, Guid accountId, string email, string password)
     {
-        await using var audit = new AuditDbContext(auditOptions);
-        var records = await audit.Events.AsNoTracking().Where(value => value.CorrelationId == correlation).ToListAsync();
+        var records = await AuditTestData.GetByCorrelationAsync(Factory, correlation);
         Assert.That(records, Has.Count.EqualTo(1));
         var record = records.Single();
         using var details = JsonDocument.Parse(record.DetailsJson);
@@ -448,51 +339,32 @@ public sealed class IdentityAuditPostgresIntegrationTests
         });
     }
 
-    private WebApplicationFactory<Program> CreateIdentityHost(int loginPermitLimit = 1, int maxFailedAttempts = 5) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    private WebApplicationFactory<Program> CreateIdentityHost(
+        int loginPermitLimit = 1, int maxFailedAttempts = 5, ITrustedAuditWriter? writer = null) =>
+        Factory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("RateLimiting:Login:PermitLimit", loginPermitLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("RateLimiting:Login:WindowSeconds", "60");
             builder.UseSetting("Identity:Lockout:MaxFailedAccessAttempts", maxFailedAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Keep raw Audit configuration and the scoped context on the same restricted test role.
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["ConnectionStrings:Identity"] = database.GetConnectionString(),
                     ["ConnectionStrings:Audit"] = auditRuntimeConnection
                 }));
             builder.ConfigureTestServices(services =>
             {
-                services.RemoveAll<PlatformIdentityDbContext>();
-                services.RemoveAll<DbContextOptions<PlatformIdentityDbContext>>();
-                services.AddDbContext<PlatformIdentityDbContext>(options => options.UseNpgsql(database.GetConnectionString(),
-                    postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", PlatformIdentityDbContext.SchemaName)));
                 services.RemoveAll<AuditDbContext>();
                 services.RemoveAll<DbContextOptions<AuditDbContext>>();
                 services.AddDbContext<AuditDbContext>(options => options.UseNpgsql(auditRuntimeConnection,
                     postgres => postgres.MigrationsHistoryTable("__EFMigrationsHistory", "audit")));
+                // Restore the real writer hidden by the shared factory's default success stub.
+                services.RemoveAll<ITrustedAuditWriter>();
+                if (writer is null)
+                    services.AddScoped<ITrustedAuditWriter>(provider => provider.GetRequiredService<AuditWriter>());
+                else
+                    services.AddSingleton(writer);
             });
         });
-
-    private async Task SeedAccountAsync(Guid userId, string email)
-    {
-        var account = new UserAccount(userId, CredentialVerifier.NormalizeEmail(email));
-        account.SetPasswordHash(new BCryptPasswordHasher().Hash(Password));
-
-        await using var context = new PlatformIdentityDbContext(identityOptions);
-        context.Accounts.Add(account);
-        await context.SaveChangesAsync();
-    }
-
-    private static IdentityAuditProducer CreateProducer(ITrustedAuditWriter writer) =>
-        new(writer, new PostgresTransactionalAuditWriter(TimeProvider.System), NullLogger<IdentityAuditProducer>.Instance);
-
-    private sealed class UnavailableAuditWriter : ITrustedAuditWriter
-    {
-        public ValueTask<AuditWriteResult> WriteAsync(
-            AuditEventDraft draft,
-            AuditContext context,
-            CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(AuditWriteResult.Unavailable());
-    }
 }

@@ -169,7 +169,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   | User revokes another of their sessions | `204`; the revoked one is refused at once, the caller's session stays valid | `RevokeOtherSession_RejectsItImmediately_AndKeepsTheCallersSessionValid` |
   | User revokes the session they are using | `204`; the same cookie is refused on the next request | `RevokeCurrentSession_RejectsTheSameCookieOnTheNextRequest` |
   | Revoke with another user's handle (IDOR, SEC-01) | `404 session_not_found`, same body as an unknown handle, nothing revoked | `RevokeSessionOfAnotherUser_Returns404_IndistinguishableFromUnknown_AndRevokesNothing` |
-  | Successful revoke | `auth.session.revoked` is `Success` with `revocationCause=user_request` and the revoked handle | `RevokeSession_OwnedSession_Returns204AndUsesCallerId` (`SessionControllerTests`), `SessionRevoked_UsesSuccessCauseHandleAccountResourceAndUserActor` (`IdentityAuditProducerTests`), `LoginAndRevokeHttpFlow_PersistsSessionRevokedWithRequestCorrelation` (`IdentityAuditPostgresIntegrationTests`) |
+  | Successful revoke | `auth.session.revoked` is `Success` with `revocationCause=user_request` and the revoked handle | `RevokeSession_OwnedSession_Returns204AndUsesCallerId` (`SessionControllerTests`), `SessionRevoked_UsesSuccessCauseHandleAccountResourceAndUserActor` (`IdentityAuditProducerTests`), `LoginAndRevokeHttpFlow_ValidSession_PersistsSessionRevokedWithRequestCorrelation` (`IdentityAuditIntegrationTests`) |
   | Unknown or foreign handle | Audited as `Failure` with `reasonCode=not_found`; still returns `404 session_not_found` | `RevokeSession_UnknownOrForeignHandle_ReturnsSame404` (`SessionControllerTests`), `SessionRevokeFailed_UsesFailureReasonAndAccountResource` (`IdentityAuditProducerTests`) |
   | Audit event contains credentials or secrets | No session cookie, token, password, or other credential material is accepted or written | `ProducerMethods_DoNotAcceptOrWriteCredentialMaterial` (`IdentityAuditProducerTests`) |
 
@@ -184,7 +184,7 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
   - `backend/Platform.Api/Security/IdentityAccess/` (`IdentityAccessActions.cs`, `IdentitySessionAccessRegistration.cs`, `IdentitySessionSubjectProvider.cs`, `SessionSelfServicePolicy.cs`) and `backend/Platform.Api/Program.cs` (ACC-05 alignment, #185 and #200)
   - `backend/Platform.Identity.Tests/Controllers/SessionControllerTests.cs`
   - `backend/Platform.Identity.Tests/Services/IdentityAuditProducerTests.cs`
-  - `backend/Platform.Identity.Tests/Services/IdentityAuditPostgresIntegrationTests.cs`
+  - `backend/Platform.Identity.Tests/Integration/Audit/IdentityAuditIntegrationTests.cs`
   - `docs/components/audit/CONTRACTS.md`
   - `backend/Platform.Identity.Tests/Middleware/SessionCheckMiddlewareTests.cs`
   - `backend/Platform.Identity.Tests/Services/SessionManagerTests.cs`
@@ -198,14 +198,14 @@ Data-isolation rule: `SessionManager.ListForUser` applies `session.UserId == use
 
   ```bash
   dotnet test backend/Platform.Identity.Tests/Platform.Identity.Tests.csproj \
-    --filter "FullyQualifiedName~SessionControllerTests|FullyQualifiedName~SessionCheckMiddlewareTests|FullyQualifiedName~SessionManagerTests|FullyQualifiedName~SessionManagerValidationTests|FullyQualifiedName~SessionReviewRevokeIntegrationTests|FullyQualifiedName~IdentityAuditProducerTests|FullyQualifiedName~IdentityAuditPostgresIntegrationTests"
+    --filter "FullyQualifiedName~SessionControllerTests|FullyQualifiedName~SessionCheckMiddlewareTests|FullyQualifiedName~SessionManagerTests|FullyQualifiedName~SessionManagerValidationTests|FullyQualifiedName~SessionReviewRevokeIntegrationTests|FullyQualifiedName~IdentityAuditProducerTests|FullyQualifiedName~IdentityAuditIntegrationTests"
   ```
 
 - Tests and results:
 
   - `SessionControllerTests` use a mocked `ISessionManager` to test controller behavior and authorization branches.
   - `IdentityAuditProducerTests` verify session-revoke audit event shape and that producer methods do not accept or write credential material.
-  - `IdentityAuditPostgresIntegrationTests` cover the real login-and-revoke HTTP flow and persistence of `auth.session.revoked` with the request correlation ID, using PostgreSQL in Testcontainers.
+  - `IdentityAuditIntegrationTests` cover the real login-and-revoke HTTP flow and persistence of `auth.session.revoked` with the request correlation ID, using the shared PostgreSQL Testcontainers database and restricted Audit runtime role.
   - `SessionManagerTests` and `SessionManagerValidationTests` use the real `SessionManager` with an isolated EF Core InMemory context to test ownership, revocation, expiration, account status, and projection behavior.
   - `SessionCheckMiddlewareTests` test the middleware branches with a mocked `ISessionManager`.
   - `SessionReviewRevokeIntegrationTests` send real HTTP requests through the whole pipeline to the real `SessionManager` and PostgreSQL. They confirm that no session is `401 session_invalid`, a valid session without permission is `403`, a revoked session is `401` on its next request (also in the `Production` environment) while the caller's other sessions stay valid, and another user's handle is `404`. The `403` route is the IDN-03 admin endpoint `PUT /api/admin/accounts/{id}/status`.

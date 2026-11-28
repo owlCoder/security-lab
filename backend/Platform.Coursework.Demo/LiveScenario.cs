@@ -129,7 +129,7 @@ internal static class LiveScenario
         report.Stage = "complete";
     }
 
-    private sealed class LiveSession : IDisposable
+    internal sealed class LiveSession : IDisposable
     {
         private HttpClient? client;
         private readonly LiveReport report;
@@ -188,7 +188,7 @@ internal static class LiveScenario
         }
         public void Dispose() => Disconnect();
     }
-    private sealed record Reply(string Body, bool NoStore, string[] IssuedCookies)
+    internal sealed record Reply(string Body, bool NoStore, string[] IssuedCookies)
     {
         public T Parse<T>() where T : class => JsonSerializer.Deserialize<T>(Body, Json) ?? throw new InvalidOperationException("Missing expected response DTO.");
     }

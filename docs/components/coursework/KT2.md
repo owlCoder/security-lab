@@ -4,21 +4,19 @@ Team 8 owns concrete-resource authorization and scoped multi-course administrati
 This document describes the current delivered source, including increments 3 and 4.
 It does **not** certify complete KT2 or neighboring-team acceptance.
 
-## Current status — 2026-11-17
+## Current status — 2026-11-28
 
-PR [#199](https://github.com/owlCoder/security-lab/pull/199) was merged on 2026-11-15
-as `b53a9bc`. It contains the first two KT2 increments. The new delivery is based on
-current main `29db660` and includes the previously unpublished third increment.
-Continue on a new `feature/kt2-acc04-adm08-demo` branch and a new PR; do not attach
-new work to the already merged PR. No remote PR/CI result for this delivery is inferred.
+PR [#199](https://github.com/owlCoder/security-lab/pull/199) added ADM-08 persistence and transactional audit. PR [#205](https://github.com/owlCoder/security-lab/pull/205) added the KT2 integrations and live ADM-08 HTTPS demonstration. PR [#253](https://github.com/owlCoder/security-lab/pull/253) added the live ACC-04 HTTPS demonstration. All three PRs are merged into `main`.
 
-| KT2 criterion | Current implementation/evidence | Still open |
+The ACC-04 demo uses the real HTTPS API, Identity login, session cookies and access policies. ATT and course membership are simulated in the demo. The ADM-08 demo uses PostgreSQL and verifies persistence across an API restart and the denial of access after revocation with the same session.
+
+| KT2 criterion | Current implementation or evidence | Still open |
 |---|---|---|
-| 1. Assigned functionality | ACC-04 server policies, read/draft consumer API and ATT adapter; ADM-08 persistent scoped delegation/settings/revocation and first-root operator | Actual ATT read/CAS and persistent ACC-02 providers; actual provider acceptance |
-| 2. Module integration | Real ADM-08 Identity/session, ACC-01 catalog, shared Access and supported central Audit delivery; actual Kestrel/HTTPS lifecycle | ATT/membership integration; missing central audit mappings; human contract acknowledgement |
-| 3. Tests/security | Strict PostgreSQL/HTTP/adapter NUnit suite, existing KT1 and Access regressions, real HTTPS live checks | Actual latest remote CI; coverage against the eventual real ATT/membership providers |
-| 4. Startup/documentation | Repeatable live launcher, isolated seed/cleanup, operator commands, current architecture/DFD and actual evidence | Final ACC-04 provider startup/configuration and browser/UI deployment if required for the agreed product |
-| 5. Individual contribution | Published first/second increment history and merged #199; key-code defense map below | Student publishes this delivery, records real Tapiz/PR links and explains it individually |
+| 1. Assigned functionality | ACC-04 ownership checks and versioned draft updates; ADM-08 scoped delegation, settings and revocation | Integration with the real ATT and persistent ACC-02 providers |
+| 2. Module integration | Identity sessions, shared Access policies, ACC-01 catalog and supported central Audit delivery | Provider contract confirmation and remaining Audit event mappings |
+| 3. Tests and security | Both live HTTPS demonstrations passed locally; see `KT2-VALIDATION.md` | Verification against the real ATT and ACC-02 providers together |
+| 4. Startup and documentation | Demo scripts, operator commands, architecture diagrams and data flows | Startup configuration for the real ATT provider |
+| 5. Individual contribution | Published work is linked through PRs #199, #205 and #253 | Record actual Tapiz links and explain contributions during the defense |
 
 The specification source is `docs/spec/PROJECT_SPECIFICATION_OIB.pdf`, sections 2,
 2.1, 3.1, 4.2 and 4.12; SHA-256
@@ -65,7 +63,37 @@ An existing-server run is optional and must use an explicitly dedicated test ser
 set `COURSEWORK_TEST_POSTGRES` and add `-UseExistingServer`. Test bootstrap needs
 CREATE DATABASE permissions. It creates/deletes only its GUID-named database.
 `-NoBuild` is intended for CI after the full solution build. The normal default builds
-what it needs. The CI workflow adds one live-demo step and preserves existing jobs.
+what it needs. Backend CI runs the ADM-08 and ACC-04 live demos and uploads their reports from `TestResults/`.
+
+## Reproduce ACC-04 with the local ATT stub
+
+Run from the repository root with .NET 10, PowerShell and Docker Desktop running:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\demo-coursework-live.ps1 -AttemptDemo
+```
+
+The launcher starts the real API on loopback HTTPS, seeds isolated PostgreSQL Identity
+accounts and starts a second HTTPS listener for the local `acc04-att-v1` stub.
+Two students have test membership in the same course. Identity login, session cookies,
+CSRF, the Access policies and the HTTP adapter are the normal API implementation.
+Membership and the ATT store are demonstration fixtures. The stub uses only synthetic
+answers in memory and supports metadata, snapshot-bound reads and versioned draft writes;
+its write receipts are in memory and do not stand in for durable ATT audit.
+
+The run checks login, reading and saving an own draft, reload with the new version,
+denial of reads and writes on a different student's attempt, rejection of stale writes
+and immutability of submitted attempts. The listener addresses, certificate pins and
+service credential are scoped to one run. The disposable database, children and
+temporary certificate files are removed on exit. The stub reloads its per-run
+certificate as PKCS#12 so Windows Schannel can use the server private key. The
+demo client still pins the certificate, and no trusted root is installed.
+
+Results: `TestResults/coursework-live-<run>/live-attempts.json`. The launcher verifies
+that the report is from the requested run and that all checks and cleanup succeeded.
+`-UseExistingServer` is available only for a dedicated test PostgreSQL server; set
+`COURSEWORK_TEST_POSTGRES` as for the ADM-08 demo. The default invocation without
+`-AttemptDemo` runs ADM-08 separately.
 
 ## Repeat the NUnit regression/integration checks
 
@@ -221,8 +249,6 @@ acknowledgement before marking criteria 1/2 fully complete.
 | `Platform.Coursework.Demo/` and live script | Real HTTPS/Kestrel process, pinned temporary certificate, normal login, restart persistence, exact-cookie revocation and cleanup |
 | `Platform.Coursework.Tests/` | Identify which cases use real providers and which deliberately use neighboring-provider doubles; explain a positive and negative case |
 
-Use actual Git/PR links and dates for contribution evidence. Published #199 proves
-prior work, not this unpublished continuation, external contract review or real
-Tapiz creation. No separate CONTRIBUTION file or fabricated completion history is
+Use actual Git/PR links and dates for contribution evidence. PRs #199, #205 and #253 record the published work. Link Tapiz cards and external contract reviews only when they exist. No separate CONTRIBUTION file or fabricated completion history is
 required. Architecture/DFD links are in `diagrams/README.md`; recorded local checks
 are in `KT2-VALIDATION.md`.

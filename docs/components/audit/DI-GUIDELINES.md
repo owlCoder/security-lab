@@ -36,6 +36,8 @@ Forbidden:
   to the Access integration and needs review by the Access team.
 - `Platform.Api` now also registers the Identity services. Identity has its own `IAccessDecision`
   in the `Platform.Api.Services.Identity` namespace, separate from the Access contracts.
+  *Update (#265):* that interface is now `IAccountAdministrationDecision` in `Platform.Api.Interfaces.Identity`
+  (implementation `AdminOnlyAccountAdministrationDecision`), so it no longer shares a name with the Access contract.
   *Update (IDN-06, PR #196):* Identity no longer has its own `IAuditWriter`; the singleton
   `LoggerAuditWriter` is removed. Login, logout and MFA write through the scoped
   `ITrustedAuditWriter` (via `IdentityAuditProducer`, itself scoped), and status change, unlock,

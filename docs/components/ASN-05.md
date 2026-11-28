@@ -170,7 +170,7 @@ The policy receives facts collected by its caller. Those facts must come from se
 | --- | --- | --- | --- |
 | `Assignment` / `AssignmentScope` | Stores whether an assignment applies to a course or a group, and its `GroupId`. | Igor | Implemented |
 | `IGroupMembership` | Answers whether a student belongs to a specific group on a specific course. | Đorđe | Implemented |
-| `InMemoryGroupMembership` | In-memory membership set for tests and development, keyed by the exact course, group, and student IDs. | Đorđe | Implemented; not persistent |
+| `InMemoryGroupMembership` | In-memory membership set for tests and development, keyed by the exact course, group, and student IDs. Supports adding and removing a membership. | Đorđe | Implemented; not persistent |
 | `AssignmentGroupPolicy` | Pure allow/deny decision from scope, enrollment, and membership facts, with a stable reason code. | Đorđe | Implemented and unit-tested |
 | Start-attempt check | Applies the policy before a student starts an attempt. | Igor | Implemented |
 | Assignment list filtering (`VisibleAssignmentsService`) | Applies the policy before returning the assignment list. | Andrija | Implemented |
@@ -226,7 +226,8 @@ flowchart LR
 - The caller loads `CourseId`, `Scope`, and `GroupId` from the stored assignment; it never trusts a client-supplied group ID or membership claim.
 - Group membership is checked for the exact `(courseId, groupId, studentId)` tuple.
 - Enrollment and membership failures deny access. Unsupported scope values also deny access.
-- The reason code is for server-side diagnostics only. Client responses do not reveal whether a private assignment exists or which group owns it.
+- Removing a membership takes effect at the next check; no membership result is cached. `Remove` affects only the exact tuple, returns `false` when there is nothing to remove, and throws on invalid input so a mistyped removal does not look successful.
+- The reason code is for server-side diagnostics only and the list leaves a hidden assignment out completely. Known gap: `StartAttemptService` still answers a missing assignment ID (`Assignment not found.`) differently from a denied one (`Access denied.`), so a direct start call can reveal that an assignment exists.
 - The same rule is used for listing and for starting an attempt, so a guessed assignment ID cannot bypass list filtering.
 
 ### Tests and verification
@@ -234,13 +235,13 @@ flowchart LR
 | Test class | Covers |
 | --- | --- |
 | `AssignmentGroupPolicyTests` | Course access, group-member access, non-member denial, non-enrolled denial, unsupported scopes |
-| `InMemoryGroupMembershipTests` | Exact course/group/student matching, missing values, invalid input |
+| `InMemoryGroupMembershipTests` | Exact course/group/student matching, missing values, invalid input, removal of a membership (access lost at the next check, other memberships kept) |
 
 ```powershell
 dotnet test backend/Platform.Tests/Platform.Tests.csproj --filter "FullyQualifiedName~AssignmentGroupPolicyTests|FullyQualifiedName~InMemoryGroupMembershipTests"
 ```
 
-All 19 focused test cases pass.
+All 26 focused test cases pass.
 
 ### Files
 
