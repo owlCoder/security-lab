@@ -168,6 +168,26 @@ public class LabVisibilityDomainTests
     }
 
     [Test]
+    public void Answer_AtLengthLimit_IsAccepted()
+    {
+        var value = new string('x', TaskAnswerKey.MaxExpectedAnswerLength);
+        var answer = new TaskAnswerKey("T1", value);
+
+        Assert.That(answer.ExpectedAnswer, Is.EqualTo(value));
+    }
+
+    [Test]
+    public void Answer_OverLengthLimit_IsRejectedWithoutEchoingValue()
+    {
+        const string marker = "secret-marker";
+        var value = marker.PadRight(TaskAnswerKey.MaxExpectedAnswerLength + 1, 'x');
+
+        var error = Assert.Throws<ArgumentException>(() => new TaskAnswerKey("T1", value));
+
+        Assert.That(error!.Message, Does.Not.Contain(marker));
+    }
+
+    [Test]
     public void ToString_DoesNotExposeAnswers()
     {
         const string secret = "SECRET-ANSWER-4729";

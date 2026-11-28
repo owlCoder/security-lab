@@ -68,6 +68,8 @@ public sealed record EvaluatorKey
 
 public sealed record TaskAnswerKey
 {
+    public const int MaxExpectedAnswerLength = 4096;
+
     public string TaskId { get; }
     public string ExpectedAnswer { get; }
 
@@ -80,6 +82,10 @@ public sealed record TaskAnswerKey
         if (string.IsNullOrWhiteSpace(expectedAnswer))
             throw new ArgumentException(
                 "Tačan odgovor je obavezan.", nameof(expectedAnswer));
+
+        if (expectedAnswer.Length > MaxExpectedAnswerLength)
+            throw new ArgumentException(
+                "Tačan odgovor je predugačak.", nameof(expectedAnswer));
 
         TaskId = taskId.Trim();
 
